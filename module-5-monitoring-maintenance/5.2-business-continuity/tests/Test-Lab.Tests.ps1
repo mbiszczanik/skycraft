@@ -366,7 +366,7 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Backup vault soft delete (#355, decision on #36
         $line = $script:PortalVault.Line
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:PortalVault.Output)"
         $line | Should -Match 'state is AlwaysOn, which cannot be turned off: a vault created in the Portal is AlwaysOn'
-        $line | Should -Match 'delete the vault and recreate it with soft delete Off, with New-AzDataProtectionBackupVault -SoftDeleteState Off \(Az PowerShell\) or scripts/Deploy-Bicep\.ps1 \(the Bicep\)'
+        $line | Should -Match 'delete the vault and recreate it with soft delete Off, with scripts/Deploy-Bicep\.ps1 \(the Bicep\) or the request in lab-guide-5\.2\.md Step 5\.2\.4; New-AzDataProtectionBackupVault -SoftDeleteState Off is refused'
     }
 
     It 'fails a vault with soft delete On and names the command that turns it off' {

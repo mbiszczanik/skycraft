@@ -17,6 +17,13 @@
     7. Orphaned Azure Backup restore point collections and the AzureBackupRG_<location>_*
        resource groups that held them, once those groups are empty. Only a policy created
        before issue #184 leaves these behind.
+
+    Steps 6 and 7 first end the shared access signature (SAS) on the collection's disk restore
+    points. A backup job that ran while the cleanup started can leave one, and ARM then refuses to
+    delete the collection or its group (ResourceGroupDeletionBlocked, 'Call EndGetAccess before
+    deleting the VM restore point'). The calls are the Disk Restore Points list and Revoke Access
+    operations; a delete that still reports an outstanding SAS is retried, since the revoke can
+    take a moment to reach ARM (issue #366).
     8. The alert processing rule skycraft-backup-critical-apr (Step 5.2.9, issue #366).
 
     Notes:
@@ -123,6 +130,10 @@ $aprName        = 'skycraft-backup-critical-apr'
 # Azure Backup names the snapshot group <prefix><n><suffix>; main.bicep creates n = 1, and the
 # service adds n = 2, 3, ... only when one group fills up. The pattern covers all of them.
 $snapshotRgPattern = 'platform-skycraft-swc-rpc*-rg'
+# Restore point collections are Microsoft.Compute; their disk restore points are served by the
+# disk provider's own api-version line. Both read live on 2026-11-01 (#366).
+$restorePointApiVersion     = '2024-07-01'
+$diskRestorePointApiVersion = '2025-01-02'
 
 # Minimum Az.RecoveryServices for the one-pass vault delete (see the prerequisite check below).
 $rsvMinModuleVersion = [version]'7.5.0'
@@ -253,6 +264,111 @@ function Remove-LabDiagnosticSetting {
     return $clean
 }
 
+# One ARM request for the restore point calls below: a status outside 2xx throws with the body,
+# so a refusal is never read as an empty answer. Returns the parsed body, or nothing when empty.
+function Invoke-LabRestorePointRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $response = Invoke-AzRestMethod -Method $Method -Path $Path -ErrorAction Stop
+    $status = [int]$response.StatusCode
+    if ($status -lt 200 -or $status -gt 299) {
+        throw "ARM $Method $(($Path -split '\?')[0]) returned HTTP ${status}: $($response.Content)"
+    }
+    if ($response.Content) { $response.Content | ConvertFrom-Json -Depth 20 }
+}
+
+# Ends the shared access signature on every disk restore point under one restore point collection,
+# or under every collection in the group. While one is outstanding ARM refuses to delete the
+# collection or its group: 'Call EndGetAccess before deleting the VM restore point' (#366). Backup's
+# scheduled run can leave one behind. Returns how many it ended. A failure here is a note, not a
+# count: the delete that follows says whether it mattered.
+function Revoke-LabDiskRestorePointAccess {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+
+        [Parameter()]
+        [string]$CollectionName
+    )
+
+    $ended = 0
+    try {
+        $base = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Compute/restorePointCollections"
+        $collections = @($CollectionName)
+        if (-not $CollectionName) {
+            $listing = Invoke-LabRestorePointRequest -Method GET -Path "${base}?api-version=$restorePointApiVersion"
+            $collections = @($listing.value | Where-Object { $_ } | ForEach-Object { $_.name })
+        }
+        foreach ($collection in $collections) {
+            # The restore points of a collection come with $expand; there is no list call for them.
+            $detail = Invoke-LabRestorePointRequest -Method GET -Path "$base/${collection}?`$expand=restorePoints&api-version=$restorePointApiVersion"
+            foreach ($restorePoint in @($detail.properties.restorePoints | Where-Object { $_ })) {
+                $diskBase = "$base/$collection/restorePoints/$($restorePoint.name)/diskRestorePoints"
+                $diskPath = "${diskBase}?api-version=$diskRestorePointApiVersion"
+                while ($diskPath) {
+                    $page = Invoke-LabRestorePointRequest -Method GET -Path $diskPath
+                    foreach ($disk in @($page.value | Where-Object { $_ })) {
+                        Invoke-LabRestorePointRequest -Method POST -Path "$diskBase/$($disk.name)/endGetAccess?api-version=$diskRestorePointApiVersion" | Out-Null
+                        $ended++
+                    }
+                    $diskPath = if ($page.nextLink) { ([uri][string]$page.nextLink).PathAndQuery } else { $null }
+                }
+            }
+        }
+    } catch {
+        Write-Host "  [INFO] Could not end the shared access on the disk restore points in ${ResourceGroupName}: $_" -ForegroundColor Gray
+    }
+    return $ended
+}
+
+# Runs $Delete after ending the shared access on the disk restore points under the group (or the
+# one collection). A delete that still reports an outstanding SAS is retried a few times, because
+# the revoke is asynchronous. Returns $null on success, or the last error.
+function Invoke-LabRestorePointDelete {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+
+        [Parameter()]
+        [string]$CollectionName,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Delete,
+
+        [Parameter()]
+        [int]$Attempts = 4
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $ended = Revoke-LabDiskRestorePointAccess -ResourceGroupName $ResourceGroupName -CollectionName $CollectionName
+        if ($ended -gt 0) {
+            Write-Host "  ✓ Ended the shared access on $ended disk restore point(s) in $ResourceGroupName" -ForegroundColor Green
+        }
+        try {
+            & $Delete
+            return $null
+        } catch {
+            if ($attempt -lt $Attempts -and "$_" -match 'EndGetAccess|DiskRestorePointUsedByCustomer|active shared access signature') {
+                Write-Host "  A disk restore point still holds a shared access signature; trying again in 30 seconds ($attempt of $Attempts)..." -ForegroundColor Gray
+                Start-Sleep -Seconds 30
+                continue
+            }
+            return $_
+        }
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - Resource Cleanup" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
@@ -262,6 +378,7 @@ if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
+$subscriptionId = $context.Subscription.Id
 
 # Azure Backup "secure by default" keeps soft delete AlwaysON on every new Recovery Services
 # Vault, so step 5 deletes a vault that still holds soft-deleted items. That works in a single
@@ -582,13 +699,20 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'SnapshotResource
     }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete instant-restore snapshot resource group')) { continue }
     Write-Host "  Deleting snapshot resource group: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzResourceGroup -Name $r.Name -Force -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
+    $groupName = $r.Name
+    $failure = Invoke-LabRestorePointDelete -ResourceGroupName $groupName -Delete {
+        Remove-AzResourceGroup -Name $groupName -Force -ErrorAction Stop | Out-Null
+    }
+    if ($failure) {
         $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete snapshot resource group '$($r.Name)': $_" -ForegroundColor Red
-        Write-Host "    A resource lock on the group blocks the delete - the lab never sets one." -ForegroundColor Gray
+        Write-Host "  [ERROR] Could not delete snapshot resource group '$groupName': $failure" -ForegroundColor Red
+        if ("$failure" -match 'EndGetAccess|DiskRestorePointUsedByCustomer|active shared access signature') {
+            Write-Host "    A disk restore point still holds a shared access signature that could not be ended. Wait for any running backup job to finish, then run this script again." -ForegroundColor Gray
+        } elseif ("$failure" -match 'ScopeLocked') {
+            Write-Host "    A CanNotDelete lock on the group blocks the delete; the lab never sets one on it." -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
     }
 }
 
@@ -603,12 +727,15 @@ foreach ($r in $resourcesToDelete | Where-Object { $_.Type -eq 'RestorePointColl
     }
     if (-not $PSCmdlet.ShouldProcess($r.Name, 'Delete orphaned restore point collection')) { continue }
     Write-Host "  Deleting restore point collection: $($r.Name)..." -ForegroundColor Gray
-    try {
-        Remove-AzResource -ResourceId $r.ResourceId -ApiVersion '2024-07-01' -Force -ErrorAction Stop | Out-Null
-        Write-Host "  ✓ Deleted" -ForegroundColor Green
-    } catch {
+    $collectionId = $r.ResourceId
+    $failure = Invoke-LabRestorePointDelete -ResourceGroupName $r.ResourceGroupName -CollectionName $r.Name -Delete {
+        Remove-AzResource -ResourceId $collectionId -ApiVersion $restorePointApiVersion -Force -ErrorAction Stop | Out-Null
+    }
+    if ($failure) {
         $script:cleanupFailures++
-        Write-Host "  [ERROR] Could not delete restore point collection '$($r.Name)': $_" -ForegroundColor Red
+        Write-Host "  [ERROR] Could not delete restore point collection '$($r.Name)': $failure" -ForegroundColor Red
+    } else {
+        Write-Host "  ✓ Deleted" -ForegroundColor Green
     }
 }
 

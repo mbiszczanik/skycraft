@@ -26,7 +26,9 @@
       (each when present), plus an on-demand backup whenever a VM has no recovery point yet.
       The world VM is the unencrypted one Step 5.2.10 restores files from. The script watches the
       job's Take Snapshot phase until it completes or fails (up to 20 minutes) and counts a
-      failure, or a phase it did not see finish, as a deployment failure.
+      failure, or a phase it did not see finish, as a deployment failure. After enabling
+      protection it waits for the vault to list the VM as a backup item (-BackupItemWaitMinutes);
+      a VM that is never listed is a deployment failure, not a skipped backup.
 
     The blob backup policy (SkyCraft-Blob-Policy) is created by New-LabBlobBackup.ps1, the
     script the guide has the learner run (issue #306).
@@ -44,6 +46,14 @@
     Name of Lab 3.2's key vault in dev-skycraft-swc-rg, when it was created under another name
     (key vault names are globally unique). Pass the same name to Test-Lab.ps1 and
     Remove-LabResource.ps1. Default: dev-skycraft-swc-kv
+
+.PARAMETER BackupItemWaitMinutes
+    How long step 7 waits for the vault to list a VM as a backup item after protection was
+    enabled. The listing trailed Enable in one live run (2026-10-31). A VM still not listed
+    after this time fails the run. Default: 10
+
+.PARAMETER BackupItemPollSeconds
+    Seconds between two looks at the vault's backup items while step 7 waits. Default: 30
 
 .PARAMETER WhatIf
     Run deployment in what-if mode (dry run).
@@ -67,8 +77,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.3.0
-    Date: 2026-10-29
+    Version: 1.4.0
+    Date: 2026-11-01
 #>
 
 #Requires -Version 7.0
@@ -79,6 +89,14 @@ param(
     [Parameter()]
     [ValidateLength(3, 24)]
     [string]$KeyVaultName = 'dev-skycraft-swc-kv',
+
+    [Parameter()]
+    [ValidateRange(0, 120)]
+    [int]$BackupItemWaitMinutes = 10,
+
+    [Parameter()]
+    [ValidateRange(0, 600)]
+    [int]$BackupItemPollSeconds = 30,
 
     [Parameter()]
     [switch]$WhatIf,
@@ -111,6 +129,34 @@ $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 # and lets the script exit 0 lets an orchestrated cycle record a half-built lab as a success.
 $script:deployFailures = 0
 
+function Find-LabVmBackupItem {
+    param([string]$VaultId, [string]$VmName)
+    # FriendlyName comes back empty for some protected VMs (#105); the container name carries the VM
+    # name as its last ';'-separated segment. Collected, then indexed: Select-Object -First on a
+    # -ErrorAction SilentlyContinue pipeline can end the script silently (#366).
+    @(Get-AzRecoveryServicesBackupItem `
+        -VaultId $VaultId `
+        -BackupManagementType AzureVM `
+        -WorkloadType AzureVM `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.FriendlyName -eq $VmName -or ($_.ContainerName -split ';')[-1] -eq $VmName })[0]
+}
+
+# The vault lists a VM some time after Enable returns; one early read missed it (2026-10-31).
+function Wait-LabVmBackupItem {
+    param([string]$VaultId, [string]$VmName, [int]$TimeoutMinutes, [int]$PollSeconds)
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $poll = 0
+    while ($true) {
+        $poll++
+        $item = Find-LabVmBackupItem -VaultId $VaultId -VmName $VmName
+        if ($item) { return $item }
+        if ((Get-Date) -ge $deadline) { return $null }
+        Write-Host "  Poll ${poll}: $VmName is not listed as a backup item yet; looking again in $PollSeconds seconds (up to $TimeoutMinutes minutes)..." -ForegroundColor Gray
+        Start-Sleep -Seconds $PollSeconds
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Lab 5.2 - BCDR Deployment" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
@@ -127,7 +173,8 @@ Write-Host "  ✓ Logged in as: $($context.Account.Id)" -ForegroundColor Green
 
 # Register required resource providers (idempotent)
 foreach ($ns in @('Microsoft.RecoveryServices', 'Microsoft.DataProtection')) {
-    $provider = Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Indexed, not piped to Select-Object -First: that ends the script silently after an Az cmdlet with -ErrorAction SilentlyContinue (#366).
+    $provider = @(Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction SilentlyContinue)[0]
     $state = if ($provider) { $provider.RegistrationState } else { 'NotRegistered' }
     if ($state -ne 'Registered') {
         if ($WhatIf) {
@@ -414,151 +461,158 @@ if ($WhatIf) {
     # The automated cycle deploys the dev VMs only; no prod VM exists.
     # A dev VM that is absent (Lab 3.2 not run) is a WARN and a skip, not a failure.
     Write-Host "`n[7/7] Ensuring VM backup protection for $($vmNames -join ', ')..." -ForegroundColor Yellow
-    foreach ($vmName in $vmNames) {
-        $vm = $null
-        $vmItem = $null
-        $job = $null
-        $vmItems = Get-AzRecoveryServicesBackupItem `
-            -VaultId $vault.ID `
-            -BackupManagementType AzureVM `
-            -WorkloadType AzureVM `
-            -ErrorAction SilentlyContinue
-        # FriendlyName comes back empty for some protected VMs (#105), which made this check
-        # miss an already-protected VM and re-run Enable on every deployment. The container name
-        # carries the VM name as its last ';'-separated segment.
-        $vmItem = $vmItems | Where-Object {
-            $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
-        }
+    # A pipeline stopped under this loop ends the script without an error and with exit 0, which
+    # skipped the world VM and the closing lines once (#366); finally still runs then, so the run
+    # exits 1 instead. A loop that completes sets $vmStepsDone.
+    $vmStepsDone = $false
+    try {
+        foreach ($vmName in $vmNames) {
+            $vm = $null
+            $vmItem = $null
+            $job = $null
+            # A missed match here re-ran Enable on every deployment (#105); see Find-LabVmBackupItem.
+            $vmItem = Find-LabVmBackupItem -VaultId $vault.ID -VmName $vmName
 
-        if ($vmItem) {
-            Write-Host "  ✓ $vmName is already protected (policy: $($vmItem.ProtectionPolicyName))" -ForegroundColor Green
-        } else {
-            Write-Host "  Enabling backup protection for $vmName..." -ForegroundColor Gray
-            $vm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
-            if (-not $vm) {
-                Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg'. Skipping VM-backup steps." -ForegroundColor Yellow
-                Write-Host "  Complete Lab 3.2 (dev VM) first and re-run this script if VM backup is required." -ForegroundColor Yellow
+            if ($vmItem) {
+                Write-Host "  ✓ $vmName is already protected (policy: $($vmItem.ProtectionPolicyName))" -ForegroundColor Green
             } else {
+                Write-Host "  Enabling backup protection for $vmName..." -ForegroundColor Gray
+                $vm = Get-AzVM -Name $vmName -ResourceGroupName $vmRg -ErrorAction SilentlyContinue
+                if (-not $vm) {
+                    Write-Host "  [WARNING] VM '$vmName' not found in '$vmRg'. Skipping VM-backup steps." -ForegroundColor Yellow
+                    Write-Host "  Complete Lab 3.2 (dev VM) first and re-run this script if VM backup is required." -ForegroundColor Yellow
+                } else {
+                    try {
+                        if ($keyVaultRoleGranted) {
+                            # The role took effect within two minutes live (#368); before that Enable fails with 400198.
+                            Write-Host "  Waiting 120 seconds for the Key Vault role to take effect..." -ForegroundColor Gray
+                            Start-Sleep -Seconds 120
+                            $keyVaultRoleGranted = $false
+                        }
+                        $protectionPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -Name 'SkyCraft-Daily-Prod' -VaultId $vault.ID
+                        $enableJob = Enable-AzRecoveryServicesBackupProtection `
+                            -ResourceGroupName $vmRg `
+                            -Name $vmName `
+                            -Policy $protectionPolicy `
+                            -VaultId $vault.ID
+                        if ($enableJob -and $enableJob.Status -eq 'Failed') {
+                            $enableDetail = Get-AzRecoveryServicesBackupJobDetail -JobId $enableJob.JobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            $reason = @($enableDetail.ErrorDetails | ForEach-Object { "$($_.ErrorCode): $($_.ErrorMessage)" }) -join '; '
+                            throw "ConfigureBackup job failed: $reason (400198 UserErrorKeyVaultPermissionsNotConfigured: the Key Vault role is missing or not active yet)"
+                        }
+                        Write-Host "  ✓ VM backup protection enabled for $vmName" -ForegroundColor Green
+                        # Enable returns before the vault lists the item; skipping the backup here once ended in a
+                        # green run with no recovery point.
+                        Write-Host "  Waiting for the vault to list $vmName as a backup item (up to $BackupItemWaitMinutes minutes)..." -ForegroundColor Gray
+                        $vmItem = Wait-LabVmBackupItem -VaultId $vault.ID -VmName $vmName -TimeoutMinutes $BackupItemWaitMinutes -PollSeconds $BackupItemPollSeconds
+                        if ($vmItem) {
+                            Write-Host "  ✓ $vmName is listed as a backup item" -ForegroundColor Green
+                        } else {
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] $vmName was not listed as a backup item within $BackupItemWaitMinutes minutes of enabling protection - no initial backup was triggered." -ForegroundColor Red
+                            Write-Host "    Re-run this script (-BackupItemWaitMinutes sets the wait), or use Backup now (Step 5.2.3)." -ForegroundColor Gray
+                        }
+                    } catch {
+                        $script:deployFailures++
+                        Write-Host "  [ERROR] Could not enable VM backup for ${vmName}: $_" -ForegroundColor Red
+                        Write-Host "    If this is UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy, the vault still" -ForegroundColor Gray
+                        Write-Host "    holds a Standard 'SkyCraft-Daily-Prod' from an earlier run - see step [6/7]." -ForegroundColor Gray
+                        Write-Host "    Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
+                    }
+                }
+            }
+
+            # ── Initial backup and its outcome ────────────────────────────────────
+            # Protection alone proves nothing: after Lab 1.3 every job used to fail in seconds with
+            # UserErrorRequestDisallowedByPolicy while this script reported success (#184). So a VM
+            # without a recovery point gets an on-demand backup on every run - not only the run that
+            # enabled protection, or a failed first job would never be retried - and the job is watched
+            # until its Take Snapshot phase completes or fails. The vault transfer after it is not waited for.
+            $vmItem = $vmItem | Select-Object -First 1
+            if ($vmItem) {
                 try {
-                    if ($keyVaultRoleGranted) {
-                        # The role took effect within two minutes live (#368); before that Enable fails with 400198.
-                        Write-Host "  Waiting 120 seconds for the Key Vault role to take effect..." -ForegroundColor Gray
-                        Start-Sleep -Seconds 120
-                        $keyVaultRoleGranted = $false
-                    }
-                    $protectionPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -Name 'SkyCraft-Daily-Prod' -VaultId $vault.ID
-                    $enableJob = Enable-AzRecoveryServicesBackupProtection `
-                        -ResourceGroupName $vmRg `
-                        -Name $vmName `
-                        -Policy $protectionPolicy `
-                        -VaultId $vault.ID
-                    if ($enableJob -and $enableJob.Status -eq 'Failed') {
-                        $enableDetail = Get-AzRecoveryServicesBackupJobDetail -JobId $enableJob.JobId -VaultId $vault.ID -ErrorAction SilentlyContinue
-                        $reason = @($enableDetail.ErrorDetails | ForEach-Object { "$($_.ErrorCode): $($_.ErrorMessage)" }) -join '; '
-                        throw "ConfigureBackup job failed: $reason (400198 UserErrorKeyVaultPermissionsNotConfigured: the Key Vault role is missing or not active yet)"
-                    }
-                    Write-Host "  ✓ VM backup protection enabled for $vmName" -ForegroundColor Green
-                    $vmItem = Get-AzRecoveryServicesBackupItem `
+                    $recoveryPoints = @(Get-AzRecoveryServicesBackupRecoveryPoint -Item $vmItem -VaultId $vault.ID -ErrorAction SilentlyContinue)
+                    # -Operation Backup: enabling protection or changing the policy (step [6/7]) starts a
+                    # ConfigureBackup job, and mistaking that for a running backup would skip the backup.
+                    # Collected, then indexed: with a matching job InProgress, Select-Object -First on this
+                    # -ErrorAction SilentlyContinue pipeline throws PipelineStoppedException, which no catch
+                    # sees, and the script ended here with exit 0 (#366).
+                    $job = @(Get-AzRecoveryServicesBackupJob `
                         -VaultId $vault.ID `
                         -BackupManagementType AzureVM `
-                        -WorkloadType AzureVM `
-                        -ErrorAction SilentlyContinue | Where-Object {
-                            $_.FriendlyName -eq $vmName -or ($_.ContainerName -split ';')[-1] -eq $vmName
+                        -Operation Backup `
+                        -Status InProgress `
+                        -ErrorAction SilentlyContinue |
+                        Where-Object { $_.WorkloadName -eq $vmName })[0]
+
+                    if ($recoveryPoints.Count -gt 0) {
+                        Write-Host "  ✓ $vmName has $($recoveryPoints.Count) recovery point(s) - no on-demand backup needed" -ForegroundColor Green
+                        $job = $null
+                    } elseif ($job) {
+                        Write-Host "  ✓ A backup job for $vmName is already running (started $($job.StartTime) UTC)" -ForegroundColor Green
+                    } else {
+                        Write-Host "  Triggering on-demand backup (no recovery point yet)..." -ForegroundColor Gray
+                        $job = Backup-AzRecoveryServicesBackupItem `
+                            -Item $vmItem `
+                            -VaultId $vault.ID `
+                            -ExpiryDateTimeUTC ((Get-Date).AddDays(30).ToUniversalTime())
+                    }
+
+                    if ($job) {
+                        # Watch Take Snapshot, not the whole job: the snapshot is the recovery point Step 5.2.10
+                        # needs, and the vault transfer after it takes far longer (#366).
+                        $deadline = (Get-Date).AddMinutes($snapshotWatchMinutes)
+                        $jobId = $job.JobId
+                        $snapshotStatus = ''
+                        $detail = $null
+                        Write-Host "  Watching the Take Snapshot phase of job $jobId (up to $snapshotWatchMinutes minutes)..." -ForegroundColor Gray
+                        while ($true) {
+                            $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            $snapshotStatus = "$((@($detail.SubTasks) | Where-Object { $_.Name -eq 'Take Snapshot' } | Select-Object -First 1).Status)"
+                            if (-not $job -or $job.Status -ne 'InProgress' -or $snapshotStatus -in @('Completed', 'Failed')) { break }
+                            if ((Get-Date) -ge $deadline) { break }
+                            Start-Sleep -Seconds 30
                         }
+                        $snapshotLabel = if ($snapshotStatus) { $snapshotStatus } else { 'not reported' }
+
+                        if (-not $job) {
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] Lost track of backup job $jobId - check Backup jobs in the vault" -ForegroundColor Red
+                        } elseif ($job.Status -eq 'Failed' -or $snapshotStatus -eq 'Failed') {
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] Backup job for $vmName failed (Take Snapshot: $snapshotLabel):" -ForegroundColor Red
+                            foreach ($err in @($detail.ErrorDetails)) {
+                                if ($err) { Write-Host "    $($err.ErrorCode): $($err.ErrorMessage)" -ForegroundColor Red }
+                            }
+                            Write-Host "    400211 (UserErrorRequestDisallowedByPolicy) means an Azure Policy deny refused a" -ForegroundColor Gray
+                            Write-Host "    resource Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
+                        } elseif ($snapshotStatus -eq 'Completed' -or $job.Status -in @('Completed', 'CompletedWithWarnings')) {
+                            Write-Host "  ✓ Take Snapshot completed for $vmName - it has a recovery point; job status: $($job.Status)" -ForegroundColor Green
+                        } elseif ($job.Status -ne 'InProgress') {
+                            # Cancelled, for example: the job ended without a snapshot.
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] Backup job for $vmName ended $($job.Status) before Take Snapshot completed (Take Snapshot: $snapshotLabel)." -ForegroundColor Red
+                        } else {
+                            $script:deployFailures++
+                            Write-Host "  [ERROR] Take Snapshot for $vmName did not finish within $snapshotWatchMinutes minutes (Take Snapshot: $snapshotLabel, job: $($job.Status))." -ForegroundColor Red
+                            Write-Host "    The job may still succeed: check Backup jobs in the vault, then run Test-Lab.ps1." -ForegroundColor Gray
+                        }
+                    }
                 } catch {
                     $script:deployFailures++
-                    Write-Host "  [ERROR] Could not enable VM backup for ${vmName}: $_" -ForegroundColor Red
-                    Write-Host "    If this is UserErrorThisVMBackupIsSupportedUsingEnhancedPolicy, the vault still" -ForegroundColor Gray
-                    Write-Host "    holds a Standard 'SkyCraft-Daily-Prod' from an earlier run - see step [6/7]." -ForegroundColor Gray
-                    Write-Host "    Enable manually: Enable-AzRecoveryServicesBackupProtection (Step 5.2.3)" -ForegroundColor Gray
+                    Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
+                    Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
                 }
             }
         }
-
-        # ── Initial backup and its outcome ────────────────────────────────────
-        # Protection alone proves nothing: after Lab 1.3 every job used to fail in seconds with
-        # UserErrorRequestDisallowedByPolicy while this script reported success (#184). So a VM
-        # without a recovery point gets an on-demand backup on every run - not only the run that
-        # enabled protection, or a failed first job would never be retried - and the job is watched
-        # until its Take Snapshot phase completes or fails. The vault transfer after it is not waited for.
-        $vmItem = $vmItem | Select-Object -First 1
-        if ($vmItem) {
-            try {
-                $recoveryPoints = @(Get-AzRecoveryServicesBackupRecoveryPoint -Item $vmItem -VaultId $vault.ID -ErrorAction SilentlyContinue)
-                # -Operation Backup: enabling protection or changing the policy (step [6/7]) starts a
-                # ConfigureBackup job, and mistaking that for a running backup would skip the backup.
-                $job = Get-AzRecoveryServicesBackupJob `
-                    -VaultId $vault.ID `
-                    -BackupManagementType AzureVM `
-                    -Operation Backup `
-                    -Status InProgress `
-                    -ErrorAction SilentlyContinue |
-                    Where-Object { $_.WorkloadName -eq $vmName } |
-                    Select-Object -First 1
-
-                if ($recoveryPoints.Count -gt 0) {
-                    Write-Host "  ✓ $vmName has $($recoveryPoints.Count) recovery point(s) - no on-demand backup needed" -ForegroundColor Green
-                    $job = $null
-                } elseif ($job) {
-                    Write-Host "  ✓ A backup job for $vmName is already running (started $($job.StartTime) UTC)" -ForegroundColor Green
-                } else {
-                    Write-Host "  Triggering on-demand backup (no recovery point yet)..." -ForegroundColor Gray
-                    $job = Backup-AzRecoveryServicesBackupItem `
-                        -Item $vmItem `
-                        -VaultId $vault.ID `
-                        -ExpiryDateTimeUTC ((Get-Date).AddDays(30).ToUniversalTime())
-                }
-
-                if ($job) {
-                    # Watch Take Snapshot, not the whole job: the snapshot is the recovery point Step 5.2.10
-                    # needs, and the vault transfer after it takes far longer (#366).
-                    $deadline = (Get-Date).AddMinutes($snapshotWatchMinutes)
-                    $jobId = $job.JobId
-                    $snapshotStatus = ''
-                    $detail = $null
-                    Write-Host "  Watching the Take Snapshot phase of job $jobId (up to $snapshotWatchMinutes minutes)..." -ForegroundColor Gray
-                    while ($true) {
-                        $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
-                        $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
-                        $snapshotStatus = "$((@($detail.SubTasks) | Where-Object { $_.Name -eq 'Take Snapshot' } | Select-Object -First 1).Status)"
-                        if (-not $job -or $job.Status -ne 'InProgress' -or $snapshotStatus -in @('Completed', 'Failed')) { break }
-                        if ((Get-Date) -ge $deadline) { break }
-                        Start-Sleep -Seconds 30
-                    }
-                    $snapshotLabel = if ($snapshotStatus) { $snapshotStatus } else { 'not reported' }
-
-                    if (-not $job) {
-                        $script:deployFailures++
-                        Write-Host "  [ERROR] Lost track of backup job $jobId - check Backup jobs in the vault" -ForegroundColor Red
-                    } elseif ($job.Status -eq 'Failed' -or $snapshotStatus -eq 'Failed') {
-                        $script:deployFailures++
-                        Write-Host "  [ERROR] Backup job for $vmName failed (Take Snapshot: $snapshotLabel):" -ForegroundColor Red
-                        foreach ($err in @($detail.ErrorDetails)) {
-                            if ($err) { Write-Host "    $($err.ErrorCode): $($err.ErrorMessage)" -ForegroundColor Red }
-                        }
-                        Write-Host "    400211 (UserErrorRequestDisallowedByPolicy) means an Azure Policy deny refused a" -ForegroundColor Gray
-                        Write-Host "    resource Azure Backup creates for the snapshot - see lab-guide-5.2.md, Troubleshooting, Issue 2." -ForegroundColor Gray
-                    } elseif ($snapshotStatus -eq 'Completed' -or $job.Status -in @('Completed', 'CompletedWithWarnings')) {
-                        Write-Host "  ✓ Take Snapshot completed for $vmName - it has a recovery point; job status: $($job.Status)" -ForegroundColor Green
-                    } elseif ($job.Status -ne 'InProgress') {
-                        # Cancelled, for example: the job ended without a snapshot.
-                        $script:deployFailures++
-                        Write-Host "  [ERROR] Backup job for $vmName ended $($job.Status) before Take Snapshot completed (Take Snapshot: $snapshotLabel)." -ForegroundColor Red
-                    } else {
-                        $script:deployFailures++
-                        Write-Host "  [ERROR] Take Snapshot for $vmName did not finish within $snapshotWatchMinutes minutes (Take Snapshot: $snapshotLabel, job: $($job.Status))." -ForegroundColor Red
-                        Write-Host "    The job may still succeed: check Backup jobs in the vault, then run Test-Lab.ps1." -ForegroundColor Gray
-                    }
-                }
-            } catch {
-                $script:deployFailures++
-                Write-Host "  [ERROR] Could not run the initial backup of ${vmName}: $_" -ForegroundColor Red
-                Write-Host "    Trigger it manually: vault -> Backup items -> Azure Virtual Machine -> Backup now (Step 5.2.3)" -ForegroundColor Gray
-            }
-        } elseif ($vm) {
-            # Protection was just enabled, but the vault does not list the item yet.
-            Write-Host "  [WARNING] $vmName is protected but not listed as a backup item yet - no initial backup was triggered." -ForegroundColor Yellow
-            Write-Host "    Re-run this script in a few minutes, or use Backup now (Step 5.2.3)." -ForegroundColor Gray
+        $vmStepsDone = $true
+    } finally {
+        if (-not $vmStepsDone) {
+            Write-Host "  [ERROR] Step [7/7] ended before it checked every VM ($($vmNames -join ', ')); nothing after it ran." -ForegroundColor Red
+            if ($Error.Count -gt 0) { Write-Host "    Last error recorded: $($Error[0])" -ForegroundColor Gray }
+            Write-Host "    This run exits 1. Run the script again; if it stops here again, run Test-Lab.ps1 to see what is missing." -ForegroundColor Gray
+            Exit-Lab -FailureCount 1
         }
     }
 
