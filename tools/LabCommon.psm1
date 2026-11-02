@@ -1074,6 +1074,42 @@ function Test-LabGlobalName {
     return $true
 }
 
+function Get-LabThrottleMessage {
+    <#
+    .SYNOPSIS
+        Returns the status message of the first deployment operation that ARM refused with a
+        throttling error (HTTP 429), or nothing.
+
+    .DESCRIPTION
+        ARM retries a throttled create for hours before it fails the deployment, so a script that
+        waits for the deployment alone hangs (#439). Deploy scripts run the deployment as a job and
+        pass the operations of the watched nested deployment here.
+
+    .PARAMETER Operation
+        Output of Get-AzResourceGroupDeploymentOperation.
+
+    .EXAMPLE
+        Get-LabThrottleMessage -Operation (Get-AzResourceGroupDeploymentOperation -ResourceGroupName $rg -DeploymentName 'asp-deployment')
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #439
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]]$Operation
+    )
+
+    foreach ($op in @($Operation)) {
+        if ($null -eq $op -or $null -eq $op.StatusMessage) { continue }
+        $text = if ($op.StatusMessage -is [string]) { $op.StatusMessage } else { $op.StatusMessage | ConvertTo-Json -Depth 8 -Compress }
+        if ($text -match 'throttled|TooManyRequests|Code: 429|ExtendedCode: 51025') { return $text }
+    }
+}
+
 # The resources of one type in a subscription or group, with the creation time ARM keeps for them.
 function Get-LabArmResourceCreated {
     [CmdletBinding()]
@@ -1419,4 +1455,4 @@ function Invoke-LabWithoutLock {
     return $failures
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock
