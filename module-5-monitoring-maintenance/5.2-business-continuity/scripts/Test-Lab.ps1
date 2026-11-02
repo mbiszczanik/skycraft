@@ -96,7 +96,7 @@ $platformRg     = 'platform-skycraft-swc-rg'
 $prodRg         = 'prod-skycraft-swc-rg'
 $rsvName        = 'platform-skycraft-swc-rsv'
 $bvName         = 'platform-skycraft-swc-bv'
-# The auth VM is ADE-encrypted (Lab 3.2); the world VM is the one Step 5.2.10 restores files from.
+# The auth VM is ADE-encrypted (Lab 3.2); the world VM is not.
 $encryptedVmName = 'dev-skycraft-swc-auth-vm'
 $backupVmNames  = @($encryptedVmName, 'dev-skycraft-swc-world-vm')
 $vmRg           = 'dev-skycraft-swc-rg'

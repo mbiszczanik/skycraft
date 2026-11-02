@@ -7,7 +7,7 @@ By completing this lab, you will:
 - Deploy an **Azure Recovery Services Vault (RSV)**
 - Configure **Backup Policies** for different SLA requirements
 - Implement **Azure VM Backup** for production workloads
-- Perform a **File-Level Recovery (FLR)** from a backup snapshot
+- Know when **File Recovery** beats a full VM restore (explained, not exercised)
 - Understand the difference between **LRS** and **GRS** for backup data
 - Understand **Soft Delete** for protected items (and why Azure now enforces it)
 - Route backup alerts to an action group with an **alert processing rule**
@@ -189,7 +189,7 @@ The Bicep path does the same: `bicep/main.bicep` creates the tagged group throug
 
 ### Step 5.2.3: Protect the Development VMs
 
-Two VMs from Lab 3.2 get backed up here. `dev-skycraft-swc-auth-vm` is encrypted with Azure Disk Encryption (ADE), and its keys sit in `dev-skycraft-swc-kv`. `dev-skycraft-swc-world-vm` is not encrypted, and Step 5.2.10 restores files from it, because file recovery does not work on an ADE-encrypted VM.
+Two VMs from Lab 3.2 get backed up here. `dev-skycraft-swc-auth-vm` is encrypted with Azure Disk Encryption (ADE), and its keys sit in `dev-skycraft-swc-kv`. `dev-skycraft-swc-world-vm` is not encrypted.
 
 **a. Let Azure Backup read the key vault**
 
@@ -233,7 +233,7 @@ The Bicep path grants the same role: `bicep/main.bicep` calls `avm/ptn/authoriza
 **c. Take the first backup and watch the snapshot**
 
 1. Run the first backup now instead of waiting for 02:00: under **Protected items** (expand it if it is collapsed), click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-auth-vm` → **View details** → **Backup now** → **OK**. The name is not a link: **View details** on its row opens the item. Do the same for `dev-skycraft-swc-world-vm`.
-2. Under **Monitoring**, click **Backup jobs**, and open the job of each VM. Its *Take Snapshot* sub-task is the part to watch: once it is *Completed*, the VM has a recovery point, which is what Step 5.2.10 needs. It took about 8.5 minutes in a live run. The job itself stays *In progress* until the transfer to the vault ends, which takes far longer.
+2. Under **Monitoring**, click **Backup jobs**, and open the job of each VM. Its *Take Snapshot* sub-task is the part to watch: once it is *Completed*, the VM has a recovery point. It took about 8.5 minutes in a live run. The job itself stays *In progress* until the transfer to the vault ends, which takes far longer.
 3. A job that turns *Failed* within seconds with `UserErrorRequestDisallowedByPolicy` means a policy refused the snapshot group or the restore point collection: see Troubleshooting, Issue 2. `400198 UserErrorKeyVaultPermissionsNotConfigured` on the auth VM means part a is missing or not active yet: Issue 4.
 
 #### Azure PowerShell: protect and back up
@@ -383,7 +383,7 @@ Site Recovery copies `dev-skycraft-swc-world-vm` to a second region, so that los
 
 > **SkyCraft Choice**: We replicate to **North Europe** because Lab 1.3 allows only Sweden Central and North Europe, and the wizard's default, East US, is denied. Everything the replication needs goes into **one** tagged group that you create first: Site Recovery's own default groups are created without tags, and Lab 1.3's `Require-Environment-Tag-RG` assignment denies them.
 
-The initial replication of the two disks (30 GB and 64 GB) took 45 to 70 minutes in live runs, not the 15 to 30 minutes older guides promise. Start it first and do Steps 5.2.8 to 5.2.10 while it runs.
+The initial replication of the two disks (30 GB and 64 GB) took 45 to 70 minutes in live runs, not the 15 to 30 minutes older guides promise. Start it first and do Steps 5.2.8 and 5.2.9 while it runs.
 
 **a. Create the target resource group**
 
@@ -659,51 +659,11 @@ module modAlertProcessingRule 'br/public:avm/res/alerts-management/action-rule:0
 
 ## 📖 Section 6: Recovery Simulation (15 min)
 
-### Step 5.2.10: File-Level Recovery
+### Good to know: File Recovery
 
-Instead of restoring the whole VM, you mount one recovery point and copy single files out of it. Use `dev-skycraft-swc-world-vm`: file recovery is not available for an ADE-encrypted VM such as the auth VM. Both VMs run Ubuntu 22.04, so the recovery script is a Python script that mounts the recovery point's volumes as folders. There is no drive letter on Linux.
+Azure Backup can restore single files from a recovery point without restoring the whole VM. In the vault, open **Backup items** → **Azure Virtual Machine** → the VM → **File Recovery**, select a recovery point and click **Download Script**. The script mounts the recovery point's disks on the machine where it runs, and **Unmount Disks** on the same pane closes the connection. It does not work on an ADE-encrypted VM such as the auth VM.
 
-The steps below run commands on the VM with **Run command**, which needs no Bastion and runs as root. Run the PowerShell blocks in Azure Cloud Shell.
-
-1. Put a file on the VM that the restore can find, then take a new backup that contains it. Open `dev-skycraft-swc-world-vm` and, under **Operations** (expand it if it is collapsed), click **Run command** → **RunShellScript**, and run:
-
-   ```bash
-   mkdir -p /opt/skycraft && echo "SkyCraft file recovery test $(date -u +%FT%TZ)" > /opt/skycraft/flr-marker.txt && cat /opt/skycraft/flr-marker.txt
-   ```
-
-   Then take **Backup now** for the world VM and wait for **Take Snapshot** to complete, as in Step 5.2.3 c.
-2. In the vault, under **Protected items** (expand it if it is collapsed), click **Backup items** → **Azure Virtual Machine** → `dev-skycraft-swc-world-vm` → **File Recovery**.
-3. Under **Select restore point**, select the recovery point you just took.
-4. Click **Download Script**. Generating it took about 1.5 minutes in a live run. Next to the button the pane shows a 15-character password: copy it, the script asks for it. The script and its password are valid for 12 hours.
-5. Copy the script to the VM. In Cloud Shell, upload it (**Manage files** → **Upload**), then send it with Run command into `/root/flr`:
-
-   ```powershell
-   $flr = Get-ChildItem ~/*.py | Sort-Object LastWriteTime | Select-Object -Last 1
-   $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($flr.FullName))
-   Invoke-AzVMRunCommand -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-world-vm -CommandId RunShellScript `
-     -ScriptString "mkdir -p /root/flr && echo '$b64' | base64 -d > /root/flr/$($flr.Name) && chmod +x /root/flr/$($flr.Name) && ls -l /root/flr"
-   ```
-
-6. Run it from `/root/flr` with the password on its input. The script mounts the volumes under the folder it runs in:
-
-   ```powershell
-   $password = Read-Host 'Password from the File Recovery pane'
-   (Invoke-AzVMRunCommand -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-world-vm -CommandId RunShellScript `
-     -ScriptString "cd /root/flr && printf '%s\n' '$password' | python3 ./$($flr.Name)").Value[0].Message
-   ```
-
-   The output says `Connection succeeded!` and lists the recovery point's volumes with their mount paths: `/root/flr/<vm>-<time>/Volume1` (ext4, the OS disk) and `Volume3` (vfat, the EFI partition). The BIOS boot partition is listed as not mountable.
-7. Find the file:
-
-   ```powershell
-   (Invoke-AzVMRunCommand -ResourceGroupName dev-skycraft-swc-rg -VMName dev-skycraft-swc-world-vm -CommandId RunShellScript `
-     -ScriptString 'cat /root/flr/*/Volume1/opt/skycraft/flr-marker.txt').Value[0].Message
-   ```
-
-   To restore it, copy it back: `cp /root/flr/<vm>-<time>/Volume1/opt/skycraft/flr-marker.txt /opt/skycraft/`.
-8. Close the connection: back on the File Recovery pane, click **Unmount Disks** (Step 3 of the pane). Then remove the orphaned mount folders with the script's `clean` option: `cd /root/flr && python3 ./<script>.py clean`. A recovery point left mounted can make the VM's next backup fail with `UserErrorUnableToOpenMount`.
-
-**Expected Result**: The script's output shows `Connection succeeded!` and the mount paths under `/root/flr/<vm>-<time>/`, and `Volume1/opt/skycraft/flr-marker.txt` holds the line you wrote before the backup. After **Unmount Disks**, the pane no longer shows the recovery point as mounted.
+This lab does not exercise it. On today's Ubuntu 22.04 image the script needs manual workarounds (the multipath service holds the disk copy, and an unformatted data disk makes the script ask a question it cannot get answered from Run command), and the result does not repay the time. The supported procedure is in the Microsoft Learn article under Additional Resources.
 
 ---
 
@@ -721,7 +681,6 @@ The steps below run commands on the VM with **Run command**, which needs no Bast
 - [ ] Target group `platform-skycraft-neu-asr-rg` in North Europe, tagged, holding the Site Recovery vault
 - [ ] Replication of `dev-skycraft-swc-world-vm` is **Protected** and healthy
 - [ ] Optional, only if you ran Step 5.2.7: the test failover succeeded in the size of the source VM and its test VM was cleaned up
-- [ ] A file from the world VM's recovery point read back, and the disks unmounted
 - [ ] Detailed verification performed (see checklist)
 
 **For detailed verification**, see [lab-checklist-5.2.md](lab-checklist-5.2.md)
