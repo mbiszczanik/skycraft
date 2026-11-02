@@ -241,7 +241,12 @@ function Get-AzRecoveryServicesBackupRecoveryPoint { [CmdletBinding()] param($It
 function Get-AzRecoveryServicesBackupJob {
     [CmdletBinding()]
     param([string]$VaultId, [string]$BackupManagementType, [string]$Operation, [string]$Status, [string]$JobId)
-    if ($JobId) { [pscustomobject]@{ JobId = $JobId; Status = 'Completed'; WorkloadName = 'stub' } }
+    if ($JobId) {
+        # The first SKYCRAFT_STUB_JOBNULL reads by id find nothing: a job not readable yet (#468).
+        $script:JobReads++
+        if ($script:JobReads -le [int]$env:SKYCRAFT_STUB_JOBNULL) { return }
+        [pscustomobject]@{ JobId = $JobId; Status = 'Completed'; WorkloadName = 'stub' }
+    }
 }
 
 function Get-AzRecoveryServicesBackupJobDetail {
@@ -262,12 +267,13 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
 '@
 
         function Invoke-DeployScript {
-            param([int]$ListAfter, [string[]]$ArgumentList)
+            param([int]$ListAfter, [string[]]$ArgumentList, [int]$JobNull = 0)
             $log = Join-Path $script:Stub.Directory ('calls-' + [guid]::NewGuid().ToString('N') + '.log')
             New-Item -ItemType File -Path $log | Out-Null
             $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
                 SKYCRAFT_STUB_LOG       = $log
                 SKYCRAFT_STUB_LISTAFTER = $ListAfter
+                SKYCRAFT_STUB_JOBNULL   = $JobNull
             }
             [pscustomobject]@{ ExitCode = $run.ExitCode; Refused = $run.Refused; Output = $run.Output; Calls = @(Get-Content -LiteralPath $log) }
         }
@@ -277,6 +283,7 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
 
         $script:Listed      = Invoke-DeployScript -ListAfter 1 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
         $script:ListedLate  = Invoke-DeployScript -ListAfter 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:JobLate     = Invoke-DeployScript -ListAfter 1 -JobNull 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
         $script:NeverListed = Invoke-DeployScript -ListAfter 999 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '0'
     }
 
@@ -285,7 +292,7 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
     }
 
     It 'shadows the real Az commands instead of touching a subscription' {
-        foreach ($run in $script:Listed, $script:ListedLate, $script:NeverListed) {
+        foreach ($run in $script:Listed, $script:ListedLate, $script:JobLate, $script:NeverListed) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -314,6 +321,20 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $run.Calls | Should -Contain 'Backup:dev-skycraft-swc-auth-vm'
         $run.Calls | Should -Contain 'Backup:dev-skycraft-swc-world-vm'
         $run.Output | Should -Match 'Deployment Complete'
+    }
+
+    It 'retries while the vault does not return a fresh job by id, then exits 0 (#468)' {
+        $run = $script:JobLate
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'does not return job backup-dev-skycraft-swc-auth-vm yet; retrying'
+        $run.Output | Should -Not -Match 'returned nothing for job'
+        $run.Calls | Should -Contain 'Sleep:10'
+    }
+
+    It 'names the failing call and the wait when the vault never returns the job (#468)' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text | Should -Match 'jobLookupGraceSeconds = 120'
+        $text | Should -Match 'Get-AzRecoveryServicesBackupJob returned nothing for job \$jobId for \$jobLookupGraceSeconds seconds'
     }
 
     It 'counts a VM that is never listed as a failure, exits 1 and says why' {

@@ -187,6 +187,16 @@ else {
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             $deployment = New-AzSubscriptionDeployment @deployParams
+            # The cmdlet can also return a Failed deployment without throwing (#473).
+            if ($deployment.ProvisioningState -eq 'Failed' -and $attempt -lt $maxAttempts) {
+                $failedMsg = @(Get-AzDeploymentOperation -DeploymentName $deployParams.Name -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.StatusMessage } | ForEach-Object { "$_" }) -join ' '
+                if ($failedMsg -match 'InvalidOutputTable|not available for destination|InvalidPayload') {
+                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
+                    Start-Sleep -Seconds 45
+                    continue
+                }
+            }
             break
         }
         catch {
