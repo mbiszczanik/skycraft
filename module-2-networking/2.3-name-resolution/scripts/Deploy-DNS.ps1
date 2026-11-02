@@ -104,12 +104,16 @@ if ($pubZone) {
     Write-Host "  -> Created Zone: $PublicDnsZoneName" -ForegroundColor Green
 }
 
+# Counts every failed step so the script ends with exit 1 instead of 0 (#340).
+$script:dnsFailures = 0
+
 # 2. Get Public IPs
 $devPip = Get-AzPublicIpAddress -ResourceGroupName $DevRG -Name $DevLbPipName -ErrorAction SilentlyContinue
 $prodPip = Get-AzPublicIpAddress -ResourceGroupName $ProdRG -Name $ProdLbPipName -ErrorAction SilentlyContinue
 
 if (-not $devPip -or -not $prodPip) {
-    Write-Host "  -> [WARNING] One or more Public IPs not found. Skipping A record creation." -ForegroundColor Yellow
+    Write-Host "  -> [ERROR] One or more Public IPs not found (Lab 2.1 creates them). A records not created." -ForegroundColor Red
+    $script:dnsFailures++
 } else {
     # 3. Create A Records
     $devRecord = Get-AzDnsRecordSet -ResourceGroupName $PlatformRG -ZoneName $PublicDnsZoneName -Name 'dev' -RecordType A -ErrorAction SilentlyContinue
@@ -202,6 +206,7 @@ function New-PrivateDnsLink {
             Write-Host "  -> Link created (AutoReg: $AutoReg)" -ForegroundColor Green
         } else {
              Write-Host "  -> [ERROR] VNet '$VnetName' not found!" -ForegroundColor Red
+             $script:dnsFailures++
         }
     }
 }
@@ -210,5 +215,10 @@ New-PrivateDnsLink -LinkName 'hub-vnet-link' -VnetRG $PlatformRG -VnetName $HubV
 New-PrivateDnsLink -LinkName 'dev-vnet-link' -VnetRG $DevRG -VnetName $DevVnetName -AutoReg $true
 New-PrivateDnsLink -LinkName 'prod-vnet-link' -VnetRG $ProdRG -VnetName $ProdVnetName -AutoReg $true
 
+if ($script:dnsFailures -gt 0) {
+    Write-Host "`n=== DNS Deployment finished with $($script:dnsFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
+    Exit-Lab -FailureCount $script:dnsFailures
+}
+
 Write-Host "`n=== DNS Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
-exit 0
+Exit-Lab -FailureCount 0
