@@ -153,16 +153,16 @@ Two pieces connect a VM to the workspace: the **Azure Monitor Agent (AMA)**, a V
 
 The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the VM: change it to `platform-skycraft-swc-rg`.
 
-3. **Resources** → **+ Add resources** → expand `dev-skycraft-swc-rg`, check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists) → **Apply**.
+3. **Resources** → **+ Add resources** → the pane opens with `dev-skycraft-swc-rg` already expanded: check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` if only the prod environment exists) → **Apply**.
 4. **Collect and deliver** → **Add new data source**:
    - Data source type: **Performance Counters**. The counters are a tree with no **Basic** option: tick **CPU**, **Memory**, **Disk** and **Network**
-   - **Next : Destination** → **+ Add destination**: Destination type **Log Analytics Workspaces** (it starts on **Azure Monitor Metrics**), account `platform-skycraft-swc-law` → **Apply** (the destination form's button; **Save** on the data source pane stays disabled until a destination is applied), then **Save**
+   - **Next: Destinations >** → **+ Add destination**: Destination type **Log Analytics Workspaces** (it starts on **Azure Monitor Metrics**), account `platform-skycraft-swc-law` → **Apply** (the destination form's button; **Save** on the data source pane stays disabled until a destination is applied), then **Save**
 5. **Add new data source** again:
    - Data source type: **Linux Syslog**. Tick only the facilities you want and set a minimum log level for each: one or two facilities at **Warning** are enough for this lab
-   - Destination: **Log Analytics Workspaces**, `platform-skycraft-swc-law` → **Save**
+   - Destination: **Log Analytics Workspaces**, `platform-skycraft-swc-law` (the destination can be preselected and its form can open prefilled: check it) → **Save**
 
    > [!WARNING]
-   > **Cost**: a Syslog data source saved with no facility ticked is stored as all 25 facilities at all 8 levels (Debug and up), and the workspace bills every GB it ingests. Tick only the facilities you want, or accept that cost: a lab VM writes little, a busy one does not.
+   > **Cost**: a Syslog data source saved with no facility ticked is stored as all 25 facilities at all 8 levels (Debug and up), and the workspace bills every GB it ingests. Tick only the facilities you want, or accept that cost: a lab VM writes little, a busy one does not. Switching to the **Destination** tab and back can clear the ticked facilities (the levels stay): re-check them on the **Data source** tab before **Review + create**.
 
 6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
 7. Click **Review + create** → **Create**.
@@ -196,21 +196,22 @@ The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the 
 
 1. Navigate to your **Log Analytics workspace** (`platform-skycraft-swc-law`).
 2. Click **Logs** in the left menu.
-3. Close the *Welcome to Log Analytics* and *Queries hub* windows if they open.
-4. Logs may open in Agent mode: a chat box that writes queries for you, with no query editor. Toggle **Agent** to **Off**, and confirm *Discard changes* if the Portal asks.
-5. The editor then opens in *Simple mode*. Set the mode dropdown to **KQL mode**.
-6. Paste the following query to check heartbeat (connectivity) of your VMs:
+3. Close the *Welcome to Log Analytics* and *Queries hub* windows, and the *New: Agent-powered log analysis* popover, if they open.
+4. Logs may open in Agent mode: a chat box that writes queries for you, with no query editor. Toggle **Agent** to **Off**, and confirm *Discard changes* if the Portal asks. It can also open with the chat box already closed.
+5. The editor then opens in *Simple mode*, or already in **KQL mode**. If it is in *Simple mode*, set the mode dropdown to **KQL mode**.
+6. The editor can be prefilled with an older query: replace it with the one below.
+7. Paste the following query to check heartbeat (connectivity) of your VMs:
 
 ```kusto
 Heartbeat
 | summarize LastHeartbeat = max(TimeGenerated) by Computer
 ```
 
-7. Click **Run**.
+8. Click **Run**.
 
 **Expected Result**: One row per connected VM, such as `dev-skycraft-swc-auth-vm`, with a `LastHeartbeat` from the last few minutes. No rows: see Troubleshooting, Issue 1.
 
-> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent can take up to about 90 minutes to reach the workspace (85 minutes were measured once), and often arrives much sooner on a workspace that already has a `Heartbeat` table, a recovered one for example (3 to 13 minutes were measured there: 3.2 on a Portal-built setup, 13.0 after the Bicep deploy). While you wait, check that the VM runs, that the agent shows **Provisioning succeeded** under **Extensions + applications**, and that the data collection rule lists the VM under **Resources**. A recovered workspace also answers at once with the old rows of the earlier run, so look for a `LastHeartbeat` from the last few minutes. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 90 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming its age and the cause: installed but not sending. When a VM carries the agent but the rule is not associated with it, the failure line names that VM.
+> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent can take up to about 90 minutes to reach the workspace (85 minutes were measured once), and often arrives much sooner on a workspace that already has a `Heartbeat` table, a recovered one for example (3 to 13 minutes were measured there: 3.2 on a Portal-built setup, 13.0 after the Bicep deploy, and the first rows after a new rule came 4 to 5 minutes later). While you wait, check that the VM runs, that the agent shows **Provisioning succeeded** under **Extensions + applications**, and that the data collection rule lists the VM under **Resources**. A recovered workspace also answers at once with the old rows of the earlier run, so look for a `LastHeartbeat` from the last few minutes. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 90 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming its age and the cause: installed but not sending. When a VM carries the agent but the rule is not associated with it, the failure line names that VM.
 
 ### Step 5.1.4: Query Performance Data
 
@@ -233,15 +234,15 @@ Perf
 
 The alert rule and its action group are **platform** resources - they live in `platform-skycraft-swc-rg` next to the workspace, even though the rule watches a dev VM. Whichever blade you start from, the portal defaults the rule's resource group to the target VM's group (`dev-skycraft-swc-rg`), so set **Details** → **Resource group** to `platform-skycraft-swc-rg` explicitly. `scripts/Test-Lab.ps1` finds `skycraft-cpu-alert` through the VM it watches, so a rule left in the VM's group still passes, but the name must be `skycraft-cpu-alert`.
 
-1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**.
+1. Navigate to **Monitor** → **Alerts** → **+ Create** → **Alert rule**. The scope pane opens by itself.
 2. **Scope**:
    - Scope level: **Subscription** (the default)
    - **+ Select scope** → expand `dev-skycraft-swc-rg` and check `dev-skycraft-swc-auth-vm` (or `prod-skycraft-swc-auth-vm` under `prod-skycraft-swc-rg` if only the prod environment exists) → **Apply**
-3. **Condition** → **Signal name**: **Percentage CPU**. Configure the logic:
+3. **Condition** → **Signal name**: **Percentage CPU**. Configure the logic (the defaults already match all but the first two labels, which are **Value is** and **Threshold**; check each):
    - Threshold: **Static**
    - Aggregation type: **Average**
-   - Operator: **Greater than**
-   - Threshold value: **80**
+   - Value is (the operator): **Greater than**
+   - Threshold (the value): **80**
    - Check every: **1 minute**
    - Lookback period: **5 minutes**
 4. **Actions**. The tab opens on **Use quick actions (preview)**: cancel the quick actions pane (it would create an e-mail action to the account you are signed in with) and choose **Use action groups**, then **+ Create action group**. On its **Basics** tab:
@@ -253,18 +254,18 @@ The alert rule and its action group are **platform** resources - they live in `p
 | Action group name | `skycraft-ops-ag`          |
 | Display name      | `SkyCraftOps`              |
 
-*Region* starts at *(US) East US*, which Lab 1.3's `Restrict-Azure-Regions` refuses. Global is what the CLI, PowerShell and Bicep paths create, and the *Allowed locations* policy lets it through. *Display name* takes at most 12 characters.
+The action group's *Resource group* field starts empty, so pick it. *Region* starts at *(US) East US*, which Lab 1.3's `Restrict-Azure-Regions` refuses. Global is listed under *Other*. Global is what the CLI, PowerShell and Bicep paths create, and the *Allowed locations* policy lets it through. *Display name* takes at most 12 characters.
 
 5. Click the **Notifications** tab of the action group:
    - Notification type: **Email/SMS message/Push/Voice**
-   - Name: `ops-email`
-   - In the pane that opens, check **Email** and enter your address
+   - The pane for the receiver opens first, and the **Name** field is filled afterwards: enter `ops-email` there. Unless you rename it, the saved receiver is named like `ops-email_-EmailAction-`
+   - In the pane, check **Email** and enter your address
    - Enable the common alert schema: **Yes** (the Bicep sets it too). The toggle appears after you check **Email**, and starts at **No**
    - Click **OK**
 
    The pane notes that e-mails must be verified before the action group can send notifications: confirm the message Azure sends to that address.
 
-6. Click the **Tags** tab of the action group and add the four tags from step 8 below, then **Review + create** → **Create**. The new group is selected on the rule's *Actions* tab.
+6. Click the **Tags** tab of the action group and add the four tags from step 8 below (click each field instead of pressing Tab: Tab can drop the first characters you typed), then **Review + create** → **Create**. The new group is selected on the rule's *Actions* tab.
 7. **Details**:
    - Resource group: `platform-skycraft-swc-rg`
    - Severity: **2 - Warning** (it starts at *3 - Informational*)
@@ -318,12 +319,12 @@ Update-AzTag -ResourceId (Get-AzMetricAlertRuleV2 -ResourceGroupName platform-sk
 
 ### Step 5.1.6: Pin to Dashboard
 
-1. Run the CPU query from Step 5.1.4 again.
+1. Run the CPU query from Step 5.1.4 again. (If the query is still open from Step 5.1.4, you can pin right after it and skip the rerun.)
 2. Click **Save** → **Pin to Azure dashboard**. The same menu offers *Pin to Grafana dashboard* and *Send to workbook*; this lab uses the Azure dashboard.
-3. In the pane that opens, click **Create new**:
+3. In the pane that opens (tabs **Existing** and **Create new**), click **Create new**:
    - Type: **Private**
    - Dashboard name: `SkyCraft-Ops`
-4. Click **Create and pin**.
+4. Click **Create and pin**. The toast reads *Successfully pinned to new dashboard 'SkyCraft-Ops'*.
 
 If `SkyCraft-Ops` exists from an earlier run, pick it under *Existing* instead of creating a new one, or the Portal creates `SkyCraft-Ops (2)`.
 
@@ -339,7 +340,7 @@ If `SkyCraft-Ops` exists from an earlier run, pick it under *Existing* instead o
 
 Beyond VM telemetry, this lab also routes the **platform storage account's blob logs** to the workspace, centralizing storage access auditing alongside VM metrics and logs. The setting is attached to the **blob service** of the account, not to the account itself.
 
-1. Navigate to **Storage accounts** → `platformskycraftswcsa` → **Monitoring** (expand it if it is collapsed) → **Diagnostic settings**. The menu also lists **Diagnostic settings (classic)**: that is the older storage analytics logging, not this step.
+1. Navigate to **Storage accounts** → `platformskycraftswcsa` (the account opens in Storage center) → **Monitoring** (expand it if it is collapsed) → **Diagnostic settings**. The menu also lists **Diagnostic settings (classic)**: that is the older storage analytics logging, not this step.
 2. In the list of resources, select **blob**, then **+ Add diagnostic setting**.
 3. Diagnostic setting name: `skycraft-storage-diag`
 4. Under **Logs**, check **Storage Read** and **Storage Write**.
