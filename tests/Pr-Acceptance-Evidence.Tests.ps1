@@ -1,10 +1,11 @@
 BeforeAll {
     $script:Gate = Join-Path $PSScriptRoot '../tools/Test-PrAcceptanceEvidence.ps1'
     $script:Paths = @('module-3-compute/3.4-app-service/lab-guide-3.4.md')
+    # Synthetic evidence; child processes run only the PR gate.
     $script:Record = @'
 Test-conditions: existing Free Trial, Sweden Central, Contributor, lab prerequisites retained
 Acceptance-head: 0123456789abcdef
-Scripted-check: 2026-11-02 Test-Lab.ps1, 8 expected, 8 observed, exit 0
+Scripted-check: 2026-11-02 Check-Fixture.ps1, 8 expected, 8 observed, exit 0
 Portal-check: 2026-11-02 steps 1-3, expected plan visible, observed plan visible
 Negative-check: 2026-11-02 denied request, expected exit 1, observed exit 1
 Missing-result-check: 2026-11-02 empty response, expected FAIL, observed FAIL
