@@ -162,6 +162,9 @@ try {
 # ===================================
 Write-Host "`n=== Task 5: Configuring VNet Peering ===" -ForegroundColor Cyan
 
+# Counts every failed create so the script ends with exit 1 instead of 0 (#340).
+$script:deployFailures = 0
+
 function New-SkyCraftPeering {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal helper; parent script guards idempotency via Get-before-New.')]
     param($Name, $SrcVnet, $DstVnetId, $RgName)
@@ -172,7 +175,7 @@ function New-SkyCraftPeering {
             Add-AzVirtualNetworkPeering -Name $Name -VirtualNetwork $SrcVnet -RemoteVirtualNetworkId $DstVnetId -AllowForwardedTraffic -ErrorAction Stop | Out-Null
             Write-Host "  -> Created $Name" -ForegroundColor Green
         } else { Write-Host "  -> exists" -ForegroundColor Gray }
-    } catch { Write-Host "  -> [ERROR] Failed to create $Name : $_" -ForegroundColor Red }
+    } catch { Write-Host "  -> [ERROR] Failed to create $Name : $_" -ForegroundColor Red; $script:deployFailures++ }
 }
 
 # Hub <-> Dev
@@ -198,11 +201,16 @@ function New-SkyCraftPip {
             New-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -Location $Location -Sku Standard -AllocationMethod Static -Zone 1, 2, 3 -Tag $Tags -ErrorAction Stop | Out-Null
             Write-Host "  -> Created PIP: $Name" -ForegroundColor Green
         } else { Write-Host "  -> exists" -ForegroundColor Gray }
-    } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red }
+    } catch { Write-Host "  -> [ERROR] Failed to create PIP $Name : $_" -ForegroundColor Red; $script:deployFailures++ }
 }
 
 New-SkyCraftPip -Name 'dev-skycraft-swc-lb-pip' -RgName $DevResourceGroup -Tags $TagsDev
 New-SkyCraftPip -Name 'prod-skycraft-swc-lb-pip' -RgName $ProdResourceGroup -Tags $TagsProd
+
+if ($script:deployFailures -gt 0) {
+    Write-Host "`n=== Deployment finished with $($script:deployFailures) failure(s) ===" -ForegroundColor Red -BackgroundColor Black
+    Exit-Lab -FailureCount $script:deployFailures
+}
 
 Write-Host "`n=== Deployment Complete ===" -ForegroundColor Cyan -BackgroundColor Black
 Write-Host "Run Test-Lab.ps1 to verify the networking configuration" -ForegroundColor Green
