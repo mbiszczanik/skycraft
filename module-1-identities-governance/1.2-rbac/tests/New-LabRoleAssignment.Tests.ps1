@@ -286,17 +286,19 @@ function New-StubRoleAssignment {
         -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
 
     # One invocation per scenario - each child process costs several seconds.
-    $script:Custom    = Invoke-RoleAssignmentScript -Domain 'custom'
+    # The sign-in and domain scenarios find Lab 1.1's principals: a missing one is an [ERROR] and exit 1 (#340).
+    $script:Custom    = Invoke-RoleAssignmentScript -Domain 'custom' -Principals
+    $script:Absent    = Invoke-RoleAssignmentScript -Domain 'custom'
     $script:Fail      = Invoke-RoleAssignmentScript -Domain 'fail'
     $script:NoInitial = Invoke-RoleAssignmentScript -Domain 'noinitial'
     # The #273 shape: a context in the session that holds a Read scope only.
-    $script:ReadOnly  = Invoke-RoleAssignmentScript -Scopes 'User.Read.All'
+    $script:ReadOnly  = Invoke-RoleAssignmentScript -Scopes 'User.Read.All' -Principals
     # The #242 shape: a sign-in that returns without a context.
-    $script:NoContext = Invoke-RoleAssignmentScript -NoContext
+    $script:NoContext = Invoke-RoleAssignmentScript -NoContext -Principals
     # The #381 step 3 shape: a covering Graph context in one tenant, the Az context in another.
-    $script:OtherTenant = Invoke-RoleAssignmentScript -MgTenant '99999999-9999-9999-9999-999999999999'
+    $script:OtherTenant = Invoke-RoleAssignmentScript -MgTenant '99999999-9999-9999-9999-999999999999' -Principals
     # The #300 shape: a fresh session, no Az context and no Graph context.
-    $script:NoAz = Invoke-RoleAssignmentScript -MgFresh -NoAzContext
+    $script:NoAz = Invoke-RoleAssignmentScript -MgFresh -NoAzContext -Principals
     # Lab 1.1's principals exist (issue #397): the roles are read and created through the ARM API.
     $script:Assigns   = Invoke-RoleAssignmentScript -Principals -Held
     $script:ReadFails = Invoke-RoleAssignmentScript -Principals -RoleLookupFail
@@ -315,7 +317,7 @@ AfterAll {
 Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - test harness' {
 
     It 'shadows the real Microsoft Graph and Az commands instead of touching a tenant' {
-        foreach ($run in @($script:Custom, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz, $script:Assigns, $script:ReadFails, $script:SignInFails, $script:LookupFails, $script:Conditioned, $script:Twins)) {
+        foreach ($run in @($script:Custom, $script:Absent, $script:Fail, $script:NoInitial, $script:ReadOnly, $script:NoContext, $script:OtherTenant, $script:NoAz, $script:Assigns, $script:ReadFails, $script:SignInFails, $script:LookupFails, $script:Conditioned, $script:Twins)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -445,9 +447,11 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - a failed directory lookup names th
         $run.Output | Should -Match 'Role assignment finished with 5 error\(s\)'
     }
 
-    It 'does not name the sign-in when the directory simply holds no such principal' {
-        $script:Custom.Output | Should -Match '\[SKIP\] Principal not found in Entra ID'
-        $script:Custom.Output | Should -Not -Match 'Connect-MgGraph -Scopes'
+    It 'counts a principal the directory does not hold as an [ERROR], exits 1 and does not name the sign-in (#340)' {
+        $script:Absent.ExitCode | Should -Be 1 -Because "output was:`n$($script:Absent.Output)"
+        $script:Absent.Output | Should -Match '\[ERROR\] Principal not found in Entra ID'
+        $script:Absent.Output | Should -Match 'Role assignment finished with 5 error\(s\)'
+        $script:Absent.Output | Should -Not -Match 'Connect-MgGraph -Scopes'
     }
 }
 

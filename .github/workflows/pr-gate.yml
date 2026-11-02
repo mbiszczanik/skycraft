@@ -57,3 +57,10 @@ jobs:
               $Host.SetShouldExit($LASTEXITCODE)
               exit $LASTEXITCODE
           }
+          ./tools/Test-PrAcceptanceEvidence.ps1 `
+            -BodyPath "$env:RUNNER_TEMP/pr-body.md" `
+            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt"
+          if ($LASTEXITCODE -ne 0) {
+              $Host.SetShouldExit($LASTEXITCODE)
+              exit $LASTEXITCODE
+          }

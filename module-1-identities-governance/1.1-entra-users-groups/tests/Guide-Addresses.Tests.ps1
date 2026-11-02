@@ -137,10 +137,15 @@ function Get-MgDomain {
     }
 }
 
+$script:StubUsers = @{}
+$script:StubGroups = @{}
+
 function Get-MgUser {
     [CmdletBinding()]
     param([string]$Filter, [string]$UserId, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name "Get-MgUser|$Filter"
+    # Only what the run created is found, so a membership step has its user and group (#340).
+    foreach ($upn in @($script:StubUsers.Keys)) { if ($Filter -like "*$upn*") { return $script:StubUsers[$upn] } }
 }
 
 function New-MgUser {
@@ -150,7 +155,10 @@ function New-MgUser {
         [string]$MailNickname, [string]$UsageLocation, [string]$Department, [string]$JobTitle
     )
     Write-StubCall -Name "New-MgUser|$UserPrincipalName"
-    [pscustomobject]@{ Id = 'member'; DisplayName = $DisplayName }
+    if ($env:SKYCRAFT_STUB_FAILCREATE -eq '1') { throw 'Insufficient privileges to complete the operation.' }
+    $created = [pscustomobject]@{ Id = 'member'; DisplayName = $DisplayName }
+    $script:StubUsers[$UserPrincipalName] = $created
+    $created
 }
 
 function Remove-MgUser {
@@ -166,17 +174,21 @@ function New-MgInvitation {
         $SendInvitationMessage, $InvitedUserMessageInfo
     )
     Write-StubCall -Name "New-MgInvitation|$InvitedUserEmailAddress"
+    $script:StubUsers[$InvitedUserEmailAddress] = [pscustomobject]@{ Id = 'guest'; DisplayName = $InvitedUserDisplayName }
 }
 
 function Get-MgGroup {
     [CmdletBinding()]
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
+    foreach ($name in @($script:StubGroups.Keys)) { if ($Filter -like "*'$name'*") { return $script:StubGroups[$name] } }
 }
 
 function New-MgGroup {
     [CmdletBinding()]
     param([string]$DisplayName, [string]$Description, $MailEnabled, $SecurityEnabled, [string]$MailNickname)
-    [pscustomobject]@{ Id = 'group'; DisplayName = $DisplayName }
+    $created = [pscustomobject]@{ Id = 'group'; DisplayName = $DisplayName }
+    $script:StubGroups[$DisplayName] = $created
+    $created
 }
 
 function Remove-MgGroup {
@@ -201,7 +213,8 @@ function New-MgGroupMember {
         param(
             [string]$ScriptPath,
             [string[]]$ArgumentList = @(),
-            [string]$Domain = 'custom'
+            [string]$Domain = 'custom',
+            [switch]$FailCreate
         )
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
@@ -210,6 +223,7 @@ function New-MgGroupMember {
         $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $ScriptPath -ArgumentList $ArgumentList -Environment @{
             SKYCRAFT_STUB_DOMAIN           = $Domain
             SKYCRAFT_STUB_LOG              = $logPath
+            SKYCRAFT_STUB_FAILCREATE       = if ($FailCreate) { '1' } else { '0' }
             SKYCRAFT_GRAPH_TENANT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_SECRET   = ''
@@ -245,6 +259,8 @@ function New-MgGroupMember {
 
     # One invocation per scenario, reused by the assertions below - each child process costs
     # several seconds.
+    # A user create that fails (#340): the run must not end at exit 0.
+    $script:CreateFails = Invoke-AddressScript -ScriptPath $script:NewUserPath -FailCreate
     $script:Runs = [ordered]@{
         'New-LabUser.ps1'        = Invoke-AddressScript -ScriptPath $script:NewUserPath
         'Test-Lab.ps1'           = Invoke-AddressScript -ScriptPath $script:TestLabPath
@@ -310,6 +326,13 @@ Describe 'Lab 1.1 addresses - the scripts use the guide''s users and guest (#193
     ) {
         $run = $script:Runs[$script]
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+    }
+
+    It 'New-LabUser.ps1 exits 1 and says how many steps failed when a user cannot be created (#340)' {
+        $run = $script:CreateFails
+        $run.Output | Should -Match '\[ERROR\] Failed to create user'
+        $run.Output | Should -Match 'Lab 1\.1 setup finished with \d+ failure\(s\)'
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
     }
 
     It 'Test-Lab.ps1 runs every check against a tenant whose default domain is a custom one' {
