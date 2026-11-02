@@ -103,7 +103,7 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 1. In Network Watcher, in the left menu, under **Network diagnostic tools**, click **Next hop**.
 2. **Virtual machine**: `prod-skycraft-swc-auth-vm`.
    - **Fallback** - if only the dev environment exists (the default of Lab 3.2): pick `dev-skycraft-swc-world-vm` instead.
-3. Leave the source IP address the Portal fills in (the VM's private IP).
+3. The form prefills **Network interface** and **Source IP address** from the last VM you picked in Network Watcher: check that both belong to the VM you chose (the source IP is the VM's private IP) and change them if they do not.
 4. **Destination IP address**: `1.1.1.1` (a public DNS resolver).
 5. Click **Next hop**.
 
@@ -112,9 +112,9 @@ In the Azure Portal, search **Network Watcher** and open it: the page is titled 
 ### Step 5.3.3: Visualize Topology
 
 1. In Network Watcher, in the left menu, under **Monitoring** (expand it if it is collapsed), click **Topology**. The page opens on a world map; there is no resource group field and no View topology button.
-2. Click the **Scope** chip and open **Resource Groups** in the pane. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Click **Save** without closing the list first: closing it by clicking the pane title dropped the selection, and the chip text does not change.
-3. If the map is not showing Sweden Central, zoom and drag it (mouse wheel, or its plus and minus controls) until it is. Point at the **Sweden Central** region on the map and click **Expand** in its card.
-4. Click **+** on `dev-skycraft-swc-vnet` to show its subnets, then point at `AuthSubnet` and click **Expand** in its card to show the VM in it.
+2. Click the **Scope** chip. The **Select Scope** pane lists Subscriptions, **Resource Groups** and Locations: open **Resource Groups**. If **Select All** is checked, clear it, then select only `dev-skycraft-swc-rg`. Click **Save** without closing the list first: closing it by clicking the pane title dropped the selection. After **Save** the chip reads **1 locations shown**.
+3. The map can stay blank after **Save**: click the square fit button to bring the **Sweden Central** pin into view (or zoom and drag the map). Hovering the pin opens no card, and a single click opens a side pane with **Insights**, **Traffic** and **Connectivity** tabs. Double-click the pin to get the card and click **Expand** in it.
+4. Click **+** on `dev-skycraft-swc-vnet` to show its subnets, NSGs and the hub link, then double-click `AuthSubnet`: its card offers **View Details** and **Expand**. Click **Expand** to show the NIC, the VM and the NSG.
 
 **Expected Result**: The map shows `dev-skycraft-swc-vnet` with its subnets, the VMs inside them, and the peering to the hub VNet.
 
@@ -212,7 +212,7 @@ New-AzNetworkWatcherFlowLog -NetworkWatcher $nw -Name prod-skycraft-swc-vnet-flo
   -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: The deployment ends **Succeeded**, and `prod-skycraft-swc-vnet-flowlog` shows **Enabled** under Flow logs with `prod-skycraft-swc-vnet` as its target. A deployment that ends *Conflict* leaves the flow log in the **Failed** state, recording nothing: see Troubleshooting, Issue 4. After 10-20 minutes, **Traffic Analytics** in Network Watcher shows the first flows between the hub and the spokes. Its FlowLog Type filter can start on NSG: switch it to VNet. Only traffic of VMs in `prod-skycraft-swc-vnet` is recorded, so with no VM there the page reports no data.
+**Expected Result**: The deployment ends **Succeeded**, and `prod-skycraft-swc-vnet-flowlog` shows **Enabled** under Flow logs with `prod-skycraft-swc-vnet` as its target. A deployment that ends *Conflict* leaves the flow log in the **Failed** state, recording nothing: see Troubleshooting, Issue 4. After 10-20 minutes, **Traffic Analytics** in Network Watcher shows the first flows between the hub and the spokes. Until data arrives the page says "We could not find any data in this workspace for selected time interval. Try after 20-30 mins." Its FlowLog Type filter starts on NSG (the options are NSG and VNet): switch it to VNet. Only traffic of VMs in `prod-skycraft-swc-vnet` is recorded, so with no VM there the page reports no data.
 
 ---
 
@@ -232,6 +232,8 @@ The endpoint VMs need the Network Watcher agent, a VM extension that no earlier 
 | Azure CLI, Azure PowerShell, `Deploy-Bicep.ps1` | `NetworkWatcherAgentLinux`, installed before the monitor | Set in the install request |
 
 A VM takes one Network Watcher agent, so the CLI and PowerShell blocks skip a VM that already has one, whatever its name.
+
+On a VM with Azure Disk Encryption, the extensions list can show `AzureDiskEncryptionForLinux` and `AzureMonitorLinuxAgent` as **Updating** for a few minutes before **Succeeded**. The PowerShell block took about 4.5 minutes and the CLI block about 3.5, so wait for it to return.
 
 The monitor itself lives in `NetworkWatcherRG`. The Portal wizard has no Tags tab: the monitor is created with the `Project` tag `Inherit-Project-Tag` copies from `NetworkWatcherRG`, and you add the other three tags right after (item 7). The CLI and PowerShell paths set all four tags in the create request.
 
@@ -338,7 +340,7 @@ New-AzNetworkWatcherConnectionMonitor -NetworkWatcher $nw -Name skycraft-hub-spo
   -Tag @{ Project = 'SkyCraft'; Environment = 'Production'; CostCenter = 'MSDN'; Owner = '<your name>' }
 ```
 
-**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with a status (below) and carries the four tags (the page shows no monitoring status of its own; the list does), the source VM lists a Network Watcher agent with `Project` = `SkyCraft` (on the Portal path only under Lab 1.3's policies; the CLI, PowerShell and Bicep paths install it on the destination VM too, while after the wizard the destination VM may have none), and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes. What `hub-spoke-ssh` reports depends on the source:
+**Expected Result**: `skycraft-hub-spoke-cm` appears under Connection monitor with a status (below) and carries the four tags (the page shows no monitoring status of its own; the list does), the source VM lists a Network Watcher agent with `Project` = `SkyCraft` (on the Portal path only under Lab 1.3's policies; the CLI, PowerShell and Bicep paths install it on the destination VM too, while after the wizard the destination VM may have none), and `NWConnectionMonitorTestResult` in `platform-skycraft-swc-law` starts receiving rows within about 10 minutes (the first row came about 4.5 minutes after creation in the pass). A new monitor first shows an unknown status icon and the banner "Newly created Connection Monitors may take 1-5 mins to get monitoring data and show up in the dashboards"; the status appears once data arrives. What `hub-spoke-ssh` reports depends on the source:
 
 - **Dev fallback source** (`dev-skycraft-swc-world-vm`): **Pass** - source and destination share `dev-skycraft-swc-vnet`.
 - **Production source** (`prod-skycraft-swc-auth-vm`): **Fail**. The prod and dev spokes are each peered only to the hub, and VNet peering is not transitive, so traffic to the dev `AuthSubnet` (`10.1.1.0/24`) matches the system route `10.0.0.0/8 → None` and is dropped. Confirm it with **Next hop** (Step 5.3.2) from `prod-skycraft-swc-auth-vm` to the private IP of `dev-skycraft-swc-auth-vm`: this is the monitor doing its job, not a broken lab. Issue #178 tracks the route the lab should provide.
