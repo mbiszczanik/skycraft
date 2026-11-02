@@ -65,12 +65,6 @@
 - [x] Initial backup of each: **Take Snapshot** sub-task **Completed**; job **Completed** or **In progress**, never **Failed** (a failure here is Troubleshooting, Issues 2 and 4 in the lab guide)
 - [x] Last backup status: **Success** (once completed)
 
-### File-Level Recovery
-
-- [ ] File recovery script run on `dev-skycraft-swc-world-vm` from `/root/flr`: `Connection succeeded!`
-- [ ] `/root/flr/<vm>-<time>/Volume1/opt/skycraft/flr-marker.txt` read back
-- [ ] **Unmount Disks** done on the File Recovery pane
-
 ---
 
 ## ✅ Backup Vault Verification

@@ -24,7 +24,7 @@
       grant go through Azure Resource Manager.
     - VM backup protection enabled on dev-skycraft-swc-auth-vm and dev-skycraft-swc-world-vm
       (each when present), plus an on-demand backup whenever a VM has no recovery point yet.
-      The world VM is the unencrypted one Step 5.2.10 restores files from. The script watches the
+      The world VM is the unencrypted one. The script watches the
       job's Take Snapshot phase until it completes or fails (up to 20 minutes) and counts a
       failure, or a phase it did not see finish, as a deployment failure. After enabling
       protection it waits for the vault to list the VM as a backup item (-BackupItemWaitMinutes);
@@ -124,7 +124,7 @@ $templatePath   = Join-Path $scriptPath '..\bicep\main.bicep'
 $location       = 'swedencentral'
 $platformRg     = 'platform-skycraft-swc-rg'
 $workspaceName  = 'platform-skycraft-swc-law'
-# The auth VM is ADE-encrypted (Lab 3.2); the world VM is not, so Step 5.2.10 restores files from it.
+# The auth VM is ADE-encrypted (Lab 3.2); the world VM is not.
 $vmNames        = @('dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm')
 $vmRg           = 'dev-skycraft-swc-rg'
 $actionGroupName = 'skycraft-ops-ag'
@@ -569,8 +569,8 @@ if ($WhatIf) {
                     }
 
                     if ($job) {
-                        # Watch Take Snapshot, not the whole job: the snapshot is the recovery point Step 5.2.10
-                        # needs, and the vault transfer after it takes far longer (#366).
+                        # Watch Take Snapshot, not the whole job: the snapshot is the recovery point,
+                        # and the vault transfer after it takes far longer (#366).
                         $deadline = (Get-Date).AddMinutes($snapshotWatchMinutes)
                         $jobId = $job.JobId
                         $snapshotStatus = ''
