@@ -137,6 +137,22 @@ would be tracked rather than forgotten.
 
 ## Consequences
 
+### Acceptance evidence completeness (2026-11-02)
+
+The required `Live Verification Declared` job also runs
+`tools/Test-PrAcceptanceEvidence.ps1` for the same lab-content paths.
+The PR body shall contain the [lab acceptance record](../lab-acceptance.md),
+including test conditions, tested revision, separate scripted and Portal evidence,
+negative and missing-result checks, and fallback deployment evidence or explicit
+reasons why a check does not apply.
+If an entry is absent, duplicated, blank or a placeholder, then the completeness
+check shall fail. A blocked entry shall name its tracking issue.
+
+Evidence: the 2026-11-02 retrospective on #305 reviewed the first-use gap in #402,
+the validated but undeployed fallback in #439, and the partial Portal coverage of #474.
+Completeness does not establish the truth of a declaration and does not change
+the branch, deferral, approval or issue-closure rules above.
+
 **What we gain:**
 
 - Merging lab content without a live pass becomes an explicit, recorded
