@@ -42,8 +42,8 @@
     of its last successful 'Create or Update Virtual Machine Extension' event in the activity log
     (the extension's own instance view carries no time), and the query is repeated once a minute,
     with a progress line, until -AgentInstallWaitMinutes after that time. The first row takes up
-    to about 40 minutes after the install, often much sooner on a workspace that already has a
-    Heartbeat table (3 to 13 minutes were seen on a recovered one). The install time is read
+    to about 90 minutes after the install (85 were seen on a new workspace), often much sooner on a
+    workspace that already has a Heartbeat table (3 to 13 minutes were seen on a recovered one). The install time is read
     again every 5 minutes, so a reinstall during the wait restarts the count. An agent installed
     longer ago than the bound with still no row fails at once, naming the cause: the agent is
     installed but not sending. Without a readable install
@@ -66,10 +66,10 @@
 
 .PARAMETER AgentInstallWaitMinutes
     How long after an agent extension was installed to keep waiting for the first Heartbeat row
-    of its VM; the row takes up to about 40 minutes after the install, often much sooner.
+    of its VM; the row takes up to about 90 minutes after the install, often much sooner.
     Counted from the install time in the activity log, so a run started late waits only for
     the rest, and an agent older than this fails at once when its VM has no row. The wait
-    applies only while every agent is Succeeded. 0 queries once. Default: 45
+    applies only while every agent is Succeeded. 0 queries once. Default: 90
 
 .PARAMETER NewWorkspaceWaitMinutes
     How long to keep waiting for the Heartbeat table itself to exist, which a new workspace
@@ -106,7 +106,7 @@ param(
 
     [Parameter()]
     [ValidateRange(0, 120)]
-    [int]$AgentInstallWaitMinutes = 45
+    [int]$AgentInstallWaitMinutes = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -268,6 +268,7 @@ try {
     $ruleVms    = [ordered]@{}   # rule id (lower case) -> names of the VMs it is associated with
     $readErrors = @()
     $vmsRead    = 0
+    $vmsSeen    = @()
     # Each group, VM and rule is read on its own: one that cannot be read (a missing group, a
     # failed call, an association left pointing at a deleted rule or at a rule in another
     # subscription) is noted and skipped, so it never hides the lab's rule found elsewhere.
@@ -292,6 +293,7 @@ try {
                 continue
             }
             $vmsRead++
+            $vmsSeen += $vm
             foreach ($association in @(($response.Content | ConvertFrom-Json).value)) {
                 # An association with a data collection endpoint names no rule.
                 $ruleId = "$($association.properties.dataCollectionRuleId)"
@@ -341,11 +343,28 @@ catch {
     $dcrLookupError = $_.Exception.Message
 }
 
+# With no rule found, name the VMs that already carry the agent: they are installed but collect
+# nothing until the rule is associated with them (#475).
+$noRuleNote = ''
+if (-not $dcrResource -and -not $dcrLookupError) {
+    $agentOnly = @(foreach ($seen in $vmsSeen) {
+        try {
+            $response = Invoke-AzRestMethod -Method GET -Path "$($seen.ResourceId)/extensions?api-version=2024-07-01" -ErrorAction Stop
+            if ($response.StatusCode -ne 200) { continue }
+            $hasAgent = @(($response.Content | ConvertFrom-Json).value) |
+                Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -in @('AzureMonitorLinuxAgent', 'AzureMonitorWindowsAgent') }
+            if ($hasAgent) { $seen.Name }
+        }
+        catch { continue }
+    })
+    if ($agentOnly.Count -gt 0) { $noRuleNote = "; $($agentOnly -join ', ') carries the agent but no association" }
+}
+
 Invoke-Test "Data collection rule associated with a VM in $($vmGroups -join ' or ')" {
     if ($dcrLookupError) { throw $dcrLookupError }
     if (-not $dcrResource) {
         $unread = if ($dcrUnread.Count -gt 0) { "; could not read $($dcrUnread -join '; ')" } else { '' }
-        Write-Host " (no rule is associated with these VMs - Step 5.1.2$unread)" -NoNewline -ForegroundColor Gray
+        Write-Host " (no rule is associated with these VMs$noRuleNote - Step 5.1.2$unread)" -NoNewline -ForegroundColor Gray
         return $false
     }
     Write-Host " ('$($dcrResource.Name)' in $($dcrResource.ResourceGroupName), on $($dcrVmNames -join ', '))" -NoNewline -ForegroundColor Gray
@@ -414,7 +433,7 @@ if ($dcrVmIds.Count -gt 0) {
 
 Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
     if ($agentStates.Count -eq 0) {
-        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        Write-Host " (no VM carries the lab's rule$noRuleNote - Step 5.1.2)" -NoNewline -ForegroundColor Gray
         return $false
     }
     $unread = @($agentStates.Keys | Where-Object { $agentStates[$_] -like 'unreadable:*' })
@@ -460,7 +479,7 @@ $installWait   = $AgentInstallWaitMinutes
 $tableMissingPattern = 'BadRequest|Bad Request|Failed to resolve|could not be resolved|SEM0100'
 Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes" {
     if ($dcrVmIds.Count -eq 0) {
-        Write-Host " (no VM carries the lab's rule - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        Write-Host " (no VM carries the lab's rule$noRuleNote - Step 5.1.2)" -NoNewline -ForegroundColor Gray
         return $false
     }
     if (-not $wsCache) { throw "workspace '$workspaceName' not found" }
@@ -505,7 +524,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         $missing = @(for ($i = 0; $i -lt $dcrVmIds.Count; $i++) { if ($dcrVmIds[$i].ToLowerInvariant() -notin $seen) { $dcrVmNames[$i] } })
         # A Failed or missing agent explains the gap; there is nothing to wait for.
         if ($missing.Count -eq 0 -or -not $agentsReady) { break }
-        # The first row follows the install by up to about 40 minutes: wait to a bound after the
+        # The first row follows the install by up to about 90 minutes: wait to a bound after the
         # install time, or only -HeartbeatWaitMinutes where it is not known.
         $now = (Get-Date).ToUniversalTime()
         $stillWaiting = @()
