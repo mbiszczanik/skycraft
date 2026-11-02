@@ -750,7 +750,7 @@ if (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyCo
     Invoke-Test "Replication of '$asrVm' is Protected" {
         if (-not $asrItem) { return $false }
         if ($asrItem.ProtectionState -ne 'Protected') {
-            Write-Host " (state is '$($asrItem.ProtectionState)' - the initial replication takes about 45 minutes; Lab 5.2 Troubleshooting Issue 7)" -NoNewline -ForegroundColor Gray
+            Write-Host " (state is '$($asrItem.ProtectionState)' - the initial replication takes about 45 to 75 minutes; Lab 5.2 Troubleshooting Issue 7)" -NoNewline -ForegroundColor Gray
         }
         return ($asrItem.ProtectionState -eq 'Protected')
     }

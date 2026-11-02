@@ -20,8 +20,8 @@
        containers, the 24-hour replication policy, both container mappings and both network
        mappings
     4. Enable replication of the VM's disks into the target group
-    5. Wait until the item reads Protected (the initial replication of the two disks took about
-       45 minutes), then set the failover VM size: the source VM's size when the subscription may
+    5. Wait until the item reads Protected (the initial replication of the two disks took 45 to 70
+       minutes), then set the failover VM size: the source VM's size when the subscription may
        use it in North Europe and has the quota, else the nearest size it may use. Site Recovery's
        own pick (Standard_HC44rs, 44 cores) fails the test failover on the core quota, and a size
        the subscription is barred from is refused with an empty size name
@@ -119,7 +119,7 @@ function Wait-LabAsrJob {
     # PartiallySucceeded: a task failed and was retried (Enable replication showed an Entra 401 while the
     # Mobility service installed) and the job went on; the wait for Protected decides whether it worked.
     if ($Job.State -eq 'PartiallySucceeded') {
-        Write-Host "  [WARNING] $Label finished PartiallySucceeded$(if ($detail) { ": $detail" })" -ForegroundColor Yellow
+        Write-Host "  [WARNING] $Label finished PartiallySucceeded$(if ($detail) { ": $detail" }). The wait for Protected decides whether it worked." -ForegroundColor Yellow
     } elseif ($Job.State -notin @('Succeeded', 'CompletedWithInformation')) {
         throw "$Label ended $($Job.State)$(if ($detail) { ": $detail" })"
     }
@@ -233,7 +233,7 @@ $item = Get-LabReplicationItem
 if (-not $item) {
     if (-not $Force) {
         $choices = [System.Management.Automation.Host.ChoiceDescription[]]@(
-            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', "Replicate $vmName to North Europe. The initial replication takes about 45 minutes and the replica disks, cache account and instance fee are billed until Remove-LabResource.ps1 runs.")
+            [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', "Replicate $vmName to North Europe. The initial replication takes about 45 to 75 minutes and the replica disks, cache account and instance fee are billed until Remove-LabResource.ps1 runs.")
             [System.Management.Automation.Host.ChoiceDescription]::new('&No', 'Cancel. Nothing is changed.')
         )
         try {
@@ -341,10 +341,12 @@ if (-not $item) {
 
 Write-Host "`n[5/6] Waiting for Protected (up to $WaitMinutes minutes)..." -ForegroundColor Yellow
 $deadline = (Get-Date).AddMinutes($WaitMinutes)
+$waitStart = Get-Date
 do {
     $item = Get-LabReplicationItem
     if ($item -and $item.ProtectionState -eq 'Protected') { break }
-    Write-Host "  $(if ($item) { $item.ProtectionState } else { 'item not listed yet' })" -ForegroundColor Gray
+    $waited = [int][Math]::Floor(((Get-Date) - $waitStart).TotalMinutes)
+    Write-Host "  Waiting for Protected (state: $(if ($item) { $item.ProtectionState } else { 'item not listed yet' }), $waited min of $WaitMinutes)" -ForegroundColor Gray
     if ($WaitMinutes -eq 0) { break }
     Start-Sleep -Seconds $PollSeconds
 } while ((Get-Date) -lt $deadline)
@@ -378,7 +380,7 @@ try {
     Write-Host "  [WARNING] Could not choose a failover VM size: $_" -ForegroundColor Yellow
 }
 if (-not $failoverSize) {
-    Write-Host "  [WARNING] The failover VM size is still Site Recovery's choice ($((Get-LabReplicationItem).RecoveryAzureVMSize)). Set an offered size on the item's Compute and Network page (Step 5.2.7)." -ForegroundColor Yellow
+    Write-Host "  [WARNING] The failover VM size is still Site Recovery's choice ($((Get-LabReplicationItem).RecoveryAzureVMSize)). Set an offered size under the item's General > Compute > Edit (Step 5.2.7)." -ForegroundColor Yellow
     if ($TestFailover) {
         Write-Host "  [ERROR] No failover size could be set, so a test failover would start that size and fail on the core quota. Nothing was started." -ForegroundColor Red
         Write-Host "    No size that this subscription may use in $dstLocation fits the free core quota and is accepted by Site Recovery (confidential sizes are refused). Ask for core quota there, or use a subscription that offers $size." -ForegroundColor Gray

@@ -63,7 +63,7 @@ Before starting this lab:
 
 The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group, workspace or action group, and only warns about a missing key vault (step [2/7]) or VM (step [7/7]); `scripts/New-LabBlobBackup.ps1` stops on a missing Backup vault or storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
-Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault, which is part of the Az module, and Az.AlertsManagement, which is not: it is not in the Az 16.4.0 dependency list, so install it once with `Install-Module Az.AlertsManagement -Scope CurrentUser` before the Azure PowerShell block of Step 5.2.9 (the scripts and the Portal and Bicep paths do not need it). `Deploy-Bicep.ps1` finishes by running `scripts/Enable-SiteRecovery.ps1` (Az.Network and Az.Storage as well) and waits for the replication, about 45 minutes; `-SkipSiteRecovery` leaves it for Step 5.2.6. If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
+Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault, which is part of the Az module, and Az.AlertsManagement, which is not: it is not in the Az 16.4.0 dependency list, so install it once with `Install-Module Az.AlertsManagement -Scope CurrentUser` before the Azure PowerShell block of Step 5.2.9 (the scripts and the Portal and Bicep paths do not need it). `Deploy-Bicep.ps1` finishes by running `scripts/Enable-SiteRecovery.ps1` (Az.Network and Az.Storage as well) and waits for the replication, about 45 to 75 minutes; `-SkipSiteRecovery` leaves it for Step 5.2.6. If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
 
 ---
 
@@ -383,7 +383,7 @@ Site Recovery copies `dev-skycraft-swc-world-vm` to a second region, so that los
 
 > **SkyCraft Choice**: We replicate to **North Europe** because Lab 1.3 allows only Sweden Central and North Europe, and the wizard's default, East US, is denied. Everything the replication needs goes into **one** tagged group that you create first: Site Recovery's own default groups are created without tags, and Lab 1.3's `Require-Environment-Tag-RG` assignment denies them.
 
-The initial replication of the two disks (30 GB and 64 GB) took about 45 minutes in a live run, not the 15 to 30 minutes older guides promise. Start it first and do Steps 5.2.8 to 5.2.10 while it runs.
+The initial replication of the two disks (30 GB and 64 GB) took 45 to 70 minutes in live runs, not the 15 to 30 minutes older guides promise. Start it first and do Steps 5.2.8 to 5.2.10 while it runs.
 
 **a. Create the target resource group**
 
@@ -441,7 +441,7 @@ The output must be a kernel on the [supported kernels list](https://github.com/A
 
    Leave the other fields as proposed: the wizard creates the target virtual network, the cache storage account in Sweden Central and the replica disks in the group. Without a click on **Create**, the wizard stops with "You have selected to create new automation account. Click on create to proceed".
 4. Click **Review + Start replication**, then **Start replication**.
-5. Open the VM's **Disaster recovery** page again and wait until the replication status reads **Protected**. Allow about 45 minutes.
+5. Open the VM's **Disaster recovery** page again and wait until the replication status reads **Protected**. Allow about 45 to 75 minutes.
 
 #### Replication: Azure PowerShell
 
@@ -470,7 +470,7 @@ Site Recovery picks the recovery size of the copy itself, and its pick can be a 
 #### Test failover: Azure Portal (GUI)
 
 1. Open the Recovery Services vault in `platform-skycraft-neu-asr-rg` (the one the wizard created; the Bicep and Az PowerShell paths name it `platform-skycraft-neu-asr-rsv`) and, under **Protected items** (expand it if it is collapsed), click **Replicated items** → `dev-skycraft-swc-world-vm`.
-2. Click **Compute and Network** → **Edit**, set **Size** to the size of the source VM (`Standard_B2ls_v2` unless you resized it in Lab 3.2) → **Save**. If your subscription is not offered that size in North Europe, choose the closest size with 2 vCPUs and enough memory that it is offered, and not a confidential `DC` or `EC` size: Site Recovery refused every one of those in the live run.
+2. Click **General** → **Compute** → **Edit** (enabled only once the item reads **Protected**), set **Size** to the size of the source VM (`Standard_B2ls_v2` unless you resized it in Lab 3.2) → **Save**. If your subscription is not offered that size in North Europe, choose the closest size with 2 vCPUs and enough memory that it is offered, and not a confidential `DC` or `EC` size: Site Recovery refused every one of those in the live run.
 3. Click **Test Failover**:
 
    | Field                | Value                                                              |
@@ -825,7 +825,7 @@ To avoid the problem for new VMs, build Lab 3.2 with `Deploy-Bicep.ps1`, which p
 
 ### Issue 9: The test failover fails on the core quota, or the size update is refused
 
-**Symptom**: The test failover job fails with `The subscription limit for core counts was reached`, and the replicated item's **Compute and Network** page shows a size such as `Standard_HC44rs`. Or `Set-AzRecoveryServicesAsrReplicationProtectedItem -Size` ends in a failed job with `The selected VM size '' does not support disk controller type 'SCSI'`.
+**Symptom**: The test failover job fails with `The subscription limit for core counts was reached`, and the replicated item's **Compute** page shows a size such as `Standard_HC44rs`. Or `Set-AzRecoveryServicesAsrReplicationProtectedItem -Size` ends in a failed job with `The selected VM size '' does not support disk controller type 'SCSI'`.
 
 **Root Cause**: Site Recovery picks the recovery size itself, and its pick can have far more cores than your quota. The refusal does not come from the disk controller, and the message prints an empty size name. In the live run of 2026-10-31 it came for two kinds of size: sizes the subscription is barred from in North Europe (restriction `NotAvailableForSubscription` in `Get-AzComputeResourceSku -Location northeurope`; `Standard_B2ls_v2`, `Standard_B2s` and `Standard_D2s_v3` were among them) and every confidential size (`DC` and `EC` families; five tried). Offered non-confidential sizes were accepted (`Standard_HC44-16rs`, `Standard_M12s_v3`), but all of them have more cores than the 4-core limit of that subscription, so no test failover could run there.
 
