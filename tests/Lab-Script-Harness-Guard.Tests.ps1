@@ -172,6 +172,32 @@ exit 7
         $run.Output   | Should -Not -Match 'TARGET-RAN' -Because 'the refusal must happen before the script starts'
     }
 
+    It 'exits non-zero, not 0, when the script cannot be parsed' {
+        $stub = Initialize-LabScriptStub -Name 'SkyCraftGuardStub' -Command 'Get-AzContext' -RequiredModule 'Az.Accounts' `
+            -Body "function Get-AzContext { [pscustomobject]@{ Name = 'stub-context' } }"
+        $script:Stubs.Add($stub)
+        $broken = Join-Path $TestDrive 'Broken-LabScript.ps1'
+        "Write-Host 'TARGET-RAN'`nif ( {" | Set-Content -LiteralPath $broken -Encoding utf8
+
+        $run = Invoke-LabScriptWithStub -Stub $stub -ScriptPath $broken
+
+        $run.Refused  | Should -BeFalse -Because "output was:`n$($run.Output)"
+        $run.ExitCode | Should -Not -Be 0 -Because "a script that never parsed must not read as a pass; output was:`n$($run.Output)"
+        $run.Output   | Should -Not -Match 'TARGET-RAN'
+    }
+
+    It 'exits non-zero, not 0, when the script ends on a terminating error without an exit code' {
+        $stub = Initialize-LabScriptStub -Name 'SkyCraftGuardStub' -Command 'Get-AzContext' -RequiredModule 'Az.Accounts' `
+            -Body "function Get-AzContext { [pscustomobject]@{ Name = 'stub-context' } }"
+        $script:Stubs.Add($stub)
+        $throws = Join-Path $TestDrive 'Throws-LabScript.ps1'
+        "throw 'boom'" | Set-Content -LiteralPath $throws -Encoding utf8
+
+        $run = Invoke-LabScriptWithStub -Stub $stub -ScriptPath $throws
+
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+    }
+
     It 'passes the environment to the child and restores it afterwards' {
         $stub = Initialize-LabScriptStub -Name 'SkyCraftGuardStub' -Command 'Get-AzContext' -RequiredModule 'Az.Accounts' `
             -Body "function Get-AzContext { [pscustomobject]@{ Name = `$env:SKYCRAFT_GUARD_CONTEXT } }"

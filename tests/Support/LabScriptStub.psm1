@@ -213,7 +213,7 @@ if (`$notShadowed) {
     exit $script:RefusedExitCode
 }
 `$global:LASTEXITCODE = 0
-& '$ScriptPath'$arguments
+try { & '$ScriptPath'$arguments } catch { Write-Host "[HARNESS] script did not run to an exit: `$(`$_.Exception.Message)"; exit 1 }
 exit `$LASTEXITCODE
 "@
 
