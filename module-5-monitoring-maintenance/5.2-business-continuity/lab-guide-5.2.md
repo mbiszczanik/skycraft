@@ -238,6 +238,8 @@ The Bicep path grants the same role: `bicep/main.bicep` calls `avm/ptn/authoriza
 
 #### Azure PowerShell: protect and back up
 
+The block assumes the VMs are not protected yet. After the Portal path above, `Enable-AzRecoveryServicesBackupProtection` fails with "Not Found ... already protected": skip that line, the rest of the block (the backup and the Take Snapshot watch) works on a protected VM.
+
 ```powershell
 $vault  = Get-AzRecoveryServicesVault -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-rsv
 $policy = Get-AzRecoveryServicesBackupProtectionPolicy -VaultId $vault.ID -Name SkyCraft-Daily-Prod
@@ -298,7 +300,7 @@ $response.StatusCode   # 2xx: ARM accepted the request
 Get-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv   # repeat until it returns the vault
 ```
 
-The Bicep path (`scripts/Deploy-Bicep.ps1`) creates the same vault: `avm/res/data-protection/backup-vault` with `softDeleteSettings: { state: 'Off' }` (`bicep/main.bicep`).
+The Bicep path (`scripts/Deploy-Bicep.ps1`) creates the same vault: `avm/res/data-protection/backup-vault` with `softDeleteSettings: { state: 'Off' }` (`bicep/main.bicep`). The Bicep vault also carries `monitoringSettings`, the module's default for job-failure alerts, which the ARM request above does not set: the two paths end with different vault settings, and `Deploy-Bicep.ps1 -WhatIf` after the request lists it as a change.
 
 Then look at it in the Portal: search for **Backup vaults** → `platform-skycraft-swc-bv` → under **Manage** (expand it if it is collapsed), click **Properties**. **Soft delete** reads **Disabled** (Off). On a vault created in the Portal it reads enabled with a 14-day retention: deleted backup data is kept for 14 to 180 days and can be undeleted in that time, which is what production wants. Microsoft Learn says the option to turn it off may go once secure by default reaches general availability in the region; `Test-Lab.ps1` will then accept On and AlwaysOn (#376).
 
@@ -316,9 +318,9 @@ First look at the Portal's form, without creating anything:
 
 1. Open `platform-skycraft-swc-bv` → **Manage** → **Backup policies** (expand the group if it is collapsed).
 2. Click **+ Add**.
-3. Datasource type: **Azure Blobs (Azure Storage)** → **Next**.
+3. Enter any name (for example `throwaway`: **Next** does not continue without one), Datasource type: **Azure Blobs (Azure Storage)** → **Next**.
 4. On the schedule and retention tab, *Operational backup* (30 days) is ticked, and so is *Vaulted backup* (daily, 90 days in Vault-standard), greyed out: a new policy made in the Portal cannot drop the vaulted tier.
-5. Click **Cancel**. Do not create the policy here.
+5. Close the wizard with the **X** at its top right. Do not create the policy here.
 
 Create the policy with the lab's script instead. It sets every rule itself: one retention rule, 30 days in the OperationalStore, and no vaulted rule. It does not take the defaults of `Get-AzDataProtectionPolicyTemplate`, which now ship a vaulted weekly rule with 7 days in the VaultStore.
 
@@ -546,7 +548,7 @@ Backup reports are built from **diagnostic settings** on the vaults: each vault 
 4. Check **Send to Log Analytics workspace**.
 5. Log Analytics workspace: `platform-skycraft-swc-law`.
 
-   There is no **Destination table** option here: Backup Vault logs always land in resource-specific tables.
+   There is no **Destination table** option here. The Portal stores this setting with destination type `AzureDiagnostics`; the Azure CLI, Azure PowerShell and Bicep paths store `Dedicated`. `Deploy-Bicep.ps1 -WhatIf` after a Portal build lists the difference.
 6. Click **Save**.
 
 #### Azure CLI
@@ -583,8 +585,8 @@ New-AzDiagnosticSetting -Name bv-backup-reports-diag  -ResourceId $bv.Id  -Works
 **c. Read the reports**
 
 1. Search for **Resiliency** and, under **Backup and recovery**, click **Reports**.
-2. Select `platform-skycraft-swc-law` as the workspace.
-3. View the **Backup Instances** report to see protection status across both vaults. Data appears up to 24 hours after the settings are created.
+2. **Reports** opens a gallery of workbooks: open **Backup Reports (consolidated)** and choose `platform-skycraft-swc-law` as the workspace inside it.
+3. The **Backup Instances** tab shows protection status across both vaults. It stays empty until data arrives, up to 24 hours after the settings are created.
 
 **Expected Result**: Each vault lists one diagnostic setting targeting `platform-skycraft-swc-law`; `Test-Lab.ps1` reports both `[Diagnostic Settings]` checks as PASS.
 

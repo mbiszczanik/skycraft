@@ -889,3 +889,5 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  VMs, VNets, and Storage Accounts were NOT deleted." -ForegroundColor Gray
 Write-Host "  Backup Management Service keeps Key Vault Administrator on $KeyVaultName." -ForegroundColor Gray
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+Exit-Lab -FailureCount 0
