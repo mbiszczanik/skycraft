@@ -248,6 +248,13 @@ $ConvertedLabs = @(
     'module-3-compute/3.2-virtual-machines'
     'module-3-compute/3.3-containers'
     'module-3-compute/3.4-app-service'
+    'module-4-storage/4.1-storage-accounts'
+    'module-4-storage/4.2-blob-storage'
+    'module-4-storage/4.3-azure-files'
+    'module-4-storage/4.4-storage-security'
+    'module-5-monitoring-maintenance/5.1-azure-monitor'
+    'module-5-monitoring-maintenance/5.2-business-continuity'
+    'module-5-monitoring-maintenance/5.3-network-monitoring'
     'scripts'
 )
 

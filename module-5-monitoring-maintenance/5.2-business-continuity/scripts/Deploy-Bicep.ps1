@@ -671,3 +671,5 @@ if ($script:deployFailures -gt 0) {
 
 Write-Host "  Deployment Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+Exit-Lab -FailureCount 0
