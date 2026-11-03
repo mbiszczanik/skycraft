@@ -9,6 +9,27 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.3](https://github.com/mbiszczanik/skycraft/compare/v0.19.2...v0.19.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* **cleanup:** remove diagnostic settings before resource groups ([#471](https://github.com/mbiszczanik/skycraft/issues/471)) ([1934ab6](https://github.com/mbiszczanik/skycraft/commit/1934ab623219242a795becd676116db4484b7ead))
+* **images:** mask identifying data in screenshots and drop unused ones ([#389](https://github.com/mbiszczanik/skycraft/issues/389)) ([5673d7f](https://github.com/mbiszczanik/skycraft/commit/5673d7fd381e075434701d27b01d5c8feb5037bb))
+* **lab-1.1:** print generated passwords only for created users ([#470](https://github.com/mbiszczanik/skycraft/issues/470)) ([622b459](https://github.com/mbiszczanik/skycraft/commit/622b4592ff3094a46cfc58bbf96820ef2e4f60aa))
+* **lab-3.4:** add a plan SKU parameter and stop on a throttled plan create ([#439](https://github.com/mbiszczanik/skycraft/issues/439)) ([#490](https://github.com/mbiszczanik/skycraft/issues/490)) ([21a7e3e](https://github.com/mbiszczanik/skycraft/commit/21a7e3e86f8453beec861c622412ad3de4622a97))
+* **lab-3.4:** read the nested preflight error so the plan SKU quota hint prints ([#497](https://github.com/mbiszczanik/skycraft/issues/497)) ([#498](https://github.com/mbiszczanik/skycraft/issues/498)) ([c7c292a](https://github.com/mbiszczanik/skycraft/commit/c7c292af5f6a2f754f10ede3edadf933604bec62))
+* **labs:** end the Module 4 and 5 Deploy and Remove scripts through Exit-Lab ([#257](https://github.com/mbiszczanik/skycraft/issues/257)) ([#494](https://github.com/mbiszczanik/skycraft/issues/494)) ([80e7875](https://github.com/mbiszczanik/skycraft/commit/80e78751e4d720f594354832beb16d7e82217429))
+
+
+### Documentation
+
+* drop assistant-specific names and paths from tracked files ([#466](https://github.com/mbiszczanik/skycraft/issues/466)) ([ed830e9](https://github.com/mbiszczanik/skycraft/commit/ed830e9148f621be9feb793477f5cd74ec42d3b3))
+* **lab-5.1:** drop the delete-and-re-create advice for an open heartbeat alert ([#476](https://github.com/mbiszczanik/skycraft/issues/476)) ([#500](https://github.com/mbiszczanik/skycraft/issues/500)) ([8daeb41](https://github.com/mbiszczanik/skycraft/commit/8daeb41573c20b4fa7ce6ab04cbca71b61c59f3e))
+* **lab-5.1:** say Lab 1.3's lock refuses the delete of the heartbeat alert rule ([#476](https://github.com/mbiszczanik/skycraft/issues/476)) ([#496](https://github.com/mbiszczanik/skycraft/issues/496)) ([a8ccd3f](https://github.com/mbiszczanik/skycraft/commit/a8ccd3f2785b5503084c22245bfadf645de22ec0))
+* **lab-5.2:** name where the Portal, script and Bicep paths differ ([#484](https://github.com/mbiszczanik/skycraft/issues/484)) ([b2a6a8c](https://github.com/mbiszczanik/skycraft/commit/b2a6a8c8945f795cbbc6ad5d3d89cb05e1983213))
+* **lab-5.3:** say Lab 1.3's lock refuses the flow log delete and how to recover ([#492](https://github.com/mbiszczanik/skycraft/issues/492)) ([#499](https://github.com/mbiszczanik/skycraft/issues/499)) ([1eca214](https://github.com/mbiszczanik/skycraft/commit/1eca214e985ea23b9321187ce3d7555110eb6990))
+
 ## [0.19.2](https://github.com/mbiszczanik/skycraft/compare/v0.19.1...v0.19.2) (2026-11-03)
 
 
