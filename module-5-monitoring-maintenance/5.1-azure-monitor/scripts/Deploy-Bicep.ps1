@@ -187,6 +187,16 @@ else {
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             $deployment = New-AzSubscriptionDeployment @deployParams
+            # The cmdlet can also return a Failed deployment without throwing (#473).
+            if ($deployment.ProvisioningState -eq 'Failed' -and $attempt -lt $maxAttempts) {
+                $failedMsg = @(Get-AzDeploymentOperation -DeploymentName $deployParams.Name -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.StatusMessage } | ForEach-Object { "$_" }) -join ' '
+                if ($failedMsg -match 'InvalidOutputTable|not available for destination|InvalidPayload') {
+                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
+                    Start-Sleep -Seconds 45
+                    continue
+                }
+            }
             break
         }
         catch {
@@ -250,8 +260,8 @@ if ($WhatIf) {
     }
 
     Write-Host "`n  Next Steps:" -ForegroundColor Cyan
-    Write-Host "    1. Heartbeat and Perf rows reach the workspace up to about 40 minutes after the agent install, often much sooner on a workspace that already has a Heartbeat table (a new workspace has none until then)" -ForegroundColor Gray
-    Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment (it waits up to 45 minutes after the agent install for the first Heartbeat row)" -ForegroundColor Gray
+    Write-Host "    1. Heartbeat and Perf rows reach the workspace up to about 90 minutes after the agent install, often much sooner on a workspace that already has a Heartbeat table (a new workspace has none until then)" -ForegroundColor Gray
+    Write-Host "    2. Run .\Test-Lab.ps1 to validate deployment (it waits up to 90 minutes after the agent install for the first Heartbeat row)" -ForegroundColor Gray
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

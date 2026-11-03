@@ -9,6 +9,21 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2](https://github.com/mbiszczanik/skycraft/compare/v0.19.1...v0.19.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **lab-5.1:** allow 90 minutes for the first Heartbeat row, name VMs with the agent but no rule, document the open-alert and lock traps ([#483](https://github.com/mbiszczanik/skycraft/issues/483)) ([26bde73](https://github.com/mbiszczanik/skycraft/commit/26bde73606b554bbc4fb91c9e199703d43cfe51d))
+* **labs-5.1-5.2:** retry a Failed DCR deployment and a backup job the vault does not return yet ([#482](https://github.com/mbiszczanik/skycraft/issues/482)) ([e76e430](https://github.com/mbiszczanik/skycraft/commit/e76e430745662c7c8946826a1fe366ff6be318a8))
+* **labs:** count every failed setup step so Labs 1.1, 1.2, 2.1 and 2.3 do not exit 0 after an [ERROR] ([#489](https://github.com/mbiszczanik/skycraft/issues/489)) ([399dbae](https://github.com/mbiszczanik/skycraft/commit/399dbae252a91bea9a56722f8e9d0dc88796d1fe))
+
+
+### Documentation
+
+* **lab-1.3:** say the resource group delete dialog has no lock override and the container one does ([#491](https://github.com/mbiszczanik/skycraft/issues/491)) ([90f6d43](https://github.com/mbiszczanik/skycraft/commit/90f6d4388bd553b60f4f520f120bb80d3437ec24))
+* **labs:** match Labs 5.1 and 5.3 guides to today's Portal wording ([#481](https://github.com/mbiszczanik/skycraft/issues/481)) ([90a6600](https://github.com/mbiszczanik/skycraft/commit/90a66001dffa3f9339b1f9067788f06c3c0d5e01))
+
 ## [0.19.1](https://github.com/mbiszczanik/skycraft/compare/v0.19.0...v0.19.1) (2026-11-02)
 
 

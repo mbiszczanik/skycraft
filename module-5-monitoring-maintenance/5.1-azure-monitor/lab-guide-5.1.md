@@ -211,7 +211,7 @@ Heartbeat
 
 **Expected Result**: One row per connected VM, such as `dev-skycraft-swc-auth-vm`, with a `LastHeartbeat` from the last few minutes. No rows: see Troubleshooting, Issue 1.
 
-> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent can take up to about 40 minutes to reach the workspace, and often arrives much sooner on a workspace that already has a `Heartbeat` table, a recovered one for example (3 to 13 minutes were measured there: 3.2 on a Portal-built setup, 13.0 after the Bicep deploy, and the first rows after a new rule came 4 to 5 minutes later). A recovered workspace also answers at once with the old rows of the earlier run, so look for a `LastHeartbeat` from the last few minutes. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 45 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming the agent as installed but not sending.
+> **Wait for the first row**: the first `Heartbeat` row of a newly installed agent can take up to about 90 minutes to reach the workspace (85 minutes were measured once), and often arrives much sooner on a workspace that already has a `Heartbeat` table, a recovered one for example (3 to 13 minutes were measured there: 3.2 on a Portal-built setup, 13.0 after the Bicep deploy, and the first rows after a new rule came 4 to 5 minutes later). While you wait, check that the VM runs, that the agent shows **Provisioning succeeded** under **Extensions + applications**, and that the data collection rule lists the VM under **Resources**. A recovered workspace also answers at once with the old rows of the earlier run, so look for a `LastHeartbeat` from the last few minutes. A **new** workspace has no `Heartbeat` table until that first row arrives; until then the query fails with a `BadRequest` or "Failed to resolve table" error. Both mean "not ready yet", not a broken setup: run the query again every few minutes. `scripts/Test-Lab.ps1` waits for this itself, once a minute with progress lines: up to 90 minutes after the agent was installed (`-AgentInstallWaitMinutes`, read from the extension's last successful write in the activity log), and up to 45 minutes for the table of a new workspace (`-NewWorkspaceWaitMinutes`). An agent installed longer ago than that with still no row fails at once, naming its age and the cause: installed but not sending. When a VM carries the agent but the rule is not associated with it, the failure line names that VM.
 
 ### Step 5.1.4: Query Performance Data
 
@@ -455,6 +455,8 @@ New-AzScheduledQueryRule -Name skycraft-heartbeat-alert -ResourceGroupName platf
 
 **Expected Result**: `skycraft-heartbeat-alert` is listed under **Monitor** → **Alerts** → **Alert rules** with signal type **Log search**, enabled, severity 1, in Sweden Central, with `skycraft-ops-ag` as its action. While the VM runs, the rule does not fire. Stop (deallocate) the VM to see it fire: within about 10 minutes **Monitor** → **Alerts** lists `skycraft-heartbeat-alert` as **Fired**, and `skycraft-ops-ag` sends you an e-mail. Start the VM again before you run `scripts/Test-Lab.ps1`, which waits for a fresh `Heartbeat`; the alert resolves on its own.
 
+> **An open alert hides the test**: while an earlier instance of `skycraft-heartbeat-alert` is still open, the rule creates no new one. The rule can fire in the first minutes after the deployment, before the first `Heartbeat` row, and that instance has stayed **Fired** for hours while `Heartbeat` flowed. Before you stop the VM, open **Monitor** → **Alerts** and read the **Monitor condition** of `skycraft-heartbeat-alert`. If it is **Fired**, wait until it reads **Resolved**, or delete the rule and create it again (Step 5.1.8), which starts without an open instance. With Lab 1.3's delete lock on `platform-skycraft-swc-rg`, the delete fails with `ScopeLocked`: remove the lock first and put it back afterwards (Lab 1.3, Troubleshooting Issue 3).
+
 **Preview - the AVM module calls the Bicep path makes** (`bicep/main.bicep`; versions pinned in `docs/bicep-standards.md` §4.4):
 
 ```bicep
@@ -512,6 +514,8 @@ The script removes the alert rules, the data collection rule and its association
 - The private dashboard `SkyCraft-Ops` (Step 5.1.6) stays: delete it under **Dashboard**.
 - The workspace is soft-deleted, and its name stays reserved for 14 days. Recover it or purge it before you build the lab again in the Portal (Step 5.1.1 and Troubleshooting, Issue 6).
 
+Lab 1.3's delete lock on the platform resource group refuses a manual delete of the alert rules, the data collection rule or the action group (`ScopeLocked`). `Remove-LabResource.ps1` lifts the lock for its deletes and puts it back with the same name and level.
+
 ---
 
 ## ✅ Lab Checklist
@@ -538,7 +542,7 @@ The script removes the alert rules, the data collection rule and its association
 
 - Ensure the VM is **Running**.
 - Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
-- Wait for the agent's first data: the first `Heartbeat` row can take up to about 40 minutes after the install (often much sooner on a workspace that already has the table), and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 45 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
+- Wait for the agent's first data: the first `Heartbeat` row can take up to about 90 minutes after the install (often much sooner on a workspace that already has the table), and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 90 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
 - `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to the workspace (destination type **Log Analytics Workspaces**). A rule made by VM insights sends `InsightsMetrics` instead.
 

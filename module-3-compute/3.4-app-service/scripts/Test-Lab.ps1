@@ -105,7 +105,7 @@ Write-Host "1. Checking App Service Plan..." -ForegroundColor Yellow
 $asp = Get-AzAppServicePlan -ResourceGroupName $RgName -Name $AspName -ErrorAction SilentlyContinue
 
 if ($asp) {
-    Assert-Resource $AspName ($asp.Sku.Tier -eq "PremiumV4" -or $asp.Sku.Name -eq "P0v4") "Tier is PremiumV4 (P0v4)"
+    Assert-Resource $AspName ($asp.Sku.Name -in @("P0v4", "P0v3", "S1")) "SKU is $($asp.Sku.Name) (P0v4, or the fallback P0v3 or S1)"
     Assert-Resource $AspName ($asp.Kind -like "*linux*") "OS is Linux"
     Assert-Resource $AspName ($asp.Status -eq "Ready") "Status is Ready"
 } else {

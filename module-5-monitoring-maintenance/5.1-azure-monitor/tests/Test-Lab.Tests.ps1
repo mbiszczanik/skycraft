@@ -662,11 +662,22 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
     It 'fails, counted, when no SkyCraft VM carries a rule, and names the step' {
         $run = $script:NoRule
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2\) FAIL'
+        $run.Output | Should -Match 'Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs; dev-skycraft-swc-auth-vm, dev-skycraft-swc-world-vm, prod-skycraft-swc-auth-vm, prod-skycraft-swc-world-vm carries the agent but no association - Step 5\.1\.2\) FAIL'
         # Found, destination, Perf and Syslog read the rule; the agent and Heartbeat its VMs.
-        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(no VM carries the lab's rule - Step 5\.1\.2\) FAIL"
-        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\. \(no VM carries the lab's rule - Step 5\.1\.2\) FAIL"
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(no VM carries the lab's rule; dev-skycraft-swc-auth-vm, .* carries the agent but no association - Step 5\.1\.2\) FAIL"
+        $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\. \(no VM carries the lab's rule; dev-skycraft-swc-auth-vm, .* carries the agent but no association - Step 5\.1\.2\) FAIL"
         $run.Output | Should -Match 'Failed: 6\b'
+    }
+
+    It 'leaves the VM names out when no VM carries the agent either' {
+        $run = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'none' -Agent 'missing'
+        $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(no VM carries the lab's rule - Step 5\.1\.2\) FAIL"
+        $run.Output | Should -Not -Match 'carries the agent but no association'
+    }
+
+    It 'waits up to 90 minutes after the install by default, as the first row can take that long (#475)' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text | Should -Match '\[int\]\$AgentInstallWaitMinutes = 90'
     }
 
     It 'counts an association lookup that fails everywhere as a FAIL with the error, and still reaches the summary' {
@@ -680,7 +691,7 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
     It 'says no rule is associated, and names the group it could not read, when the readable VMs carry none' {
         $run = $script:NoRulePartial
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
+        $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs; dev-skycraft-swc-auth-vm, dev-skycraft-swc-world-vm carries the agent but no association - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
         $run.Output | Should -Match 'Failed: 6\b'
     }
 }

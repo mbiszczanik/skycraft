@@ -3,7 +3,7 @@ SUMMARY: Lab 3.4 - App Service Orchestrator
 DESCRIPTION: Deploys the Linux App Service Plan (P0v4), the Node 22 LTS web app (startup command pm2 serve) with a staging slot and regional VNet integration, and the CPU autoscale setting for SkyCraft Lab 3.4 via Azure Verified Modules (autoscale via a local fallback module)
 EXAMPLE: .\scripts\Deploy-Bicep.ps1 -Environment dev
 AUTHOR/S: Marcin Biszczanik
-VERSION: 0.5.0
+VERSION: 0.6.0
 DEPLOYMENT: .\scripts\Deploy-Bicep.ps1
 ======================================================*/
 
@@ -45,6 +45,10 @@ param parSubnetName string = 'AppServiceSubnet'
 @maxLength(60)
 param parAppName string = '${parEnvironment}-skycraft-swc-app01'
 
+@description('App Service plan SKU. P0v3 and S1 are fallbacks for a subscription without P0v4 quota (both keep slots and autoscale)')
+@allowed(['P0v4', 'P0v3', 'S1'])
+param parPlanSkuName string = 'P0v4'
+
 /*******************
 *    Variables     *
 *******************/
@@ -75,7 +79,7 @@ resource resSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existi
 *     Modules      *
 *******************/
 
-// App Service Plan - Premium V4 P0v4, Linux, one instance
+// App Service Plan - Premium V4 P0v4 by default, Linux, one instance
 module modAppServicePlan 'br/public:avm/res/web/serverfarm:0.7.0' = {
   name: 'asp-deployment'
   scope: resRg
@@ -84,7 +88,7 @@ module modAppServicePlan 'br/public:avm/res/web/serverfarm:0.7.0' = {
     location: parLocation
     tags: varCommonTags
     kind: 'linux'
-    skuName: 'P0v4'
+    skuName: parPlanSkuName
     skuCapacity: 1 // AVM default is 3 (standards section 4.5)
     zoneRedundant: false // Lab-friction override (standards section 4.5): AVM defaults P-SKUs to zone-redundant
   }
