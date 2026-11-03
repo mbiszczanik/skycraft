@@ -33,6 +33,21 @@ Refs #
 
 Live-verified:
 
+## Acceptance evidence
+
+<!-- Required for the same lab-content paths as live verification. See docs/lab-acceptance.md.
+     Identify each affected lab in the entries. Use not-applicable: <specific reason>
+     for unrelated checks or blocked: <missing precondition>; tracked in #N.
+     A complete record is not proof of a passed check. -->
+
+Test-conditions: <lifecycle, offer, region, permissions, existing resources>
+Acceptance-head: <tested commit>
+Scripted-check: <date, command/run ID, expected/observed counts, exit code>
+Portal-check: <date, changed step IDs, expected/observed result, evidence link>
+Negative-check: <date, failure input, expected/observed failure, command>
+Missing-result-check: <date, empty/null/zero-work input, expected/observed failure, command>
+Fallback-deploy: <date, variant, create command/run ID, observed resource, exit code>
+
 ## Offline checks
 
 <!-- The full test set CI runs (./tests and every module-*/**/tests suite), never a subset,
