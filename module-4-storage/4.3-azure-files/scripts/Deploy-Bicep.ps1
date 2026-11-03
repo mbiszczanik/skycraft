@@ -104,3 +104,5 @@ catch {
     Write-Host "  -> Cause: $($_.Exception.Message)" -ForegroundColor Red
     Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0

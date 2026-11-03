@@ -587,7 +587,7 @@ PowerShell may print a preview warning for `-ProbeThreshold`. The block uses thi
 
 ### Step 2.3.11: Create Load Balancing Rule
 
-1. In the left menu, under **Settings**, click **Load balancing rules**.
+1. In the left menu, under **Settings** (expand it if it is collapsed), click **Load balancing rules**.
 2. Click **+ Add**.
 3. In the **Add load balancing rule** pane, fill in:
 
@@ -636,7 +636,7 @@ Create health probe and rule for authentication servers:
 
 **Health Probe**:
 
-1. Under **Settings**, click **Health probes** → **+ Add**.
+1. Under **Settings** (expand it if it is collapsed), click **Health probes** → **+ Add**.
 2. Fill in:
 
 | Field        | Value                            |
@@ -719,7 +719,7 @@ The load balancing rules do not give the backend VMs outbound access, and the VN
 | **Backend Pool Configuration** | **NIC**                           |
 
 14. Click **Save** (leave the pool empty: Lab 3.2 adds both VMs).
-15. Under **Settings**, click **Outbound rules**.
+15. Under **Settings** (expand it if it is collapsed), click **Outbound rules**.
 16. Click **+ Add**.
 17. Fill in:
 
@@ -870,7 +870,7 @@ $lb | Set-AzLoadBalancer | Out-Null
 
 ### Step 2.3.15: Configure Production Health Probes
 
-1. In `prod-skycraft-swc-lb`, under **Settings**, click **Health probes** → **+ Add**.
+1. In `prod-skycraft-swc-lb`, under **Settings** (expand it if it is collapsed), click **Health probes** → **+ Add**.
 
 **Probe 1** (World):
 
@@ -915,7 +915,7 @@ $lb | Set-AzLoadBalancer | Out-Null
 
 ### Step 2.3.16: Configure Production Load Balancing Rules
 
-1. Under **Settings**, click **Load balancing rules** → **+ Add**.
+1. Under **Settings** (expand it if it is collapsed), click **Load balancing rules** → **+ Add**.
 
 **Rule 1** (World):
 
@@ -981,7 +981,7 @@ $lb | Set-AzLoadBalancer | Out-Null
 
 #### Production Outbound Rule
 
-10. Under **Settings**, click **Outbound rules** → **+ Add**.
+10. Under **Settings** (expand it if it is collapsed), click **Outbound rules** → **+ Add**.
 11. Fill in:
 
 | Field                                                | Value                                       |
@@ -1094,7 +1094,7 @@ nslookup game.skycraft.example.com
    - Backend pools: 3 (world, auth, outbound)
    - Load balancing rules: 2 (port 8085, port 3724)
    - Health probes: 2 (world, auth)
-   - Outbound rules: 1 (`dev-skycraft-swc-lb-outbound` for the outbound pool; listed under **Settings** → **Outbound rules**)
+   - Outbound rules: 1 (`dev-skycraft-swc-lb-outbound` for the outbound pool; listed under **Settings** (expand it if it is collapsed) → **Outbound rules**)
 
 **Prod Load Balancer**:
 
@@ -1540,7 +1540,7 @@ Test your understanding with these questions:
 
 **Solution**:
 
-- Open the load balancing rule (**Settings** → **Load balancing rules**) and check that **Outbound source network address translation (SNAT)** is the default **(Recommended) Use outbound rules to provide backend pool members access to the internet.**
+- Open the load balancing rule (**Settings** (expand it if it is collapsed) → **Load balancing rules**) and check that **Outbound source network address translation (SNAT)** is the default **(Recommended) Use outbound rules to provide backend pool members access to the internet.**
 - Check that `<environment>-skycraft-swc-lb-be-outbound` exists and that **Outbound rules** lists `<environment>-skycraft-swc-lb-outbound` for it (Steps 2.3.12 and 2.3.16)
 
 ---

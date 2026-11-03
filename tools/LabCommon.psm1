@@ -1074,6 +1074,79 @@ function Test-LabGlobalName {
     return $true
 }
 
+function Get-LabThrottleMessage {
+    <#
+    .SYNOPSIS
+        Returns the status message of the first deployment operation that ARM refused with a
+        throttling error (HTTP 429), or nothing.
+
+    .DESCRIPTION
+        ARM retries a throttled create for hours before it fails the deployment, so a script that
+        waits for the deployment alone hangs (#439). Deploy scripts run the deployment as a job and
+        pass the operations of the watched nested deployment here.
+
+    .PARAMETER Operation
+        Output of Get-AzResourceGroupDeploymentOperation.
+
+    .EXAMPLE
+        Get-LabThrottleMessage -Operation (Get-AzResourceGroupDeploymentOperation -ResourceGroupName $rg -DeploymentName 'asp-deployment')
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #439
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]]$Operation
+    )
+
+    foreach ($op in @($Operation)) {
+        if ($null -eq $op -or $null -eq $op.StatusMessage) { continue }
+        $text = if ($op.StatusMessage -is [string]) { $op.StatusMessage } else { $op.StatusMessage | ConvertTo-Json -Depth 8 -Compress }
+        if ($text -match 'throttled|TooManyRequests|Code: 429|ExtendedCode: 51025') { return $text }
+    }
+}
+
+function Get-LabDeploymentErrorText {
+    <#
+    .SYNOPSIS
+        Flattens a deployment error and every error nested in its Details into one text.
+
+    .DESCRIPTION
+        A preflight refusal names only the failing provider ("See inner errors for details"); the
+        reason, such as SubscriptionIsOverQuotaForSku, is two levels down (#497). Deploy scripts
+        pass the output of Test-AzSubscriptionDeployment here and match on the text.
+
+    .PARAMETER ErrorDetail
+        Error objects with Code, Message and Details, as Test-AzSubscriptionDeployment returns.
+
+    .EXAMPLE
+        Get-LabDeploymentErrorText -ErrorDetail (Test-AzSubscriptionDeployment @params)
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #497
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]]$ErrorDetail
+    )
+
+    $lines = foreach ($e in @($ErrorDetail)) {
+        if ($null -eq $e) { continue }
+        "$($e.Code) $($e.Message)".Trim()
+        $nested = Get-LabDeploymentErrorText -ErrorDetail @($e.Details)
+        if ($nested) { $nested }
+    }
+    @($lines) -join "`n"
+}
+
 # The resources of one type in a subscription or group, with the creation time ARM keeps for them.
 function Get-LabArmResourceCreated {
     [CmdletBinding()]
@@ -1496,4 +1569,4 @@ function Remove-LabResourceDiagnosticSetting {
     return $failures
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
