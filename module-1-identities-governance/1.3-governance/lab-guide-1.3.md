@@ -613,7 +613,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 ![Test the Lock](./images/step-1.3.12.png)
 
-**Note**: The pane opened by **Delete resource group** shows no lock warning, and the **Delete** button stays greyed out until the name is typed and the field loses focus. The refusal comes only after you confirm. From the CLI or a template, Azure Resource Manager refuses the same delete with the error code `ScopeLocked`.
+**Note**: The pane opened by **Delete resource group** shows no lock warning, and the **Delete** button stays greyed out until the name is typed and the field loses focus. The refusal comes only after you confirm. The **Delete confirmation** dialog of a resource group has no checkbox: only **Delete** and **Go back**. (Deleting a blob container under a lock shows **Attempt override of delete lock** instead; leave it unticked, because ticking it deletes the resource permanently.) From the CLI or a template, Azure Resource Manager refuses the same delete with the error code `ScopeLocked`.
 
 **Key Learning**: Even with Owner role, you cannot delete a locked resource until the lock is removed.
 
@@ -986,6 +986,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 **Solution**:
 
 - Check for resource locks: **Resource** → **Settings** (expand it if it is collapsed) → **Locks**
+- If the Portal's **Delete confirmation** offers **Attempt override of delete lock**, leave it unticked: ticking it deletes the resource permanently
 - Remove lock temporarily (document why)
 - Delete resource
 - Re-apply lock if needed
