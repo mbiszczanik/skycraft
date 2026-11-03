@@ -530,3 +530,5 @@ if ($script:cleanupFailures -gt 0) {
 }
 Write-Host "  Cleanup Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+Exit-Lab -FailureCount 0
