@@ -133,6 +133,8 @@ $backupManagementServiceAppId = '262044b1-e2ce-469f-a196-69ab7ada62d3'
 $keyVaultAdministratorRoleId  = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 # Take Snapshot took about 8.5 minutes live on 2026-10-16.
 $snapshotWatchMinutes = 20
+# A job just started may not be readable by id for a moment (#468).
+$jobLookupGraceSeconds = 120
 $deploymentName = "lab52-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
 # Counts lab resources that were meant to be created but were not. A step that only warns
@@ -576,8 +578,17 @@ if ($WhatIf) {
                         $snapshotStatus = ''
                         $detail = $null
                         Write-Host "  Watching the Take Snapshot phase of job $jobId (up to $snapshotWatchMinutes minutes)..." -ForegroundColor Gray
+                        $lostSince = $null
                         while ($true) {
                             $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            if (-not $job) {
+                                if (-not $lostSince) { $lostSince = Get-Date }
+                                if (((Get-Date) - $lostSince).TotalSeconds -ge $jobLookupGraceSeconds) { break }
+                                Write-Host "  The vault does not return job $jobId yet; retrying..." -ForegroundColor DarkYellow
+                                Start-Sleep -Seconds 10
+                                continue
+                            }
+                            $lostSince = $null
                             $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
                             $snapshotStatus = "$((@($detail.SubTasks) | Where-Object { $_.Name -eq 'Take Snapshot' } | Select-Object -First 1).Status)"
                             if (-not $job -or $job.Status -ne 'InProgress' -or $snapshotStatus -in @('Completed', 'Failed')) { break }
@@ -588,7 +599,7 @@ if ($WhatIf) {
 
                         if (-not $job) {
                             $script:deployFailures++
-                            Write-Host "  [ERROR] Lost track of backup job $jobId - check Backup jobs in the vault" -ForegroundColor Red
+                            Write-Host "  [ERROR] Get-AzRecoveryServicesBackupJob returned nothing for job $jobId for $jobLookupGraceSeconds seconds - check Backup jobs in the vault" -ForegroundColor Red
                         } elseif ($job.Status -eq 'Failed' -or $snapshotStatus -eq 'Failed') {
                             $script:deployFailures++
                             Write-Host "  [ERROR] Backup job for $vmName failed (Take Snapshot: $snapshotLabel):" -ForegroundColor Red
