@@ -92,6 +92,10 @@ Describe 'Lab 3.4 Deploy-Bicep.ps1' {
         $script:Deploy | Should -Match '\$PlanWaitMinutes'
     }
 
+    It 'names the way out when the plan SKU has no quota' {
+        $script:Deploy | Should -Match '(?s)catch \{.*?additional quota.*?-PlanSku P0v3 or -PlanSku S1.*?Exit-Lab -FailureCount 1'
+    }
+
     It 'exits 1 after stopping' {
         $script:Deploy | Should -Match '(?s)Stop-AzSubscriptionDeployment.*?Exit-Lab -FailureCount 1'
     }

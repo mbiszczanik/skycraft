@@ -175,6 +175,10 @@ try {
 catch {
     Write-Host "Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    # No quota for the SKU: say what to do instead of leaving Azure's message alone (#439).
+    if ($_.Exception.Message -match 'additional quota|SkuNotAvailable|quota') {
+        Write-Host "  The subscription has no quota for plan SKU $PlanSku in $Location. Run again with another SKU (-PlanSku P0v3 or -PlanSku S1), ask Azure for quota (Portal > Quotas), or use another subscription." -ForegroundColor Yellow
+    }
     Exit-Lab -FailureCount 1
 }
 Exit-Lab -FailureCount 0
