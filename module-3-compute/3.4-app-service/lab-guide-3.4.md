@@ -78,6 +78,8 @@ You can build this lab in the Portal by following this guide, or with Bicep. Bot
 | Portal (this guide) | Everything in the steps below |
 | `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The plan (Step 3.4.1); the web app with its runtime, startup command, HTTPS only and TLS 1.2 (Steps 3.4.2, 3.4.4 and 3.4.11); the `staging` slot with the same settings (Step 3.4.5); the autoscale setting (Steps 3.4.8-3.4.9); the VNet integration of the app and the slot (Step 3.4.10). It deploys no dashboard. |
 
+`Deploy-Bicep.ps1` creates the plan on P0V4. Without P0V4 quota, run it with `-PlanSku P0v3` or `-PlanSku S1`; `Test-Lab.ps1` accepts all three. On a subscription that throttles plan creation (see the Note in Step 3.4.1) the script stops after at most 15 minutes, stops the deployment and says so, instead of waiting for Azure to give up.
+
 The Az PowerShell blocks in Steps 3.4.4, 3.4.6 and 3.4.7 deploy the dashboard and swap the slots, whichever path built the resources; after `Deploy-Bicep.ps1`, run them to reach the end of Section 4.
 
 Steps without an Az PowerShell block in this guide: 3.4.1, 3.4.2, 3.4.5, 3.4.8-3.4.11, and the startup command in Step 3.4.4. Their scripted path is the Bicep. Steps without a Bicep counterpart: 3.4.3 (a file on your computer), 3.4.4, 3.4.6 and 3.4.7 (deploying content and swapping are operations, not resources), 3.4.12 (reference only) and 3.4.13 (automatic backups need no configuration).
@@ -138,6 +140,8 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 **Note**: The form opens with **Region** = West US 3 and **Pricing plan** = Premium V3 P1V3 (seen 2026-10-15). Change both. Lab 1.3's `Restrict-Azure-Regions` refuses West US 3, and P1V3 is a larger size that costs more than P0V4. If **Premium V4 P0V4** is not in the **Pricing plan** list, click **Explore pricing plans**, select **P0V4** under **Premium V4**, and click **Select**.
 
 **Note**: Leave **Zone redundancy** at **Disabled**. Enabled, the plan runs at least two instances, which doubles its cost.
+
+**Note**: A Free Trial subscription may refuse every App Service plan create, whatever the pricing plan. On 2026-10-27 a Bicep deploy of this lab on a Free Trial in Sweden Central waited 3.5 hours and then failed with `App Service Plan Create operation is throttled for subscription <subscription-id>. (Code: 429, ExtendedCode: 51025)`. If **Create** does not finish within a few minutes, or the deployment says the create is throttled, cancel it and do this lab on a Pay-As-You-Go or Visual Studio subscription. If the error is a missing quota for **P0V4** instead, choose **P0V3** or **S1** in **Pricing plan**: both have deployment slots and autoscale, so the rest of the lab is unchanged. Use only a subscription you may spend on: the plan bills by the hour from the moment it exists.
 
 > [!NOTE]
 > Ensure you select **Linux**. While SkyCraft game servers run on Linux, the dashboard could run on Windows, but we'll stick to Linux for consistency and cost.
