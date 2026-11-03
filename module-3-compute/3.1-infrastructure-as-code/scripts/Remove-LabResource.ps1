@@ -36,7 +36,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources
+#Requires -Modules Az.Accounts, Az.Resources, Az.Monitor
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -165,6 +165,13 @@ if (-not $rgLookup.Failed) {
         if ($PSCmdlet.ShouldProcess($rgName, 'Remove resource group')) {
             Write-Host "Deleting '$rgName'..." -ForegroundColor Yellow
             try {
+                $ids = @(Get-LabDiagnosticResourceId -ResourceGroupName $rgName)
+                $diagnosticFailures = Remove-LabResourceDiagnosticSetting -ResourceId $ids -Confirm:$false
+                $script:cleanupFailures += $diagnosticFailures
+                if ($diagnosticFailures -gt 0) {
+                    Write-Host "[ERROR] Keeping '$rgName' because diagnostic cleanup failed." -ForegroundColor Red
+                    continue
+                }
                 Remove-AzResourceGroup -Name $rgName -Force -ErrorAction Stop | Out-Null
                 Write-Host "[SUCCESS] Deleted '$rgName'." -ForegroundColor Green
             }

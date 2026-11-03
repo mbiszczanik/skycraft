@@ -414,7 +414,8 @@ Describe 'Isolation - the suite cannot reach Azure' {
             & $script:RemoveCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest -Confirm:$false `
                 -LogDirectory $script:OfflinePaths.LogDirectory -ResultsPath $script:OfflinePaths.ResultsPath `
                 -ContextProbe $script:GoodContext -ToolingFloorRunner { @() } -TeardownRunner { 0 } `
-                -BackupResourceGroupProbe { @() } -ResourceGroupProbe { 'still here' } -VaultProbe { $null }
+                -BackupResourceGroupProbe { @() } -ResourceGroupProbe { 'still here' } -VaultProbe { $null } `
+                -DiagnosticTargetProbe { @() } -DiagnosticSettingProbe { @() } -DiagnosticSettingRemover { 0 }
         }
 
         $hits | Should -Contain 'Remove-LabCycle.ps1:ResourceGroupRemover'
@@ -2041,6 +2042,9 @@ Describe 'Teardown - order, failure handling and -WhatIf' {
 '@
         # A clean subscription, as the probes see it after a successful teardown.
         $script:CleanProbes = @{
+            DiagnosticTargetProbe    = { @() }
+            DiagnosticSettingProbe   = { @() }
+            DiagnosticSettingRemover = { 0 }
             ContextProbe             = $script:GoodContext
             ToolingFloorRunner       = { @() }
             BackupResourceGroupProbe = { @() }
@@ -2203,6 +2207,9 @@ Describe 'Teardown - the residue sweep' {
 }
 '@
         $script:SweepBase = @{
+            DiagnosticTargetProbe    = { @() }
+            DiagnosticSettingProbe   = { @() }
+            DiagnosticSettingRemover = { 0 }
             ContextProbe       = $script:GoodContext
             ToolingFloorRunner = { @() }
             TeardownRunner     = { 0 }
@@ -2373,6 +2380,9 @@ Describe 'Teardown - a check that fails is not "gone" (#290)' {
 }
 '@
         $script:CheckBase = @{
+            DiagnosticTargetProbe    = { @() }
+            DiagnosticSettingProbe   = { @() }
+            DiagnosticSettingRemover = { 0 }
             ContextProbe             = $script:GoodContext
             ToolingFloorRunner       = { @() }
             TeardownRunner           = { 0 }

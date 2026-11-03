@@ -73,7 +73,7 @@ Before starting, ensure you have:
 | `Microsoft.Graph.Identity.SignIns` | Lab 1.1 `New-LabUser.ps1` | Preinstalled |
 | `Az.Accounts`, `Az.Resources` | Lab 1.2 and Lab 1.3 scripts | Preinstalled |
 | `Az.Billing` | Lab 1.3 `Test-Lab.ps1` and `Remove-LabResource.ps1` | Preinstalled |
-| `Az.Monitor` | Lab 1.3 `Remove-LabResource.ps1` | Preinstalled |
+| `Az.Monitor` | Lab 1.2 and Lab 1.3 `Remove-LabResource.ps1` | Preinstalled |
 | `Az.PolicyInsights` | Lab 1.3 checklist (`Get-AzPolicyStateSummary`) | Preinstalled |
 
 On your own machine, install them for your account (no administrator rights needed). If PowerShell asks whether to trust the PSGallery repository, answer `Y`:
