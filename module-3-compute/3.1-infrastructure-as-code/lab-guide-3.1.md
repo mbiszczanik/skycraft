@@ -590,26 +590,42 @@ az bicep decompile --file template.json
 ```
 
 **Expected Output**: the command writes `template.bicep` and exits with code 1. After the
-best-effort warning it lists errors in the generated file, for example:
+best-effort warning it lists errors and warnings in the generated file. On `dev-skycraft-swc-rg`
+after Labs 1.2 to 2.3 and 4.1 to 4.4 (29 resources) a run printed 52 errors and 30 warnings; your
+counts depend on what is deployed. The errors look like this:
 
 ```text
 WARNING: Decompilation is a best-effort process, as there is no guaranteed mapping from ARM JSON to Bicep Template or Bicep Parameters.
-template.bicep(65,13) : Error BCP080: The expression is involved in a cycle ("networkSecurityGroups_auth_nsg_name_AllowBastionSSH" -> "networkSecurityGroups_auth_nsg_name_resource").
-template.bicep(350,16) : Error BCP079: This expression is referencing its own declaration, which is not allowed.
-template.bicep(492,5) : Error BCP062: The referenced declaration with name "loadBalancers_dev_skycraft_swc_lb_name_resource" is not valid.
+template.bicep(56,13) : Error BCP080: The expression is involved in a cycle ("networkSecurityGroups_dev_skycraft_swc_auth_nsg_name_Allow_SSH_From_Bastion" -> "networkSecurityGroups_dev_skycraft_swc_auth_nsg_name_resource").
+template.bicep(323,16) : Error BCP079: This expression is referencing its own declaration, which is not allowed.
+template.bicep(460,5) : Error BCP062: The referenced declaration with name "loadBalancers_dev_skycraft_swc_lb_name_resource" is not valid.
 ```
 
 The errors are expected, and the file is still written. The decompiler declares every subnet,
 security rule, peering and backend pool twice: as a resource of its own, and inside its parent
 with an `id:` line that points at that resource, so each refers to the other (`BCP080`, then
-`BCP062` for everything that references them). Lab 2.3's load balancer also refers to its own
-frontend, pools and probes by `id` (`BCP079`). Deleting the `id:` lines from the parent arrays
-(`securityRules`, `subnets`, `virtualNetworkPeerings`, `backendAddressPools`) clears the cycles of
-the network security groups and the virtual network, but not the load balancer's
-self-references. Do not try to make this file deployable: read it in Step 3.1.9, and Section 5
-writes clean modules instead.
+`BCP062` for everything that references them). It does the same with an interpolated id,
+`id: '${<resource>.id}/...'`, for the delegated subnet's delegation and for the load balancer's
+frontend, rules, probes and outbound rule (`BCP079`, and one more cycle on the virtual network).
+Deleting only the `id: <resource>.id` lines is not enough: `az bicep build` still reports errors.
 
-3. **Review generated Bicep file**:
+3. **Make the file compile** (optional, to see how a clean build looks): delete every line that
+   is only an `id:` pointing at a resource declared in the same file, in both forms, and compile
+   the result. The file is for reading, not for deploying:
+
+```powershell
+Get-Content template.bicep |
+  Where-Object { $_ -notmatch '^\s+id: (\w+\.id|''\$\{\w+\.id\}/.*'')\s*$' } |
+  Set-Content template.clean.bicep -Encoding utf8
+az bicep build --file template.clean.bicep --outfile template.clean.json
+```
+
+**Expected Output**: the first command removes 39 lines (26 of the first form, 13 of the second)
+and the build exits with code 0: 0 errors, 44 warnings (`BCP081`: the Bicep CLI has no type
+information for some resource types). Do not try to make this file deployable: read it in
+Step 3.1.9, and Section 5 writes clean modules instead.
+
+4. **Review generated Bicep file**:
 
 ```bash
 code template.bicep
