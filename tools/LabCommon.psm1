@@ -1527,7 +1527,8 @@ function Test-LabDiagnosticNotFound {
         $text += " $($exception.Message) $($exception.Body.Code) $($exception.Body.Error.Code) $($exception.ErrorCode)"
     }
     if ($text -match 'SubscriptionNotFound|subscription .{0,80}(could not be|was not) found') { return $false }
-    if ($text -match '\bResource(Group)?NotFound\b|invalid status code ''NotFound''|\b404 \(Not Found\)') { return $true }
+    # A read on a child of a deleted parent (blobServices of a deleted account) names the parent, not a 404.
+    if ($text -match '\bResource(Group)?NotFound\b|invalid status code ''NotFound''|\b404 \(Not Found\)|because the parent resource .{0,400} could not be found') { return $true }
     for ($exception = $ErrorRecord.Exception; $exception; $exception = $exception.InnerException) {
         foreach ($status in @($exception.Response.StatusCode, $exception.ResponseStatusCode, $exception.Status)) {
             if ("$status" -in @('404', 'NotFound')) { return $true }

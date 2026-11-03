@@ -45,6 +45,11 @@ Describe 'Shared diagnostic cleanup' {
             Remove-LabResourceDiagnosticSetting -ResourceId '/fixture' -Confirm:$false | Should -Be 0
             $script:Removed.Count | Should -Be 0
         }
+        It 'treats a read on a child of a deleted parent as no settings' {
+            $script:ReadError = "Failed to perform 'read' on resource(s) of type 'storageAccounts/blobServices', because the parent resource '/subscriptions/fixture/resourceGroups/fixture-rg/providers/Microsoft.Storage/storageAccounts/fixture' could not be found."
+            Remove-LabResourceDiagnosticSetting -ResourceId '/fixture/blobServices/default' -Confirm:$false | Should -Be 0
+            $script:Removed.Count | Should -Be 0
+        }
         It 'rejects a target returned from outside the requested resource group' {
             $script:Resources = @(@{ ResourceId = '/subscriptions/fixture/resourceGroups/other/providers/Microsoft.KeyVault/vaults/fixture'; ResourceType = 'Microsoft.KeyVault/vaults' })
             { Get-LabDiagnosticResourceId -ResourceGroupName 'fixture-rg' } | Should -Throw '*outside*'
