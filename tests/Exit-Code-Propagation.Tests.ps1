@@ -624,7 +624,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
         $result | Should -Be $expected
     }
 
-    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411, Import-LabModule (#375), Write-LabDeploymentOutput (#354), the name check of #438, the throttle reader of #439, the DNS link helpers of #444 and the lock helper of #372, and nothing else yet' {
+    It 'exports Exit-Lab, the role assignment helpers of #397 the budget helpers of #411, Import-LabModule (#375), Write-LabDeploymentOutput (#354), the name check of #438, the throttle reader of #439, the nested deployment error reader of #497, the DNS link helpers of #444 and the lock helper of #372, and nothing else yet' {
         # The helpers have their own suites, tests/LabCommon-RoleAssignment.Tests.ps1,
         # tests/LabCommon-Budget.Tests.ps1, tests/LabCommon-DeploymentOutput.Tests.ps1,
         # tests/LabCommon-GlobalName.Tests.ps1, tests/LabCommon-DnsLink.Tests.ps1 and
@@ -634,6 +634,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
             'Get-LabArmBudget'
             'Get-LabArmRoleAssignment'
             'Get-LabBuiltInRoleId'
+            'Get-LabDeploymentErrorText'
             'Get-LabDnsLink'
             'Get-LabGraphSignInHint'
             'Get-LabNameUnavailableReason'

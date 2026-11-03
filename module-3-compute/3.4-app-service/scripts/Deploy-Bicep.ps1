@@ -175,8 +175,20 @@ try {
 catch {
     Write-Host "Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    $errorText = $_.Exception.Message
+    # A preflight refusal names only the provider; the reason is in the nested details (#497).
+    if ($errorText -match 'preflight validation errors') {
+        try {
+            $nested = Get-LabDeploymentErrorText -ErrorDetail (Test-AzSubscriptionDeployment -Location $Location -TemplateFile $BicepFile -TemplateParameterObject $params -ErrorAction Stop)
+            if ($nested) {
+                Write-Host $nested -ForegroundColor Red
+                $errorText = "$errorText`n$nested"
+            }
+        }
+        catch { Write-Host "  [INFO] The nested error could not be read: $($_.Exception.Message)" -ForegroundColor Gray }
+    }
     # No quota for the SKU: say what to do instead of leaving Azure's message alone (#439).
-    if ($_.Exception.Message -match 'additional quota|SkuNotAvailable|quota') {
+    if ($errorText -match 'additional quota|SkuNotAvailable|quota') {
         Write-Host "  The subscription has no quota for plan SKU $PlanSku in $Location. Run again with another SKU (-PlanSku P0v3 or -PlanSku S1), ask Azure for quota (Portal > Quotas), or use another subscription." -ForegroundColor Yellow
     }
     Exit-Lab -FailureCount 1
