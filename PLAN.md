@@ -13,9 +13,13 @@ Ownership check before starting: worktree `fix/257-exit-lab-helper` is open and 
 
 ## Block 0, 2026-11-04: status sweep (no Azure)
 
-- [ ] Re-read all 27 issues and merged PRs #447 #448 #450 #459 #471 #455 #457 #478 #482 #489 #491 #494; mark each issue Fixed / Owed-live / Open-code.
-- [ ] Close issues whose evidence is already recorded (candidates: #357, #197, #372, #373, #370, #371, #398 Modules 4-5).
-- [ ] Add label `fixed-awaiting-verification` to issues that need only a live run.
+- [x] Re-read all 27 issues and merged PRs; status of each issue checked against `origin/main` on 2026-11-03.
+- [ ] Close #357 and #197 (code fixed on main, last issue comments stale; #197 still owes a Portal label check by the maintainer).
+- [ ] Close #398 only after R8 (count printed `[ERROR]` lines) and R9 (Az and Graph calls outside try/catch end through `Exit-Lab`) are confirmed in code; all 63 scripts already end through `Exit-Lab`.
+- [ ] Add label `fixed-awaiting-verification` to issues that need only a live run: #370, #373, #371 (after the 3.2 disk check), #340, #290, #238, #473, #408, #432.
+- [ ] Delete stale branch `origin/fix/257-exit-lab-helper` (78 files, 2026-10-21, superseded by #410, #423, #428, #494) only after the maintainer confirms.
+
+Test subscription for live runs: the maintainer's Visual Studio Enterprise MPN subscription, confirmed 2026-11-03 (id kept out of this file). Five subscriptions share that name in the tenant; before every live write, check the id with `az account show`.
 
 ## Block 1, 2026-11-05 to 06: offline fixes (CI only)
 
@@ -28,6 +32,9 @@ One PR. Evidence: green CI run id at head, including an `ubuntu-latest` Pester r
 - [ ] #393 redaction helper in `tools/LabCommon.psm1`, applied in 32 scripts
 - [ ] #346 lint: menu paths name their collapsed group
 - [ ] #452 remaining Module 1-3 pinned calls with `-ApiVersion`
+- [ ] #372 lock lift and restore (`Invoke-LabWithoutLock`) in the Remove-LabResource scripts of Labs 2.1, 2.2, 2.3, 3.1, 3.2, 3.3; Labs 4.1-5.3 already have it
+- [ ] #371 Lab 3.2 Test-Lab also reads disk encryption state
+- [ ] Run in parallel: prepare the Module 1 live run (read `param(` blocks and `tools/lab-cycle-manifest.psd1` entries for Labs 1.1-1.3) while these fixes are written
 - [ ] #380 Lab 1.2 matches only `malfurion.stormrage@<initial domain>`
 
 ## Block 2, 2026-11-07 to 08: Module 1 live run
