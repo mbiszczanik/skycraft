@@ -325,3 +325,5 @@ if ($failed -gt 0) {
 }
 
 Write-Host "Cleanup complete." -ForegroundColor Green
+
+Exit-Lab -FailureCount 0

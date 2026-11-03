@@ -628,7 +628,7 @@ Azure Storage automatically encrypts all data at rest using 256-bit AES encrypti
 1. In Azure Portal, search for **Storage accounts**
 2. Click the **Resources** tab
 3. Click **prodskycraftswcsa**
-4. Under **Security + networking**, select **Encryption**
+4. Under **Security + networking** (expand it if it is collapsed), select **Encryption**
 5. Verify:
    - Encryption type: **Microsoft-managed keys**
    - This is **always enabled** and cannot be disabled
@@ -657,7 +657,7 @@ This step is a look at the form only: the lab keeps Microsoft-managed keys, whic
 
 Stay on `prodskycraftswcsa`.
 
-1. Under **Settings**, select **Configuration**
+1. Under **Settings** (expand it if it is collapsed), select **Configuration**
 2. Verify:
    - Minimum TLS version: **Version 1.2**
    - Secure transfer required: **Enabled**
@@ -689,7 +689,7 @@ This prevents accidental exposure of sensitive data through misconfigured contai
 1. In Azure Portal, search for **Storage accounts**
 2. Click the **Resources** tab
 3. Click **prodskycraftswcsa**
-4. Under **Security + networking**, select **Access keys**
+4. Under **Security + networking** (expand it if it is collapsed), select **Access keys**
 5. Under **key1**, click **Show** next to _Key_
 
 **Note**: Each key has its own **Show** buttons, one for the key and one for its connection string. A key shown on screen is a password to the whole account: do not put it in a screenshot or an issue. The page also offers **Set rotation reminder**, which records a reminder interval on the account; this lab rotates by hand in Step 4.1.13 and sets no reminder.
@@ -714,7 +714,7 @@ Practice the dual-key rotation ceremony. In production, you would coordinate thi
 
 #### Option 1: Azure Portal (GUI)
 
-1. Under **Security + networking**, select **Access keys**
+1. Under **Security + networking** (expand it if it is collapsed), select **Access keys**
 2. Note the date that key1's _Last rotated_ shows
 3. Next to key1, click **Rotate key**
 4. In the confirmation dialog, click **Yes**
@@ -894,7 +894,7 @@ While Lab 1.3's delete locks (`lock-no-delete-platform`, `lock-no-delete-prod`) 
 
 **Solution**:
 
-- Check network rules: under **Security + networking**, select **Networking**
+- Check network rules: under **Security + networking** (expand it if it is collapsed), select **Networking**
 - Ensure VNet is allowed if using private endpoints
 - Verify firewall isn't blocking port 443 (HTTPS)
 
@@ -939,7 +939,7 @@ Update-AzTag -ResourceId $account.Id -Operation Merge -Tag @{
 
 **Cause**: **Make read access to data available in the event of regional unavailability** was checked under **Redundancy** on the **Basics** tab.
 
-**Solution**: Under **Data management**, select **Redundancy**, set **Redundancy** to **Geo-redundant storage (GRS)** without read access, and click **Save**. With Az PowerShell: `Set-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa -SkuName Standard_GRS`.
+**Solution**: Under **Data management** (expand it if it is collapsed), select **Redundancy**, set **Redundancy** to **Geo-redundant storage (GRS)** without read access, and click **Save**. With Az PowerShell: `Set-AzStorageAccount -ResourceGroupName prod-skycraft-swc-rg -Name prodskycraftswcsa -SkuName Standard_GRS`.
 
 ### Issue 9: "Resources must be deployed to Sweden Central or North Europe regions only"
 

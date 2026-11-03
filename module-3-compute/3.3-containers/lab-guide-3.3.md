@@ -203,7 +203,7 @@ az acr build --registry [your-acr-name] --image skycraft-auth:v1 --output json h
 
 - The build process logs appear in the console.
 - Final status shows `Run ID: ... was successful`.
-- In `devskycraftswcacr01`, under **Services**, **Repositories** lists `skycraft-auth` with tag `v1`.
+- In `devskycraftswcacr01`, under **Services** (expand it if it is collapsed), **Repositories** lists `skycraft-auth` with tag `v1`.
 
 ---
 

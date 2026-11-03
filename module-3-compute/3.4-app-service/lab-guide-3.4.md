@@ -78,6 +78,8 @@ You can build this lab in the Portal by following this guide, or with Bicep. Bot
 | Portal (this guide) | Everything in the steps below |
 | `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The plan (Step 3.4.1); the web app with its runtime, startup command, HTTPS only and TLS 1.2 (Steps 3.4.2, 3.4.4 and 3.4.11); the `staging` slot with the same settings (Step 3.4.5); the autoscale setting (Steps 3.4.8-3.4.9); the VNet integration of the app and the slot (Step 3.4.10). It deploys no dashboard. |
 
+`Deploy-Bicep.ps1` creates the plan on P0V4. Without P0V4 quota, run it with `-PlanSku P0v3` or `-PlanSku S1`; `Test-Lab.ps1` accepts all three. On a subscription that throttles plan creation (see the Note in Step 3.4.1) the script stops after at most 15 minutes, stops the deployment and says so, instead of waiting for Azure to give up.
+
 The Az PowerShell blocks in Steps 3.4.4, 3.4.6 and 3.4.7 deploy the dashboard and swap the slots, whichever path built the resources; after `Deploy-Bicep.ps1`, run them to reach the end of Section 4.
 
 Steps without an Az PowerShell block in this guide: 3.4.1, 3.4.2, 3.4.5, 3.4.8-3.4.11, and the startup command in Step 3.4.4. Their scripted path is the Bicep. Steps without a Bicep counterpart: 3.4.3 (a file on your computer), 3.4.4, 3.4.6 and 3.4.7 (deploying content and swapping are operations, not resources), 3.4.12 (reference only) and 3.4.13 (automatic backups need no configuration).
@@ -138,6 +140,8 @@ For this lab, we will use **Premium V4 P0V4**. The lab needs **deployment slots*
 **Note**: The form opens with **Region** = West US 3 and **Pricing plan** = Premium V3 P1V3 (seen 2026-10-15). Change both. Lab 1.3's `Restrict-Azure-Regions` refuses West US 3, and P1V3 is a larger size that costs more than P0V4. If **Premium V4 P0V4** is not in the **Pricing plan** list, click **Explore pricing plans**, select **P0V4** under **Premium V4**, and click **Select**.
 
 **Note**: Leave **Zone redundancy** at **Disabled**. Enabled, the plan runs at least two instances, which doubles its cost.
+
+**Note**: A Free Trial subscription may refuse every App Service plan create, whatever the pricing plan. On 2026-10-27 a Bicep deploy of this lab on a Free Trial in Sweden Central waited 3.5 hours and then failed with `App Service Plan Create operation is throttled for subscription <subscription-id>. (Code: 429, ExtendedCode: 51025)`. If **Create** does not finish within a few minutes, or the deployment says the create is throttled, cancel it and do this lab on a Pay-As-You-Go or Visual Studio subscription. If the error is a missing quota for **P0V4** instead, choose **P0V3** or **S1** in **Pricing plan**: both have deployment slots and autoscale, so the rest of the lab is unchanged. Use only a subscription you may spend on: the plan bills by the hour from the moment it exists.
 
 > [!NOTE]
 > Ensure you select **Linux**. While SkyCraft game servers run on Linux, the dashboard could run on Windows, but we'll stick to Linux for consistency and cost.
@@ -268,7 +272,7 @@ First give the app the command that serves the dashboard, then deploy it. A Node
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Settings**, select **Configuration**
+3. Under **Settings** (expand it if it is collapsed), select **Configuration**
 4. Click the **Stack settings** tab
 5. **Startup command**: `pm2 serve /home/site/wwwroot --no-daemon`
 6. Click **Apply** at the bottom
@@ -308,7 +312,7 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Deployment**, select **Deployment slots**
+3. Under **Deployment** (expand it if it is collapsed), select **Deployment slots**
 4. Click **+ Add** in the toolbar (the empty page says "No slots have been added")
 5. **Name**: `staging`
 6. **Clone settings from**: `dev-skycraft-swc-app01` (the list starts at **Do not clone settings**)
@@ -327,7 +331,7 @@ Deployment slots allow you to deploy different versions of your app (e.g., "Stag
 ### Step 3.4.6: Deploy V2 to Staging
 
 1. In the **Deployment slots** list of Step 3.4.5, click **dev-skycraft-swc-app01-staging**
-2. Under **Settings**, select **Configuration**
+2. Under **Settings** (expand it if it is collapsed), select **Configuration**
 3. Click the **Stack settings** tab
 4. Verify:
    - **Startup command**: `pm2 serve /home/site/wwwroot --no-daemon`
@@ -361,7 +365,7 @@ Publish-AzWebApp `
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Deployment**, select **Deployment slots**
+3. Under **Deployment** (expand it if it is collapsed), select **Deployment slots**
 4. Click **Swap**
 5. **Source**: `dev-skycraft-swc-app01-staging` (pre-selected)
 6. **Target**: `dev-skycraft-swc-app01`, marked **PRODUCTION** (pre-selected)
@@ -397,7 +401,7 @@ We want the dashboard to scale out if too many Game Masters use it simultaneousl
 
 1. In Azure Portal, search for **App Service plans**
 2. Click **dev-skycraft-swc-asp**
-3. Under **Settings**, select **Scale out (App Service plan)**.
+3. Under **Settings** (expand it if it is collapsed), select **Scale out (App Service plan)**.
    > _Note: The UI might say "Apps in this plan will scale together"._
 4. Under **Scale out method**, select **Rules Based** (the page starts at **Manual**)
 5. Click **Configure** at the bottom of the page
@@ -455,7 +459,7 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Settings**, select **Networking**.
+3. Under **Settings** (expand it if it is collapsed), select **Networking**.
 4. Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).
 5. Click **Add virtual network integration**
 6. **Virtual network**: `dev-skycraft-swc-vnet`
@@ -463,9 +467,9 @@ To allow the dashboard to connect to the Game Servers (e.g., to query status dir
 8. Click **Connect**
 9. On the **Virtual Network Integration** page, verify:
    - **Outbound internet traffic** (under **Application routing**): checked
-10. Under **Deployment**, select **Deployment slots**
+10. Under **Deployment** (expand it if it is collapsed), select **Deployment slots**
 11. Click **dev-skycraft-swc-app01-staging**
-12. Under **Settings**, select **Networking**
+12. Under **Settings** (expand it if it is collapsed), select **Networking**
 13. Under **Outbound traffic configuration**, click **Not configured** (the value of _Virtual network integration_).
 14. Click **Add virtual network integration**
 15. Under **App Service Plan connections**, select `dev-skycraft-swc-vnet/AppServiceSubnet`: the connection the plan already has from the app. The pane opens with **New connection** selected.
@@ -488,7 +492,7 @@ The create wizard already turns **HTTPS only** on and sets the minimum TLS versi
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Settings**, select **Configuration**
+3. Under **Settings** (expand it if it is collapsed), select **Configuration**
 4. Click the **General settings** tab
 5. Verify:
    - **HTTPS only**: checked
@@ -509,7 +513,7 @@ In a real production environment, you wouldn't use the `azurewebsites.net` domai
 **Steps to configure (For Reference Only):**
 
 1. Buy a domain from a registrar (GoDaddy, Namecheap, etc.).
-2. In the app, under **Settings**, select **Custom domains**, then **+ Add custom domain**.
+2. In the app, under **Settings** (expand it if it is collapsed), select **Custom domains**, then **+ Add custom domain**.
 3. **Domain provider**: All other domain services.
 4. **TLS/SSL certificate**: Managed certificate (Free).
 5. **Validation**: Add the `TXT` and `CNAME` records provided by Azure to your domain registrar's DNS settings.
@@ -524,7 +528,7 @@ App Service backs up every app on the Basic tier and above automatically, every 
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Settings**, select **Backups**
+3. Under **Settings** (expand it if it is collapsed), select **Backups**
 
 **Expected Result**: The **Backups** page shows the automatic backups, taken **Every 1 hour**. The first one can take up to an hour after the app was created.
 
@@ -578,18 +582,18 @@ In the Portal, the same order:
 
 1. In Azure Portal, search for **App Services**
 2. Click **dev-skycraft-swc-app01**
-3. Under **Deployment**, select **Deployment slots**
+3. Under **Deployment** (expand it if it is collapsed), select **Deployment slots**
 4. Click **dev-skycraft-swc-app01-staging**
-5. Under **Settings**, select **Networking**
+5. Under **Settings** (expand it if it is collapsed), select **Networking**
 6. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
 7. Click **Disconnect**, and confirm
 8. Verify that the slot's **Networking** page shows _Virtual network integration_: **Not configured**
 9. In Azure Portal, search for **App Services**
 10. Click **dev-skycraft-swc-app01**
-11. Under **Settings**, select **Networking**
+11. Under **Settings** (expand it if it is collapsed), select **Networking**
 12. Under **Outbound traffic configuration**, click the value of _Virtual network integration_ (it names `AppServiceSubnet`)
 13. Click **Disconnect**, and confirm
-14. Under **Settings**, select **Networking**, and verify:
+14. Under **Settings** (expand it if it is collapsed), select **Networking**, and verify:
     - _Virtual network integration_: **Not configured**
 15. Click **Overview**, click **Delete**, type the app's name, and click **Delete**. The pane lists the app, its `staging` slot and, when this is the plan's last app, the plan with **Delete App Service plan** set to **Yes**: all three are deleted.
 16. In Azure Portal, search for **Resource groups**

@@ -42,7 +42,7 @@ You will configure the following Resource Groups and Role Assignments:
 - **Section 3**: Assign roles at subscription scope (25 min)
 - **Section 4**: Assign roles at resource group scope (30 min)
 - **Section 5**: Verify and test access (20 min)
-- **Hands-on Practice**: Modify role assignments (10 min)
+- **Section 6**: Understand role assignment properties (10 min)
 
 ---
 

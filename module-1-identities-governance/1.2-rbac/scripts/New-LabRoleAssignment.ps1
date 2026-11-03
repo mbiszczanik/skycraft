@@ -595,7 +595,8 @@ foreach ($item in $assignments) {
     $objectId = if ($found.Count -eq 1) { [string]$found[0].Id } else { $null }
 
     if (-not $objectId) {
-        Write-Host " [SKIP] Principal not found in Entra ID." -ForegroundColor Red
+        $failCount++
+        Write-Host " [ERROR] Principal not found in Entra ID." -ForegroundColor Red
         continue
     }
 

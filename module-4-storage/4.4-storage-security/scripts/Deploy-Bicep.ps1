@@ -258,3 +258,5 @@ catch {
     }
     Exit-Lab -FailureCount 1
 }
+
+Exit-Lab -FailureCount 0

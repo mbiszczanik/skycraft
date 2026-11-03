@@ -10,6 +10,7 @@ Before submitting a Pull Request (PR), please review our project standards to en
 - **[PowerShell Standards](docs/powershell-standards.md)**: Scripting style, error handling, and formatting.
 - **[Bicep Standards](docs/bicep-standards.md)**: Infrastructure as Code modules and parameters.
 - **[Dry-Run Harness](docs/dry-run-harness.md)**: The offline pre-push gate and the live checks it deliberately leaves to you.
+- **[Lab acceptance evidence](docs/lab-acceptance.md)**: Required test conditions, separate script and Portal results, negative and missing-result checks, and actual fallback deployment evidence. Fill the PR record before acceptance; the PR gate rejects incomplete entries.
 
 ## 🌿 Branching & PR workflow
 
