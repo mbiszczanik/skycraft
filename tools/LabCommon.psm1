@@ -1110,6 +1110,43 @@ function Get-LabThrottleMessage {
     }
 }
 
+function Get-LabDeploymentErrorText {
+    <#
+    .SYNOPSIS
+        Flattens a deployment error and every error nested in its Details into one text.
+
+    .DESCRIPTION
+        A preflight refusal names only the failing provider ("See inner errors for details"); the
+        reason, such as SubscriptionIsOverQuotaForSku, is two levels down (#497). Deploy scripts
+        pass the output of Test-AzSubscriptionDeployment here and match on the text.
+
+    .PARAMETER ErrorDetail
+        Error objects with Code, Message and Details, as Test-AzSubscriptionDeployment returns.
+
+    .EXAMPLE
+        Get-LabDeploymentErrorText -ErrorDetail (Test-AzSubscriptionDeployment @params)
+
+    .NOTES
+        Project: SkyCraft
+        Issue: #497
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]]$ErrorDetail
+    )
+
+    $lines = foreach ($e in @($ErrorDetail)) {
+        if ($null -eq $e) { continue }
+        "$($e.Code) $($e.Message)".Trim()
+        $nested = Get-LabDeploymentErrorText -ErrorDetail @($e.Details)
+        if ($nested) { $nested }
+    }
+    @($lines) -join "`n"
+}
+
 # The resources of one type in a subscription or group, with the creation time ARM keeps for them.
 function Get-LabArmResourceCreated {
     [CmdletBinding()]
@@ -1455,4 +1492,4 @@ function Invoke-LabWithoutLock {
     return $failures
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock
+Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock

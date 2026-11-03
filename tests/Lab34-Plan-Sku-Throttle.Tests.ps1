@@ -68,6 +68,49 @@ Describe 'Get-LabThrottleMessage' {
     }
 }
 
+Describe 'Get-LabDeploymentErrorText' {
+    BeforeAll {
+        # The shape Test-AzSubscriptionDeployment returned for P0v4 on a subscription with quota 0 (#497).
+        $script:QuotaError = [pscustomobject]@{
+            Code    = 'InvalidTemplateDeployment'
+            Message = "The following resource provider(s) - 'Microsoft.Web/serverFarms' reported preflight validation errors. See inner errors for details."
+            Details = @([pscustomobject]@{
+                Code    = 'ValidationForResourceFailed'
+                Message = "Check 'Error.Details[0]' for more information."
+                Details = @([pscustomobject]@{
+                    Code    = 'SubscriptionIsOverQuotaForSku'
+                    Message = 'Operation cannot be completed without additional quota.'
+                    Details = $null
+                })
+            })
+        }
+    }
+
+    It 'reaches the error two levels down' {
+        Get-LabDeploymentErrorText -ErrorDetail $script:QuotaError | Should -Match 'SubscriptionIsOverQuotaForSku Operation cannot be completed without additional quota'
+    }
+
+    It 'gives the text the quota hint of Deploy-Bicep.ps1 matches on, which the top-level message alone does not' {
+        $pattern = [regex]::Match($script:Deploy, "\`$errorText -match '([^']*quota[^']*)'").Groups[1].Value
+        $pattern | Should -Not -BeNullOrEmpty
+        $script:QuotaError.Message | Should -Not -Match $pattern
+        Get-LabDeploymentErrorText -ErrorDetail $script:QuotaError | Should -Match $pattern
+    }
+
+    It 'returns nothing for no errors and null' {
+        Get-LabDeploymentErrorText -ErrorDetail @() | Should -BeNullOrEmpty
+        Get-LabDeploymentErrorText -ErrorDetail $null | Should -BeNullOrEmpty
+    }
+
+    It 'lists sibling errors too' {
+        $two = @(
+            [pscustomobject]@{ Code = 'A'; Message = 'first'; Details = $null },
+            [pscustomobject]@{ Code = 'B'; Message = 'second'; Details = $null }
+        )
+        (Get-LabDeploymentErrorText -ErrorDetail $two) -split "`n" | Should -Be @('A first', 'B second')
+    }
+}
+
 Describe 'Lab 3.4 main.bicep plan SKU' {
     It 'declares parPlanSkuName defaulting to P0v4 and allowing only P0v4, P0v3 and S1' {
         $script:Bicep | Should -Match "(?s)@allowed\(\['P0v4', 'P0v3', 'S1'\]\)\s*param parPlanSkuName string = 'P0v4'"
@@ -94,6 +137,10 @@ Describe 'Lab 3.4 Deploy-Bicep.ps1' {
 
     It 'names the way out when the plan SKU has no quota' {
         $script:Deploy | Should -Match '(?s)catch \{.*?additional quota.*?-PlanSku P0v3 or -PlanSku S1.*?Exit-Lab -FailureCount 1'
+    }
+
+    It 'reads the nested error of a preflight refusal before it picks the hint' {
+        $script:Deploy | Should -Match '(?s)catch \{.*?preflight validation errors.*?Get-LabDeploymentErrorText.*?Test-AzSubscriptionDeployment.*?\$errorText -match'
     }
 
     It 'exits 1 after stopping' {
