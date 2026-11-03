@@ -31,7 +31,7 @@ BeforeDiscovery {
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $textExtensions = @('.md', '.ps1', '.psm1', '.psd1', '.sh', '.py')
 
-    # Tracked files only: a worktree under .claude/ or a scratch file is not the repository.
+    # Tracked files only: a worktree under a tool folder or a scratch file is not the repository.
     $tracked = @(git -C $repoRoot ls-files)
 
     # The text a file holds, as lines. An Excalidraw diagram is JSON; its commands live in the

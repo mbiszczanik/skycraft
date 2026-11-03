@@ -98,10 +98,9 @@ lab-X.Y-architecture.svg            # light
 lab-X.Y-architecture.dark.svg       # dark
 ```
 
-Render with the `excalidraw-diagram` skill's renderer:
+Render with an Excalidraw-to-SVG renderer, for example `render_excalidraw.py`:
 
 ```bash
-cd ~/.claude/skills/excalidraw-diagram/references
 uv run python render_excalidraw.py --format svg            <file>.excalidraw
 uv run python render_excalidraw.py --format svg --theme dark <file>.excalidraw
 ```
