@@ -267,3 +267,5 @@ if ($WhatIf) {
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Deployment Complete" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+Exit-Lab -FailureCount 0
