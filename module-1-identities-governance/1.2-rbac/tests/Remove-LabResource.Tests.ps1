@@ -67,6 +67,8 @@ BeforeAll {
     # change that, so one generated module serves every scenario:
     #   SKYCRAFT_STUB_EMPTY   '1' leaves nothing to find: the listings come back empty
     #   SKYCRAFT_STUB_LOOKUP  '<lookup>=<kind>,...' makes one lookup fail (denied, throttled)
+    #   SKYCRAFT_STUB_DOMAIN_FAIL / SKYCRAFT_STUB_NOINITIAL  the tenant's domain list (issue #380)
+    #                         is refused, or holds no initial domain
     #   SKYCRAFT_STUB_FAIL    '<Remove-command>:<name>,...' makes one removal throw
     # A removal is logged both bare and with the object's name.
     $script:StubBody = @'
@@ -121,12 +123,13 @@ function Get-AzContext {
     }
 }
 
-# The one Microsoft Graph lookup left in the cleanup (issue #397): Malfurion by his
-# userPrincipalName prefix, through the Az sign-in's Graph token.
+# The Microsoft Graph user lookup in the cleanup (issues #397, #380): Malfurion by his full
+# userPrincipalName on the tenant's initial domain. Any other filter, a prefix or another domain
+# included, fails the suite: that is the match the lab must not make.
 function Get-AzADUser {
     [CmdletBinding()]
     param([string]$Filter)
-    if ($Filter -ne "startsWith(userPrincipalName,'malfurion.stormrage@')") { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
+    if ($Filter -ne "userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'") { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
     if (Invoke-StubLookup -Name 'Get-AzADUser') { return }
     if ($env:SKYCRAFT_STUB_NOUSER -eq '1') { return }
     [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; UserPrincipalName = 'malfurion.stormrage@contoso.example' }
@@ -204,7 +207,9 @@ function Remove-AzDiagnosticSetting {
             [string[]]$Lookup = @(),
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty,
-            [switch]$NoUser
+            [switch]$NoUser,
+            [switch]$DomainFail,
+            [switch]$NoInitial
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -215,6 +220,8 @@ function Remove-AzDiagnosticSetting {
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
             SKYCRAFT_STUB_NOUSER = if ($NoUser) { '1' } else { '0' }
+            SKYCRAFT_STUB_DOMAIN_FAIL = if ($DomainFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOINITIAL   = if ($NoInitial) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG    = $logPath
         }
 
@@ -228,7 +235,7 @@ function Remove-AzDiagnosticSetting {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Domain)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -244,6 +251,9 @@ function Remove-AzDiagnosticSetting {
     # The Az sign-in cannot get a Graph token without interaction (issue #397).
     $script:GraphDenied = Invoke-CleanupScript -Stub $script:Stub -Lookup 'Get-AzADUser=graph'
     $script:NoUser      = Invoke-CleanupScript -Stub $script:Stub -NoUser
+    # The tenant's initial domain cannot be determined (issue #380).
+    $script:DomainDenied = Invoke-CleanupScript -Stub $script:Stub -DomainFail
+    $script:NoInitialDomain = Invoke-CleanupScript -Stub $script:Stub -NoInitial
     $script:RemovalsFail = Invoke-CleanupScript -Stub $script:Stub -Fail @(
         'Remove-RoleAssignment:ra-malfurion-sub'
         'Remove-AzResourceGroup:dev-skycraft-swc-rg'
@@ -251,7 +261,7 @@ function Remove-AzDiagnosticSetting {
 
     $script:AllRuns = @(
         $script:Clean, $script:Nothing, $script:WhatIf, $script:LookupsFail, $script:AssignmentDenied,
-        $script:RemovalsFail, $script:GraphDenied, $script:NoUser
+        $script:RemovalsFail, $script:GraphDenied, $script:NoUser, $script:DomainDenied, $script:NoInitialDomain
     )
 }
 
@@ -357,7 +367,7 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - role assignments without Microsoft Gr
     It 'counts a Graph lookup that needs interaction, names the sign-in that provides Graph, and still deletes the groups' {
         $run = $script:GraphDenied
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[ERROR\] Could not look up Malfurion in Entra ID[^\r\n]*MicrosoftGraphEndpointResourceId'
+        $run.Output | Should -Match '\[ERROR\] Could not look up Malfurion \(malfurion\.stormrage@contoso\.onmicrosoft\.com\) in Entra ID[^\r\n]*MicrosoftGraphEndpointResourceId'
         $run.Output | Should -Match "Connect-AzAccount -AuthScope MicrosoftGraphEndpointResourceId"
         $run.Output | Should -Not -Match 'Assignment not found'
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
@@ -368,7 +378,35 @@ Describe 'Lab 1.2 Remove-LabResource.ps1 - role assignments without Microsoft Gr
     It 'reports Malfurion absent from Entra ID as nothing to remove, not as a failure' {
         $run = $script:NoUser
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Malfurion not found in Entra ID'
+        $run.Output | Should -Match 'malfurion\.stormrage@contoso\.onmicrosoft\.com not found in Entra ID'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
+    }
+}
+
+Describe 'Lab 1.2 Remove-LabResource.ps1 - Malfurion is the initial-domain user only (#380)' {
+
+    It 'looks him up on the initial domain, by his full address, and removes his Owner assignment' {
+        # The stub fails the suite for any other Get-AzADUser filter, so a prefix match on any
+        # domain cannot pass; the clean run reaches the removal through the one accepted filter.
+        $script:Clean.Calls | Should -Contain 'Get-AzADUser'
+        $script:Clean.Calls | Should -Contain 'Remove-RoleAssignment:ra-malfurion-sub'
+    }
+
+    It 'counts a refused domain list, removes no Owner assignment and exits 1' {
+        $run = $script:DomainDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not look up the tenant's initial domain[^\r\n]*Microsoft Graph refused"
+        $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
+        $run.Calls  | Should -Not -Contain 'Get-AzADUser'
+        $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
+        $run.Calls  | Should -Contain 'Remove-AzResourceGroup:dev-skycraft-swc-rg'
+    }
+
+    It 'counts a tenant that lists no initial domain, removes no Owner assignment and exits 1' {
+        $run = $script:NoInitialDomain
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[ERROR\] Could not look up the tenant's initial domain[^\r\n]*no domain marked IsInitial"
+        $run.Calls  | Should -Not -Contain 'Get-AzADUser'
         $run.Calls  | Should -Not -Contain 'Remove-RoleAssignment'
     }
 }

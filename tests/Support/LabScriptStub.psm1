@@ -341,8 +341,10 @@ function Get-StubArmQueryValue {
 
 function Invoke-AzRestMethod {
     [CmdletBinding()]
-    param([string]$Path, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
+    param([string]$Path, [string]$Uri, [string]$Method = 'GET', [string]$Payload, [Parameter(ValueFromRemainingArguments)]$Rest)
 
+    # A script that calls Microsoft Graph through -Uri (Get-LabDirectoryDomain) is routed by it.
+    if (-not $Path -and $Uri) { $Path = $Uri }
     $resource, $query = $Path -split '\?', 2
     foreach ($route in $script:StubArmRoutes) {
         $reply = & "Invoke-StubArm${route}Route" -Method $Method -Path $Path -Resource $resource -Query ([string]$query) -Payload $Payload
@@ -553,6 +555,26 @@ function Start-Sleep {
 }
 '@
 
+$script:LabArmFakeRoute['Domain'] = @'
+
+# The tenant's domains through Microsoft Graph (issue #380): GET https://graph.microsoft.com/v1.0/domains,
+# as Get-LabDirectoryDomain asks for it. The directory lists a custom default domain and the initial
+# one. SKYCRAFT_STUB_DOMAIN_FAIL '1' refuses the request (403); SKYCRAFT_STUB_NOINITIAL '1' lists
+# no initial domain.
+
+function Invoke-StubArmDomainRoute {
+    param([string]$Method, [string]$Path, [string]$Resource, [string]$Query, [string]$Payload)
+
+    if ($Resource -notmatch '^https://graph\.microsoft\.com/v1\.0/domains$') { return }
+    if ($env:SKYCRAFT_STUB_DOMAIN_FAIL -eq '1') {
+        return ConvertTo-StubArmError -Code 'AuthorizationFailed' -Message 'stub: Microsoft Graph refused GET /v1.0/domains'
+    }
+    $items = @(@{ id = 'contoso.example'; isInitial = $false })
+    if ($env:SKYCRAFT_STUB_NOINITIAL -ne '1') { $items += @{ id = 'contoso.onmicrosoft.com'; isInitial = $true } }
+    return ConvertTo-StubArmReply -StatusCode 200 -Body @{ value = $items }
+}
+'@
+
 function Get-LabArmStub {
     <#
     .SYNOPSIS
@@ -610,7 +632,8 @@ function Get-LabArmStub {
         of passing unseen.
 
     .PARAMETER Api
-        RoleAssignment, Budget, Lock, or several of them.
+        RoleAssignment, Budget, Lock, Domain (the tenant's domains through Microsoft Graph, issue
+        #380: environment SKYCRAFT_STUB_DOMAIN_FAIL and SKYCRAFT_STUB_NOINITIAL), or several of them.
 
     .OUTPUTS
         System.String - PowerShell text for a stub module body.
@@ -619,7 +642,7 @@ function Get-LabArmStub {
     [OutputType([string])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('RoleAssignment', 'Budget', 'Lock')]
+        [ValidateSet('RoleAssignment', 'Budget', 'Lock', 'Domain')]
         [string[]]$Api
     )
 

@@ -10,9 +10,9 @@
     a custom one, the scripts named users Lab 1.1 never created, and a failed lookup fell back to
     a guess.
 
-    The five scripts that build such an address - New-LabUser.ps1, Test-Lab.ps1 and
-    Remove-LabResource.ps1 in Lab 1.1, New-LabRoleAssignment.ps1 and Deploy-Bicep.ps1 in Lab 1.2 -
-    each carry a byte-identical copy of Select-LabInitialDomain rather than import a shared module:
+    The seven scripts that build such an address - New-LabUser.ps1, Test-Lab.ps1 and
+    Remove-LabResource.ps1 in Lab 1.1, New-LabRoleAssignment.ps1, Deploy-Bicep.ps1, Test-Lab.ps1
+    and Remove-LabResource.ps1 in Lab 1.2 (the last two since #380) - each carry a byte-identical copy of Select-LabInitialDomain rather than import a shared module:
     docs/powershell-standards.md 7.3 keeps connection checks and lookups in each lab. This suite
     holds the copies together the way tests/Lab11-Graph-Auth.Tests.ps1 holds the Graph sign-in
     together:
@@ -46,6 +46,8 @@ BeforeAll {
         '1.1 Remove-LabResource.ps1'    = Join-Path $module1 '1.1-entra-users-groups/scripts/Remove-LabResource.ps1'
         '1.2 New-LabRoleAssignment.ps1' = Join-Path $module1 '1.2-rbac/scripts/New-LabRoleAssignment.ps1'
         '1.2 Deploy-Bicep.ps1'          = Join-Path $module1 '1.2-rbac/scripts/Deploy-Bicep.ps1'
+        '1.2 Test-Lab.ps1'              = Join-Path $module1 '1.2-rbac/scripts/Test-Lab.ps1'
+        '1.2 Remove-LabResource.ps1'    = Join-Path $module1 '1.2-rbac/scripts/Remove-LabResource.ps1'
     }
 
     $script:Ast = @{}
@@ -68,26 +70,28 @@ BeforeAll {
     . ([scriptblock]::Create($lifted[0].Extent.Text))
 }
 
-Describe 'Module 1 initial domain - five scripts, one lookup (#193, #237)' {
+Describe 'Module 1 initial domain - seven scripts, one lookup (#193, #237, #380)' {
 
     It '<name> defines Select-LabInitialDomain once, at the top level' -ForEach @(
         @{ name = '1.1 New-LabUser.ps1' }, @{ name = '1.1 Test-Lab.ps1' }, @{ name = '1.1 Remove-LabResource.ps1' }
         @{ name = '1.2 New-LabRoleAssignment.ps1' }, @{ name = '1.2 Deploy-Bicep.ps1' }
+        @{ name = '1.2 Test-Lab.ps1' }, @{ name = '1.2 Remove-LabResource.ps1' }
     ) {
         @(Get-SelectFunctionAst -Name $name).Count | Should -Be 1
     }
 
-    It 'ships byte-identical copies in all five scripts' {
+    It 'ships byte-identical copies in all seven scripts' {
         $text = foreach ($name in $script:ScriptPath.Keys) {
             (Get-SelectFunctionAst -Name $name)[0].Extent.Text -replace "`r`n", "`n"
         }
-        @($text).Count | Should -Be 5
+        @($text).Count | Should -Be 7
         ($text | Sort-Object -Unique).Count | Should -Be 1 -Because 'each lab reads on its own (7.3), so the copies must not drift'
     }
 
     It '<name> calls Select-LabInitialDomain exactly once, outside the function itself' -ForEach @(
         @{ name = '1.1 New-LabUser.ps1' }, @{ name = '1.1 Test-Lab.ps1' }, @{ name = '1.1 Remove-LabResource.ps1' }
         @{ name = '1.2 New-LabRoleAssignment.ps1' }, @{ name = '1.2 Deploy-Bicep.ps1' }
+        @{ name = '1.2 Test-Lab.ps1' }, @{ name = '1.2 Remove-LabResource.ps1' }
     ) {
         $calls = @($script:Ast[$name].FindAll({
             param($node)

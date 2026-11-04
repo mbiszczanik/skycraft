@@ -105,8 +105,47 @@ $checks = @(
     @{ Name="External Partner";  Principal="istormrage@illidari.com"; Role="Reader";   Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
 )
 
+# The tenant's domains, as Microsoft Graph lists them (GET /v1.0/domains: id, isInitial, ...).
+# Az.Resources has no domain cmdlet, so the list comes through Invoke-AzRestMethod, which calls
+# Graph with the same Az token Get-AzADUser uses: still one sign-in and no extra module. It
+# answers an HTTP error with a status code rather than an exception, so the code is checked here:
+# a failed lookup is an error, never an empty list.
+function Get-LabDirectoryDomain {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+
+    $response = Invoke-AzRestMethod -Method GET -Uri 'https://graph.microsoft.com/v1.0/domains?$select=id,isInitial' -ErrorAction Stop
+    if ([int]$response.StatusCode -ne 200) {
+        throw "Microsoft Graph answered $($response.StatusCode) to GET /v1.0/domains: $($response.Content)"
+    }
+    return @(($response.Content | ConvertFrom-Json).value)
+}
+
+# --- The users' domain (issues #193, #237) --------------------------------------------------
+# Lab 1.1 creates its users on the tenant's INITIAL *.onmicrosoft.com domain, the one its guide's
+# '<name>@[yourtenant].onmicrosoft.com' means, so this script looks them up there. Not the default
+# domain: in a tenant whose default is a custom domain, that names users Lab 1.1 never created.
+# And no guess when the tenant lists no initial domain. A byte-identical copy of the function in
+# Lab 1.1's scripts and in New-LabRoleAssignment.ps1; tests/Module1-Initial-Domain.Tests.ps1 holds
+# the copies together.
+function Select-LabInitialDomain {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Domain
+    )
+
+    $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
+    if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
+    return $initial[0]
+}
+
 # Finds one of Lab 1.1's principals by name, through Microsoft Graph with the Az sign-in's own
-# token: Malfurion by userPrincipalName prefix (the domain varies), a group by display name, the
+# token: Malfurion by his full userPrincipalName on the initial domain (issue #380), a group by display name, the
 # guest by mail (a guest's userPrincipalName is rewritten to <alias>_<domain>#EXT#@<tenant>).
 # Returns the object id, $null when the directory holds no such principal, and throws when the
 # lookup fails or finds more than one. Only a failed lookup names the sign-in that provides
@@ -115,8 +154,14 @@ function Find-LabPrincipalId {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Name
+        [string]$Name,
+
+        [Parameter()]
+        [string]$InitialDomain
     )
+
+    $isUser = $Name -notlike 'SkyCraft-*' -and $Name -notlike '*@*'
+    if ($isUser -and -not $InitialDomain) { throw "the tenant's initial domain is unknown, so '$Name' cannot be looked up" }
 
     try {
         $found = if ($Name -like 'SkyCraft-*') {
@@ -126,7 +171,7 @@ function Find-LabPrincipalId {
             @(Get-AzADUser -Filter "mail eq '$Name'" -ErrorAction Stop)
         }
         else {
-            @(Get-AzADUser -Filter "startsWith(userPrincipalName,'$Name@')" -ErrorAction Stop)
+            @(Get-AzADUser -Filter "userPrincipalName eq '$Name@$InitialDomain'" -ErrorAction Stop)
         }
     }
     catch {
@@ -146,12 +191,24 @@ else {
     # error, so every check of that principal fails and says why.
     $principalIds = @{}
     $principalErrors = @{}
+
+    # Lab 1.1 creates Malfurion on the tenant's initial domain; a user of that name on another domain
+    # is not his (issue #380). If the domain cannot be determined, his checks fail and say why.
+    $initialDomain = $null
+    $domainError = $null
+    try {
+        $initialDomain = Select-LabInitialDomain -Domain @(Get-LabDirectoryDomain)
+    }
+    catch {
+        $domainError = "Could not determine the tenant's initial *.onmicrosoft.com domain: $($_.Exception.Message) $(Get-LabGraphSignInHint -Client Az)"
+    }
+
     foreach ($name in @($checks | ForEach-Object { $_.Principal } | Select-Object -Unique)) {
         try {
-            $principalIds[$name] = Find-LabPrincipalId -Name $name
+            $principalIds[$name] = Find-LabPrincipalId -Name $name -InitialDomain $initialDomain
         }
         catch {
-            $principalErrors[$name] = $_.Exception.Message
+            $principalErrors[$name] = if ($domainError -and -not $initialDomain -and $name -notlike 'SkyCraft-*' -and $name -notlike '*@*') { $domainError } else { $_.Exception.Message }
         }
     }
 

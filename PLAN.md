@@ -35,7 +35,7 @@ One PR. Evidence: green CI run id at head, including an `ubuntu-latest` Pester r
 - [ ] #372 lock lift and restore (`Invoke-LabWithoutLock`) in the Remove-LabResource scripts of Labs 2.1, 2.2, 2.3, 3.1, 3.2, 3.3; Labs 4.1-5.3 already have it
 - [ ] #371 Lab 3.2 Test-Lab also reads disk encryption state
 - [ ] Run in parallel: prepare the Module 1 live run (read `param(` blocks and `tools/lab-cycle-manifest.psd1` entries for Labs 1.1-1.3) while these fixes are written
-- [ ] #380 Lab 1.2 matches only `malfurion.stormrage@<initial domain>`
+- [x] #380 Lab 1.2 matches only `malfurion.stormrage@<initial domain>`
 
 ## Block 2, 2026-11-07 to 08: Module 1 live run
 
