@@ -1474,10 +1474,15 @@ function Invoke-LabWithoutLock {
                 }
                 catch {
                     $restoreError = $_
+                    # A cleanup that deletes the group itself (Lab 3.1) takes the lock with it.
+                    if ($_.Exception.Data['StatusCode'] -eq 404 -and "$($_.Exception.Message)" -match 'ResourceGroupNotFound') { break }
                     if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
                 }
             }
-            if ($restoreError) {
+            if ($restoreError -and $restoreError.Exception.Data['StatusCode'] -eq 404 -and "$($restoreError.Exception.Message)" -match 'ResourceGroupNotFound') {
+                Write-Host "  [INFO] '$($lock.ResourceGroupName)' no longer exists; Lab 1.3's lock '$($lock.Name)' went with it." -ForegroundColor Gray
+            }
+            elseif ($restoreError) {
                 $failures++
                 Write-Host "  [ERROR] Could not restore Lab 1.3's lock '$($lock.Name)' on '$($lock.ResourceGroupName)': $($restoreError.Exception.Message)" -ForegroundColor Red
                 Write-Host "  [ERROR] '$($lock.ResourceGroupName)' is UNLOCKED. Recreate the lock now:" -ForegroundColor Red

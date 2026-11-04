@@ -46,6 +46,7 @@ BeforeAll {
         Locks     = @{}
         Fail      = @{}
         NoContext = $false
+        Gone      = @{}
     }
 
     function global:Get-AzContext {
@@ -65,6 +66,9 @@ BeforeAll {
         $group = $Matches['group']
         $name = $Matches['name']
         $fake.Calls.Add("${Method}:${group}:${name}")
+        if ($Method -eq 'PUT' -and $fake.Gone.ContainsKey($group)) {
+            return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceGroupNotFound","message":"Resource group could not be found."}}' }
+        }
         $key = "${Method}:${group}"
         if ($fake.Fail.ContainsKey($key) -and $fake.Fail[$key] -ne 0) {
             $fake.Fail[$key]--
@@ -105,6 +109,7 @@ BeforeAll {
         $global:SkyCraftLockFake.Locks = $Locks
         $global:SkyCraftLockFake.Fail = $Fail
         $global:SkyCraftLockFake.NoContext = $false
+        $global:SkyCraftLockFake.Gone = @{}
         $global:SkyCraftLockFake | Add-Member -NotePropertyName ActionRan -NotePropertyValue $false -Force
         $global:SkyCraftLockFake | Add-Member -NotePropertyName LocksDuringAction -NotePropertyValue $null -Force
     }
@@ -295,6 +300,28 @@ Describe 'Invoke-LabWithoutLock - a lock it cannot put back (#372)' {
     }
 }
 
+Describe 'Invoke-LabWithoutLock - a delete that removes the group itself (#372)' {
+
+    BeforeEach {
+        Mock -ModuleName LabCommon Start-Sleep { }
+    }
+
+    It 'does not count a lock restore on a vanished group as an error' {
+        Reset-LockFake -Locks @{ $script:Prod = (New-Lab13Lock -Group $script:Prod) }
+        $global:SkyCraftLockFake.Gone = @{ $script:Prod = $true }
+        $run = Invoke-Helper -Group $script:Prod
+        $run.Result | Should -Be @(0)
+        @($global:SkyCraftLockFake.Calls | Where-Object { $_ -like 'PUT:*' }).Count | Should -Be 1 -Because 'a missing group is not retried'
+        $run.Text | Should -Match "no longer exists; Lab 1.3's lock 'lock-no-delete-prod' went with it"
+        $run.Text | Should -Not -Match 'UNLOCKED'
+    }
+
+    It 'still reports a restore that fails for another reason' {
+        Reset-LockFake -Locks @{ $script:Prod = (New-Lab13Lock -Group $script:Prod) } -Fail @{ "PUT:$script:Prod" = -1 }
+        (Invoke-Helper -Group $script:Prod).Result | Should -Be @(1)
+    }
+}
+
 Describe 'Invoke-LabWithoutLock - -WhatIf (#372)' {
 
     BeforeEach {
@@ -317,6 +344,7 @@ Describe 'Module 4-5 cleanups route their locked-group deletes through Invoke-La
     # Labs 2.1-3.4 delete in the same groups and are owed the same change (#372); the course pins
     # them (#300), so they are not in this list yet.
     It '<Lab> passes -WhatIf through and adds the lock failures in a statement of their own' -ForEach @(
+        @{ Lab = '3.1'; Path = 'module-3-compute/3.1-infrastructure-as-code' }
         @{ Lab = '4.1'; Path = 'module-4-storage/4.1-storage-accounts' }
         @{ Lab = '4.2'; Path = 'module-4-storage/4.2-blob-storage' }
         @{ Lab = '4.3'; Path = 'module-4-storage/4.3-azure-files' }

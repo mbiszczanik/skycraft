@@ -159,30 +159,41 @@ $rgLookup = Invoke-LabLookup -Target 'the resource groups in the subscription' -
 }
 
 if (-not $rgLookup.Failed) {
+    $existing = [System.Collections.Generic.List[string]]::new()
     foreach ($rgName in $groupsToRemove) {
         if (-not ($rgLookup.Value | Where-Object { $_.ResourceGroupName -eq $rgName })) {
             Write-Host "[INFO] '$rgName' not found - nothing to delete." -ForegroundColor Gray
             continue
         }
+        $existing.Add($rgName)
+    }
 
-        if ($PSCmdlet.ShouldProcess($rgName, 'Remove resource group')) {
-            Write-Host "Deleting '$rgName'..." -ForegroundColor Yellow
-            try {
-                $ids = @(Get-LabDiagnosticResourceId -ResourceGroupName $rgName)
-                $diagnosticFailures = Remove-LabResourceDiagnosticSetting -ResourceId $ids -Confirm:$false
-                $script:cleanupFailures += $diagnosticFailures
-                if ($diagnosticFailures -gt 0) {
-                    Write-Host "[ERROR] Keeping '$rgName' because diagnostic cleanup failed." -ForegroundColor Red
-                    continue
+    # Lab 1.3's CanNotDelete locks on the platform and prod groups refuse the group delete
+    # (ScopeLocked); Invoke-LabWithoutLock lifts them for the deletes (#372).
+    if ($existing.Count -gt 0) {
+        $lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($existing) -WhatIf:$WhatIfPreference -Action {
+            foreach ($rgName in $existing) {
+                if ($PSCmdlet.ShouldProcess($rgName, 'Remove resource group')) {
+                    Write-Host "Deleting '$rgName'..." -ForegroundColor Yellow
+                    try {
+                        $ids = @(Get-LabDiagnosticResourceId -ResourceGroupName $rgName)
+                        $diagnosticFailures = Remove-LabResourceDiagnosticSetting -ResourceId $ids -Confirm:$false
+                        $script:cleanupFailures += $diagnosticFailures
+                        if ($diagnosticFailures -gt 0) {
+                            Write-Host "[ERROR] Keeping '$rgName' because diagnostic cleanup failed." -ForegroundColor Red
+                            continue
+                        }
+                        Remove-AzResourceGroup -Name $rgName -Force -ErrorAction Stop | Out-Null
+                        Write-Host "[SUCCESS] Deleted '$rgName'." -ForegroundColor Green
+                    }
+                    catch {
+                        $script:cleanupFailures++
+                        Write-Host "[ERROR] Could not delete '$rgName': $_" -ForegroundColor Red
+                    }
                 }
-                Remove-AzResourceGroup -Name $rgName -Force -ErrorAction Stop | Out-Null
-                Write-Host "[SUCCESS] Deleted '$rgName'." -ForegroundColor Green
-            }
-            catch {
-                $script:cleanupFailures++
-                Write-Host "[ERROR] Could not delete '$rgName': $_" -ForegroundColor Red
             }
         }
+        $script:cleanupFailures += $lockFailures
     }
 }
 
