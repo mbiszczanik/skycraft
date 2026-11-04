@@ -25,9 +25,9 @@ Test subscription for live runs: the maintainer's Visual Studio Enterprise MPN s
 
 One PR. Evidence: green CI run id at head, including an `ubuntu-latest` Pester run for #414.
 
-- [ ] #414 `-Force` or `git ls-files` in `tests/` listings; `.patches` filter for both separators
-- [ ] #384 `LabScriptStub` exits non-zero on parse error; test with an unparseable script
-- [ ] #415 lab-specific preflight only for selected labs (`RequiresOpsEmail` model)
+- [x] #414 `-Force` or `git ls-files` in `tests/` listings; `.patches` filter for both separators
+- [x] #384 `LabScriptStub` exits non-zero on parse error; test with an unparseable script
+- [x] #415 lab-specific preflight only for selected labs (`RequiresOpsEmail` model)
 - [ ] #398 R8 (count printed `[ERROR]`) and R9 (calls outside try/catch end through `Exit-Lab`)
 - [ ] #393 redaction helper in `tools/LabCommon.psm1`, applied in 32 scripts
 - [ ] #346 lint: menu paths name their collapsed group

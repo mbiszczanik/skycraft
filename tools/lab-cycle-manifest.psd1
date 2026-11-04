@@ -227,6 +227,8 @@
             TimeoutMs    = 14400000
             StdinAnswers = $null
             Excluded     = $null
+            # Preflight checks the public key only when a selected phase sets this (#415).
+            RequiresSshKey = $true
             # gate: verified - exits 1 on a missing $HOME\.ssh\skycraft-dev.pub, dev resource
             # group, dev VNet or dev-skycraft-swc-lb. The load balancer comes from Lab 2.3 or 3.1;
             # the manifest cannot express OR, and 2.3 (which implies 2.1) matches the measured order.
