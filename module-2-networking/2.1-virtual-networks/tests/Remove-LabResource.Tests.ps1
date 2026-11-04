@@ -207,6 +207,8 @@ function Invoke-AzRestMethod {
     }
     $reply = { param($Status, $Body) [pscustomobject]@{ StatusCode = $Status; Content = ($Body | ConvertTo-Json -Depth 6 -Compress) } }
     $target = ($Path -split '\?')[0]
+    # Lab 1.3's delete locks (Invoke-LabWithoutLock, #372): none in this stub, so the cleanup deletes as is.
+    if ($target -match '/providers/Microsoft\.Authorization/locks/') { return & $reply 404 @{ error = @{ code = 'LockNotFound'; message = 'The lock was not found.' } } }
     Write-StubCall -Name "Invoke-AzRestMethod:$Method"
 
     if ($env:SKYCRAFT_STUB_DNS -eq 'denied') { return & $reply 403 @{ error = @{ code = 'AuthorizationFailed'; message = "The client 'stub' does not have authorization to list $target." } } }

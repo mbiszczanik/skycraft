@@ -65,6 +65,7 @@ BeforeAll {
         'Get-AzPrivateDnsZone'
         'Remove-AzPrivateDnsZone'
         'Start-Sleep'
+        'Invoke-AzRestMethod'
     )
 
     # Every command the script calls, recording its own invocation. By default the subscription
@@ -240,7 +241,7 @@ function Start-Sleep {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api Lock)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs

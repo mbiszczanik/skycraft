@@ -50,6 +50,9 @@ BeforeAll {
     $script:RequiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Monitor')
 
     $script:StubCommands = @(
+        'Get-AzContext'
+        'Invoke-AzRestMethod'
+        'Start-Sleep'
         'Get-AzResourceGroup'
         'Remove-AzResourceGroup'
         'Get-AzResource'
@@ -66,6 +69,12 @@ BeforeAll {
     # A removal is logged both bare and with the group's name.
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
+
+function Get-AzContext {
+    [CmdletBinding()]
+    param()
+    [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = '00000000-0000-0000-0000-000000000000'; Name = 'stub-subscription' } }
+}
 
 function Write-StubCall {
     param([string]$Name)
@@ -176,7 +185,7 @@ function Remove-AzDiagnosticSetting {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body $script:StubBody -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api Lock)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
