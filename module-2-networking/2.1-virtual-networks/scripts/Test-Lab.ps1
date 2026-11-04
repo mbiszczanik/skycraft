@@ -121,7 +121,7 @@ function Test-AppServiceDelegation {
     else {
         $actual = @($Subnet.Delegations.ServiceName | Where-Object { $_ })
         $shown  = if ($actual.Count) { $actual -join ', ' } else { 'none' }
-        Write-Host "    - [FAIL] Subnet $($Subnet.Name) is not delegated to $service (delegations: $shown)." -ForegroundColor Red
+        Write-Host "    - [FAIL] Subnet $($Subnet.Name) is not delegated to $service (delegations: $shown). Delegate it as the guide says: Step 2.1.6 (dev) or Step 2.1.8 (prod)." -ForegroundColor Red
         $script:failCount++
     }
 }

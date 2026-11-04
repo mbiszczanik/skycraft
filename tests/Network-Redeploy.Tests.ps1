@@ -459,6 +459,16 @@ Describe 'AppServiceSubnet delegation - every Lab 2.1 path creates the same subn
     }
 }
 
+Describe 'Lab 2.1 Test-Lab - the delegation FAIL line names the guide steps that fix it (#274)' {
+    It 'names Step 2.1.6 and Step 2.1.8, and each step delegates AppServiceSubnet' {
+        $test  = Get-Content (Join-Path $script:Lab21 'scripts/Test-Lab.ps1') -Raw
+        $guide = Get-Content (Join-Path $script:Lab21 'lab-guide-2.1.md') -Raw
+        $test | Should -Match 'Step 2\.1\.6 \(dev\) or Step 2\.1\.8 \(prod\)'
+        [regex]::Match($guide, '(?s)### Step 2\.1\.6:.*?### Step 2\.1\.7').Value | Should -Match 'Microsoft\.Web/serverFarms'
+        [regex]::Match($guide, '(?s)### Step 2\.1\.8:.*?### Step 2\.1\.9').Value | Should -Match 'Microsoft\.Web/serverFarms'
+    }
+}
+
 Describe 'Deploy-Bicep.ps1 lookup helpers (Lab 2.1 and Lab 3.1)' {
 
     It "'<lab>' treats only a missing resource as absent" -ForEach @(
