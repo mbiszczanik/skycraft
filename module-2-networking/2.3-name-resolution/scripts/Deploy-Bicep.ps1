@@ -93,14 +93,45 @@ foreach ($staleLink in $staleLinks) {
     }
 }
 
+# A load balancer whose backend pools already hold VM NICs (Lab 3.2) cannot be written again:
+# Azure refuses a pool write that changes NIC-based members, ModificationOfNICIpConfigBackendPoolNotSupported
+# (#352). Such a balancer is left as it stands and the rest of the lab is deployed. A lookup that
+# fails for any reason other than "not found" stops the script: it must not read as "no members".
+$lbTargets = [ordered]@{
+    dev  = @{ ResourceGroup = 'dev-skycraft-swc-rg'; Name = 'dev-skycraft-swc-lb' }
+    prod = @{ ResourceGroup = 'prod-skycraft-swc-rg'; Name = 'prod-skycraft-swc-lb' }
+}
+$deployLb = @{}
+foreach ($target in $lbTargets.GetEnumerator()) {
+    $lb = $null
+    try {
+        $lb = Get-AzLoadBalancer -ResourceGroupName $target.Value.ResourceGroup -Name $target.Value.Name -ErrorAction Stop
+    } catch {
+        $text = "$($_.Exception.Message) $($_.FullyQualifiedErrorId)"
+        if ($text -notmatch '\bResourceNotFound\b|\bResourceGroupNotFound\b|StatusCode:\s*404|was not found|could not be found|NotFound') {
+            Write-Host "[ERROR] Could not read load balancer $($target.Value.Name): $($_.Exception.Message)" -ForegroundColor Red
+            Exit-Lab -FailureCount 1
+        }
+    }
+    $members = if ($lb) { @($lb.BackendAddressPools | ForEach-Object { $_.BackendIpConfigurations } | Where-Object { $_ }).Count } else { 0 }
+    $deployLb[$target.Key] = ($members -eq 0)
+    if ($members -gt 0) {
+        Write-Host "  - $($target.Value.Name) has $members VM NIC(s) in its backend pools: left as it stands, not redeployed. To change its pools, remove the NICs from them first (Lab 3.2 cleanup) or edit the pools in the Portal." -ForegroundColor Yellow
+    }
+}
+
 Write-Host "Starting deployment: $deploymentName..." -ForegroundColor Yellow
 
 try {
     $deployParams = @{
-        Name         = $deploymentName
-        Location     = $Location
-        TemplateFile = $TemplateFile
-        ErrorAction  = 'Stop'
+        Name                    = $deploymentName
+        Location                = $Location
+        TemplateFile            = $TemplateFile
+        TemplateParameterObject = @{
+            parDeployDevLb  = $deployLb['dev']
+            parDeployProdLb = $deployLb['prod']
+        }
+        ErrorAction             = 'Stop'
     }
 
     if ($WhatIf) {

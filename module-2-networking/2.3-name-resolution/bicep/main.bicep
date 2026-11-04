@@ -72,6 +72,12 @@ param parPipNameDev string = 'dev-skycraft-swc-lb-pip'
 @maxLength(80)
 param parPipNameProd string = 'prod-skycraft-swc-lb-pip'
 
+@description('Deploy the dev load balancer. Deploy-Bicep.ps1 passes false when its backend pools already hold VM NICs (Module 3): Azure refuses a pool write that changes NIC-based members (#352).')
+param parDeployDevLb bool = true
+
+@description('Deploy the prod load balancer. Deploy-Bicep.ps1 passes false when its backend pools already hold VM NICs (#352).')
+param parDeployProdLb bool = true
+
 /*******************
 *    Variables     *
 *******************/
@@ -199,7 +205,7 @@ module modProdPip 'modules/get-public-ip.bicep' = {
 //    frontend, Azure requires disableOutboundSnat true on every load-balancing rule on it
 //    (LoadBalancingRuleMustDisableSNATSinceSameFrontendIPConfigurationIsReferencedByOutboundRule),
 //    which is also the Portal's recommended option (docs/bicep-standards.md, Section 4.5).
-module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
+module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = if (parDeployDevLb) {
   name: 'deploy-dev-lb'
   scope: resDevRG
   params: {
@@ -285,7 +291,7 @@ module modDevLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
   }
 }
 
-module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = {
+module modProdLb 'br/public:avm/res/network/load-balancer:0.8.0' = if (parDeployProdLb) {
   name: 'deploy-prod-lb'
   scope: resProdRG
   params: {
@@ -466,5 +472,5 @@ module modPrivateDns 'br/public:avm/res/network/private-dns-zone:0.8.1' = {
 output outPublicDnsZoneId string = modPublicDns.outputs.resourceId
 output outPublicDnsNameServers array = modPublicDns.outputs.nameServers
 output outPrivateDnsZoneId string = modPrivateDns.outputs.resourceId
-output outDevLbId string = modDevLb.outputs.resourceId
-output outProdLbId string = modProdLb.outputs.resourceId
+output outDevLbId string = modDevLb.?outputs.resourceId ?? ''
+output outProdLbId string = modProdLb.?outputs.resourceId ?? ''

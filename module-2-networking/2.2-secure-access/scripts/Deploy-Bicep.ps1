@@ -14,6 +14,9 @@
 .PARAMETER Location
     The Azure region deployment target. Default: 'swedencentral'
 
+.PARAMETER DevResourceGroup
+    The development resource group name. Default: 'dev-skycraft-swc-rg'
+
 .PARAMETER ProdResourceGroup
     The production resource group name. Default: 'prod-skycraft-swc-rg'
 
@@ -48,6 +51,10 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$DevResourceGroup = 'dev-skycraft-swc-rg',
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
@@ -88,6 +95,50 @@ if (-not (Test-Path $mainBicep)) {
     Exit-Lab -FailureCount 1
 }
 
+# Runs an Az lookup and returns its result, or $null when the resource (or its resource group)
+# does not exist. Any other failure is rethrown: "could not read it" must not read as "absent".
+function Find-ExistingResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Lookup
+    )
+
+    try {
+        & $Lookup
+    }
+    catch {
+        $text = "$($_.Exception.Message) $($_.FullyQualifiedErrorId)"
+        if ($text -match '\bResourceNotFound\b|\bResourceGroupNotFound\b|StatusCode:\s*404|was not found|could not be found') { return $null }
+        throw
+    }
+}
+
+# Which spokes Lab 2.1 deployed. The template declares subnets under each spoke's existing VNet,
+# so a missing spoke is skipped (and named) instead of failing its subnet PUTs (#275).
+Write-Host "`nLooking up the spoke networks from Lab 2.1..." -ForegroundColor Cyan
+$spokeTargets = [ordered]@{
+    dev  = @{ ResourceGroup = $DevResourceGroup; Name = 'dev-skycraft-swc-vnet' }
+    prod = @{ ResourceGroup = $ProdResourceGroup; Name = 'prod-skycraft-swc-vnet' }
+}
+$spokeExists = @{}
+foreach ($target in $spokeTargets.GetEnumerator()) {
+    $vnet = Find-ExistingResource -Lookup {
+        Get-AzVirtualNetwork -ResourceGroupName $target.Value.ResourceGroup -Name $target.Value.Name -ErrorAction Stop
+    }
+    $spokeExists[$target.Key] = $null -ne $vnet
+    if ($spokeExists[$target.Key]) {
+        Write-Host "  - $($target.Value.Name) found." -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  - $($target.Value.Name) not found: this spoke is skipped. Run Lab 2.1 (Deploy-Bicep.ps1) first to add it, then run this script again." -ForegroundColor Yellow
+    }
+}
+if (-not $spokeExists['dev'] -and -not $spokeExists['prod']) {
+    Write-Host "[ERROR] Neither spoke network exists. Run Lab 2.1 first." -ForegroundColor Red
+    Exit-Lab -FailureCount 1
+}
+
 Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
 
 # Ask user about Bastion deployment. A what-if run answers the prompt for the caller:
@@ -117,8 +168,11 @@ try {
     
     $params = @{
         parLocation                  = $Location
+        parResourceGroupNameDev      = $DevResourceGroup
         parResourceGroupNameProd     = $ProdResourceGroup
         parResourceGroupNamePlatform = $PlatformResourceGroup
+        parDevSpokeExists            = $spokeExists['dev']
+        parProdSpokeExists           = $spokeExists['prod']
         parDeployBastion             = $shouldDeployBastion
     }
 

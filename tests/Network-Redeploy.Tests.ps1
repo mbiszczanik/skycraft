@@ -263,7 +263,8 @@ Describe 'Lab 2.2 template - a re-run declares everything the spoke subnets carr
     ) {
         $plan = @{}
         foreach ($s in $script:Template21.variables[$variable]) { $plan[$s.name] = $s }
-        $entry = $script:Template22.variables.varSpokes[$index]
+        # varAllSpokes lists both spokes; varSpokes is that list filtered to the ones that exist (#275).
+        $entry = $script:Template22.variables.varAllSpokes[$index]
         $entry.prefix | Should -Be $spoke
         $entry.authSubnetCidr  | Should -Be $plan['AuthSubnet'].addressPrefix
         $entry.worldSubnetCidr | Should -Be $plan['WorldSubnet'].addressPrefix
@@ -273,6 +274,46 @@ Describe 'Lab 2.2 template - a re-run declares everything the spoke subnets carr
             $plan[$name].defaultOutboundAccess | Should -BeFalse -Because 'Lab 2.2 restates the value Lab 2.1 creates the subnet with'
             $plan[$name].ContainsKey('delegation') | Should -BeFalse -Because 'Lab 2.2 declares no delegation on this subnet'
         }
+    }
+}
+
+Describe 'Lab 2.2 - a missing spoke is skipped, not failed (#275)' {
+    It "takes <name> and passes it from the script" -ForEach @(
+        @{ name = 'parDevSpokeExists' }
+        @{ name = 'parProdSpokeExists' }
+    ) {
+        $script:Template22.parameters.ContainsKey($name) | Should -BeTrue
+        (Get-Content (Join-Path $script:Lab22 'scripts/Deploy-Bicep.ps1') -Raw) | Should -Match ([regex]::Escape($name))
+    }
+
+    It 'lets the script name the dev resource group the template takes' {
+        $script = Get-Content (Join-Path $script:Lab22 'scripts/Deploy-Bicep.ps1') -Raw
+        $script | Should -Match '\[string\]\$DevResourceGroup'
+        $script | Should -Match 'parResourceGroupNameDev\s*=\s*\$DevResourceGroup'
+    }
+
+    It 'stops with exit 1 when neither spoke exists' {
+        (Get-Content (Join-Path $script:Lab22 'scripts/Deploy-Bicep.ps1') -Raw) | Should -Match 'Neither spoke network exists'
+    }
+}
+
+Describe 'Lab 2.3 - a load balancer with VM NICs in its pools is left alone (#352)' {
+    BeforeAll {
+        $script:Template23 = ConvertFrom-BicepFile -Path (Join-Path $script:RepoRoot 'module-2-networking/2.3-name-resolution/bicep/main.bicep') -Name 'lab23'
+        $script:Script23 = Get-Content (Join-Path $script:RepoRoot 'module-2-networking/2.3-name-resolution/scripts/Deploy-Bicep.ps1') -Raw
+    }
+
+    It "takes <name> and passes it from the script" -ForEach @(
+        @{ name = 'parDeployDevLb' }
+        @{ name = 'parDeployProdLb' }
+    ) {
+        $script:Template23.parameters.ContainsKey($name) | Should -BeTrue
+        $script:Script23 | Should -Match ([regex]::Escape($name))
+    }
+
+    It 'reads the balancers'' pool members and stops when a read fails for another reason than "not found"' {
+        $script:Script23 | Should -Match 'BackendIpConfigurations'
+        $script:Script23 | Should -Match 'Could not read load balancer'
     }
 }
 
