@@ -189,139 +189,144 @@ if (-not $context) {
     Exit-Lab -FailureCount 1
 }
 
-# 2. Cleanup Public DNS
-Write-Host "`n=== Cleaning up Public DNS ===" -ForegroundColor Cyan
-$publicZoneLookup = Invoke-LabLookup -Target "public DNS zone $PublicDnsZoneName" -Lookup {
-    Get-AzDnsZone -ResourceGroupName $PlatformRG -Name $PublicDnsZoneName -ErrorAction Stop
-}
-if ($publicZoneLookup.Value.Count -gt 0) {
-    if ($PSCmdlet.ShouldProcess($PublicDnsZoneName, 'Remove public DNS zone')) {
-        Write-Host "Removing Public DNS Zone: $PublicDnsZoneName..." -ForegroundColor Yellow
-        try {
-            Remove-AzDnsZone -ResourceGroupName $PlatformRG -Name $PublicDnsZoneName -Confirm:$false -ErrorAction Stop
-            Write-Host "  -> Deleted" -ForegroundColor Green
-        }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Could not delete the public DNS zone: $_" -ForegroundColor Red
-        }
+# Lab 1.3's CanNotDelete locks on the platform and prod groups refuse every delete below
+# (ScopeLocked); Invoke-LabWithoutLock lifts them for the deletes and puts them back (#372).
+$lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($PlatformRG, $DevRG, $ProdRG) -WhatIf:$WhatIfPreference -Action {
+    # 2. Cleanup Public DNS
+    Write-Host "`n=== Cleaning up Public DNS ===" -ForegroundColor Cyan
+    $publicZoneLookup = Invoke-LabLookup -Target "public DNS zone $PublicDnsZoneName" -Lookup {
+        Get-AzDnsZone -ResourceGroupName $PlatformRG -Name $PublicDnsZoneName -ErrorAction Stop
     }
-} elseif (-not $publicZoneLookup.Failed) {
-    Write-Host "  -> Public Zone not found" -ForegroundColor Gray
-}
-
-# 3. Cleanup Load Balancers
-Write-Host "`n=== Cleaning up Load Balancers ===" -ForegroundColor Cyan
-
-# Dev LB
-$devLbLookup = Invoke-LabLookup -Target "load balancer $DevLbName" -Lookup {
-    Get-AzLoadBalancer -ResourceGroupName $DevRG -Name $DevLbName -ErrorAction Stop
-}
-if ($devLbLookup.Value.Count -gt 0) {
-    if ($PSCmdlet.ShouldProcess($DevLbName, 'Remove load balancer')) {
-        Write-Host "Removing Dev Load Balancer: $DevLbName..." -ForegroundColor Yellow
-        try {
-            Remove-AzLoadBalancer -ResourceGroupName $DevRG -Name $DevLbName -Force -ErrorAction Stop
-            Write-Host "  -> Deleted" -ForegroundColor Green
-        }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Could not delete load balancer ${DevLbName}: $_" -ForegroundColor Red
-        }
-    }
-} elseif (-not $devLbLookup.Failed) {
-    Write-Host "  -> Dev LB not found" -ForegroundColor Gray
-}
-
-# Prod LB
-$prodLbLookup = Invoke-LabLookup -Target "load balancer $ProdLbName" -Lookup {
-    Get-AzLoadBalancer -ResourceGroupName $ProdRG -Name $ProdLbName -ErrorAction Stop
-}
-if ($prodLbLookup.Value.Count -gt 0) {
-    if ($PSCmdlet.ShouldProcess($ProdLbName, 'Remove load balancer')) {
-        Write-Host "Removing Prod Load Balancer: $ProdLbName..." -ForegroundColor Yellow
-        try {
-            Remove-AzLoadBalancer -ResourceGroupName $ProdRG -Name $ProdLbName -Force -ErrorAction Stop
-            Write-Host "  -> Deleted" -ForegroundColor Green
-        }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Could not delete load balancer ${ProdLbName}: $_" -ForegroundColor Red
-        }
-    }
-} elseif (-not $prodLbLookup.Failed) {
-    Write-Host "  -> Prod LB not found" -ForegroundColor Gray
-}
-
-# 4. Cleanup Private DNS Links & Zone
-Write-Host "`n=== Cleaning up Private DNS ===" -ForegroundColor Cyan
-
-# Links. A zone whose links could not be listed or removed stays (see the zone step below).
-$linkLookup = Invoke-LabLookup -Target "the VNet links of $PrivateDnsZoneName" -Lookup {
-    Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction Stop
-}
-if ($linkLookup.Failed) { $script:privateZoneMustStay = $true }
-foreach ($link in $linkLookup.Value) {
-    if ($PSCmdlet.ShouldProcess($link.Name, 'Remove private DNS VNet link')) {
-        Write-Host "Removing link: $($link.Name)..." -ForegroundColor Yellow
-        try {
-            Remove-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $link.Name -Confirm:$false -ErrorAction Stop
-            Write-Host "  -> Deleted" -ForegroundColor Green
-        }
-        catch {
-            $script:cleanupFailures++
-            $script:privateZoneMustStay = $true
-            Write-Host "  -> [ERROR] Could not delete link $($link.Name): $_" -ForegroundColor Red
-        }
-    }
-}
-
-# Zone. While a link may still be there, the delete could only fail on it after a minute of
-# retries, so the zone is left for a rerun; the [ERROR] above already makes this run exit 1.
-$privateZoneLookup = Invoke-LabLookup -Target "private DNS zone $PrivateDnsZoneName" -Lookup {
-    Get-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -ErrorAction Stop
-}
-if ($privateZoneLookup.Value.Count -gt 0) {
-    if ($script:privateZoneMustStay) {
-        Write-Host "  -> [INFO] $PrivateDnsZoneName left in place - its VNet links could not be listed or removed (see the [ERROR] above)." -ForegroundColor Gray
-    }
-    elseif ($PSCmdlet.ShouldProcess($PrivateDnsZoneName, 'Remove private DNS zone')) {
-        Write-Host "Removing Private DNS Zone: $PrivateDnsZoneName..." -ForegroundColor Yellow
-
-        # Link deletion is asynchronous, and ARM still counts the links as nested resources for
-        # a few seconds after Get-AzPrivateDnsVirtualNetworkLink has stopped returning them - so
-        # polling the link list is not a reliable signal. Retry the delete itself on exactly the
-        # nested-resource error instead; anything else fails immediately (#97).
-        $maxAttempts = 12
-        $delaySeconds = 5
-
-        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    if ($publicZoneLookup.Value.Count -gt 0) {
+        if ($PSCmdlet.ShouldProcess($PublicDnsZoneName, 'Remove public DNS zone')) {
+            Write-Host "Removing Public DNS Zone: $PublicDnsZoneName..." -ForegroundColor Yellow
             try {
-                Remove-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -Confirm:$false -ErrorAction Stop
+                Remove-AzDnsZone -ResourceGroupName $PlatformRG -Name $PublicDnsZoneName -Confirm:$false -ErrorAction Stop
                 Write-Host "  -> Deleted" -ForegroundColor Green
-                break
             }
             catch {
-                if ($_.Exception.Message -notmatch 'nested resource') {
-                    $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Could not delete the private DNS zone: $($_.Exception.Message)" -ForegroundColor Red
-                    break
-                }
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete the public DNS zone: $_" -ForegroundColor Red
+            }
+        }
+    } elseif (-not $publicZoneLookup.Failed) {
+        Write-Host "  -> Public Zone not found" -ForegroundColor Gray
+    }
 
-                if ($attempt -eq $maxAttempts) {
-                    $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] VNet links were still draining after $($maxAttempts * $delaySeconds)s. Re-run this script." -ForegroundColor Red
-                    break
-                }
+    # 3. Cleanup Load Balancers
+    Write-Host "`n=== Cleaning up Load Balancers ===" -ForegroundColor Cyan
 
-                Write-Host "  -> VNet links still draining, retrying in ${delaySeconds}s ($attempt/$maxAttempts)..." -ForegroundColor Gray
-                Start-Sleep -Seconds $delaySeconds
+    # Dev LB
+    $devLbLookup = Invoke-LabLookup -Target "load balancer $DevLbName" -Lookup {
+        Get-AzLoadBalancer -ResourceGroupName $DevRG -Name $DevLbName -ErrorAction Stop
+    }
+    if ($devLbLookup.Value.Count -gt 0) {
+        if ($PSCmdlet.ShouldProcess($DevLbName, 'Remove load balancer')) {
+            Write-Host "Removing Dev Load Balancer: $DevLbName..." -ForegroundColor Yellow
+            try {
+                Remove-AzLoadBalancer -ResourceGroupName $DevRG -Name $DevLbName -Force -ErrorAction Stop
+                Write-Host "  -> Deleted" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete load balancer ${DevLbName}: $_" -ForegroundColor Red
+            }
+        }
+    } elseif (-not $devLbLookup.Failed) {
+        Write-Host "  -> Dev LB not found" -ForegroundColor Gray
+    }
+
+    # Prod LB
+    $prodLbLookup = Invoke-LabLookup -Target "load balancer $ProdLbName" -Lookup {
+        Get-AzLoadBalancer -ResourceGroupName $ProdRG -Name $ProdLbName -ErrorAction Stop
+    }
+    if ($prodLbLookup.Value.Count -gt 0) {
+        if ($PSCmdlet.ShouldProcess($ProdLbName, 'Remove load balancer')) {
+            Write-Host "Removing Prod Load Balancer: $ProdLbName..." -ForegroundColor Yellow
+            try {
+                Remove-AzLoadBalancer -ResourceGroupName $ProdRG -Name $ProdLbName -Force -ErrorAction Stop
+                Write-Host "  -> Deleted" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete load balancer ${ProdLbName}: $_" -ForegroundColor Red
+            }
+        }
+    } elseif (-not $prodLbLookup.Failed) {
+        Write-Host "  -> Prod LB not found" -ForegroundColor Gray
+    }
+
+    # 4. Cleanup Private DNS Links & Zone
+    Write-Host "`n=== Cleaning up Private DNS ===" -ForegroundColor Cyan
+
+    # Links. A zone whose links could not be listed or removed stays (see the zone step below).
+    $linkLookup = Invoke-LabLookup -Target "the VNet links of $PrivateDnsZoneName" -Lookup {
+        Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -ErrorAction Stop
+    }
+    if ($linkLookup.Failed) { $script:privateZoneMustStay = $true }
+    foreach ($link in $linkLookup.Value) {
+        if ($PSCmdlet.ShouldProcess($link.Name, 'Remove private DNS VNet link')) {
+            Write-Host "Removing link: $($link.Name)..." -ForegroundColor Yellow
+            try {
+                Remove-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PlatformRG -ZoneName $PrivateDnsZoneName -Name $link.Name -Confirm:$false -ErrorAction Stop
+                Write-Host "  -> Deleted" -ForegroundColor Green
+            }
+            catch {
+                $script:cleanupFailures++
+                $script:privateZoneMustStay = $true
+                Write-Host "  -> [ERROR] Could not delete link $($link.Name): $_" -ForegroundColor Red
             }
         }
     }
-} elseif (-not $privateZoneLookup.Failed) {
-    Write-Host "  -> Private Zone not found" -ForegroundColor Gray
+
+    # Zone. While a link may still be there, the delete could only fail on it after a minute of
+    # retries, so the zone is left for a rerun; the [ERROR] above already makes this run exit 1.
+    $privateZoneLookup = Invoke-LabLookup -Target "private DNS zone $PrivateDnsZoneName" -Lookup {
+        Get-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -ErrorAction Stop
+    }
+    if ($privateZoneLookup.Value.Count -gt 0) {
+        if ($script:privateZoneMustStay) {
+            Write-Host "  -> [INFO] $PrivateDnsZoneName left in place - its VNet links could not be listed or removed (see the [ERROR] above)." -ForegroundColor Gray
+        }
+        elseif ($PSCmdlet.ShouldProcess($PrivateDnsZoneName, 'Remove private DNS zone')) {
+            Write-Host "Removing Private DNS Zone: $PrivateDnsZoneName..." -ForegroundColor Yellow
+
+            # Link deletion is asynchronous, and ARM still counts the links as nested resources for
+            # a few seconds after Get-AzPrivateDnsVirtualNetworkLink has stopped returning them - so
+            # polling the link list is not a reliable signal. Retry the delete itself on exactly the
+            # nested-resource error instead; anything else fails immediately (#97).
+            $maxAttempts = 12
+            $delaySeconds = 5
+
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                try {
+                    Remove-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -Confirm:$false -ErrorAction Stop
+                    Write-Host "  -> Deleted" -ForegroundColor Green
+                    break
+                }
+                catch {
+                    if ($_.Exception.Message -notmatch 'nested resource') {
+                        $script:cleanupFailures++
+                        Write-Host "  -> [ERROR] Could not delete the private DNS zone: $($_.Exception.Message)" -ForegroundColor Red
+                        break
+                    }
+
+                    if ($attempt -eq $maxAttempts) {
+                        $script:cleanupFailures++
+                        Write-Host "  -> [ERROR] VNet links were still draining after $($maxAttempts * $delaySeconds)s. Re-run this script." -ForegroundColor Red
+                        break
+                    }
+
+                    Write-Host "  -> VNet links still draining, retrying in ${delaySeconds}s ($attempt/$maxAttempts)..." -ForegroundColor Gray
+                    Start-Sleep -Seconds $delaySeconds
+                }
+            }
+        }
+    } elseif (-not $privateZoneLookup.Failed) {
+        Write-Host "  -> Private Zone not found" -ForegroundColor Gray
+    }
 }
+$script:cleanupFailures += $lockFailures
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s) - see the [ERROR] lines above." -ForegroundColor Red

@@ -339,11 +339,13 @@ Describe 'Invoke-LabWithoutLock - -WhatIf (#372)' {
     }
 }
 
-Describe 'Module 4-5 cleanups route their locked-group deletes through Invoke-LabWithoutLock (#372)' {
+Describe 'Module 2-5 cleanups route their locked-group deletes through Invoke-LabWithoutLock (#372)' {
 
-    # Labs 2.1-3.4 delete in the same groups and are owed the same change (#372); the course pins
-    # them (#300), so they are not in this list yet.
+    # Lab 3.4 deletes in the same groups and is owed the same change (#372); it is not in this list yet.
     It '<Lab> passes -WhatIf through and adds the lock failures in a statement of their own' -ForEach @(
+        @{ Lab = '2.1'; Path = 'module-2-networking/2.1-virtual-networks' }
+        @{ Lab = '2.2'; Path = 'module-2-networking/2.2-secure-access' }
+        @{ Lab = '2.3'; Path = 'module-2-networking/2.3-name-resolution' }
         @{ Lab = '3.1'; Path = 'module-3-compute/3.1-infrastructure-as-code' }
         @{ Lab = '4.1'; Path = 'module-4-storage/4.1-storage-accounts' }
         @{ Lab = '4.2'; Path = 'module-4-storage/4.2-blob-storage' }

@@ -195,175 +195,180 @@ if (-not $context) {
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
-# ===================================
-# Remove Azure Bastion (Highest Cost)
-# ===================================
-if ($RemoveBastion -or $RemoveAll) {
-    Write-Host "`n=== Removing Azure Bastion ===" -ForegroundColor Cyan
-    
-    $bastionLookup = Invoke-LabLookup -Target 'Bastion platform-skycraft-swc-bas' -Lookup {
-        Get-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -ErrorAction Stop
-    }
-    if ($bastionLookup.Value.Count -gt 0) {
-        Write-Host "Removing Bastion: platform-skycraft-swc-bas (this may take a few minutes)..." -ForegroundColor Yellow
-        try {
-            if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas', 'Remove Azure Bastion')) {
-                Remove-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -Force -ErrorAction Stop
-                Write-Host "  -> Bastion removed successfully" -ForegroundColor Green
+# Lab 1.3's CanNotDelete locks on the platform and prod groups refuse every delete below
+# (ScopeLocked); Invoke-LabWithoutLock lifts them for the deletes and puts them back (#372).
+$lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($PlatformResourceGroup, $ProdResourceGroup) -WhatIf:$WhatIfPreference -Action {
+    # ===================================
+    # Remove Azure Bastion (Highest Cost)
+    # ===================================
+    if ($RemoveBastion -or $RemoveAll) {
+        Write-Host "`n=== Removing Azure Bastion ===" -ForegroundColor Cyan
+        
+        $bastionLookup = Invoke-LabLookup -Target 'Bastion platform-skycraft-swc-bas' -Lookup {
+            Get-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -ErrorAction Stop
+        }
+        if ($bastionLookup.Value.Count -gt 0) {
+            Write-Host "Removing Bastion: platform-skycraft-swc-bas (this may take a few minutes)..." -ForegroundColor Yellow
+            try {
+                if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas', 'Remove Azure Bastion')) {
+                    Remove-AzBastion -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas' -Force -ErrorAction Stop
+                    Write-Host "  -> Bastion removed successfully" -ForegroundColor Green
+                }
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Failed to remove Bastion" -ForegroundColor Red
+                Write-Host $_.Exception.Message -ForegroundColor Red
             }
         }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Failed to remove Bastion" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
+        elseif (-not $bastionLookup.Failed) {
+            Write-Host "  -> Bastion does not exist, skipping" -ForegroundColor Gray
         }
-    }
-    elseif (-not $bastionLookup.Failed) {
-        Write-Host "  -> Bastion does not exist, skipping" -ForegroundColor Gray
-    }
 
-    # Remove Bastion Public IP
-    Write-Host "Removing Bastion Public IP..." -ForegroundColor Yellow
-    $bastionPipLookup = Invoke-LabLookup -Target 'Bastion Public IP platform-skycraft-swc-bas-pip' -Lookup {
-        Get-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -ErrorAction Stop
-    }
-    if ($bastionPipLookup.Value.Count -gt 0) {
-        try {
-            if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas-pip', 'Remove Bastion Public IP')) {
-                Remove-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -Force -ErrorAction Stop
-                Write-Host "  -> Bastion Public IP removed" -ForegroundColor Green
+        # Remove Bastion Public IP
+        Write-Host "Removing Bastion Public IP..." -ForegroundColor Yellow
+        $bastionPipLookup = Invoke-LabLookup -Target 'Bastion Public IP platform-skycraft-swc-bas-pip' -Lookup {
+            Get-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -ErrorAction Stop
+        }
+        if ($bastionPipLookup.Value.Count -gt 0) {
+            try {
+                if ($PSCmdlet.ShouldProcess('platform-skycraft-swc-bas-pip', 'Remove Bastion Public IP')) {
+                    Remove-AzPublicIpAddress -ResourceGroupName $PlatformResourceGroup -Name 'platform-skycraft-swc-bas-pip' -Force -ErrorAction Stop
+                    Write-Host "  -> Bastion Public IP removed" -ForegroundColor Green
+                }
+            }
+            catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Failed to remove Bastion Public IP" -ForegroundColor Red
+                Write-Host $_.Exception.Message -ForegroundColor Red
             }
         }
-        catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Failed to remove Bastion Public IP" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
+        elseif (-not $bastionPipLookup.Failed) {
+            Write-Host "  -> Bastion Public IP does not exist, skipping" -ForegroundColor Gray
         }
     }
-    elseif (-not $bastionPipLookup.Failed) {
-        Write-Host "  -> Bastion Public IP does not exist, skipping" -ForegroundColor Gray
-    }
-}
 
-# ===================================
-# Remove NSG Associations and NSGs
-# ===================================
-if ($RemoveNSGs -or $RemoveAll) {
-    Write-Host "`n=== Removing Network Security Groups ===" -ForegroundColor Cyan
-    
-    # First, dissociate NSG from all subnets it is currently attached to
-    # We do a universal check to catch any accidental or deep associations
-    Write-Host "Searching for and removing NSG associations across all VNets..." -ForegroundColor Yellow
-    # Remove NSGs
-    # -----------------------------------
-    $nsgList = @(
-        @{ Name="dev-skycraft-swc-auth-nsg"; RG="dev-skycraft-swc-rg" },
-        @{ Name="dev-skycraft-swc-world-nsg"; RG="dev-skycraft-swc-rg" },
-        @{ Name="dev-skycraft-swc-db-nsg"; RG="dev-skycraft-swc-rg" },
-        @{ Name="prod-skycraft-swc-auth-nsg"; RG=$ProdResourceGroup },
-        @{ Name="prod-skycraft-swc-world-nsg"; RG=$ProdResourceGroup },
-        @{ Name="prod-skycraft-swc-db-nsg"; RG=$ProdResourceGroup },
-        @{ Name="platform-skycraft-swc-nsg"; RG=$PlatformResourceGroup }
-    )
+    # ===================================
+    # Remove NSG Associations and NSGs
+    # ===================================
+    if ($RemoveNSGs -or $RemoveAll) {
+        Write-Host "`n=== Removing Network Security Groups ===" -ForegroundColor Cyan
+        
+        # First, dissociate NSG from all subnets it is currently attached to
+        # We do a universal check to catch any accidental or deep associations
+        Write-Host "Searching for and removing NSG associations across all VNets..." -ForegroundColor Yellow
+        # Remove NSGs
+        # -----------------------------------
+        $nsgList = @(
+            @{ Name="dev-skycraft-swc-auth-nsg"; RG="dev-skycraft-swc-rg" },
+            @{ Name="dev-skycraft-swc-world-nsg"; RG="dev-skycraft-swc-rg" },
+            @{ Name="dev-skycraft-swc-db-nsg"; RG="dev-skycraft-swc-rg" },
+            @{ Name="prod-skycraft-swc-auth-nsg"; RG=$ProdResourceGroup },
+            @{ Name="prod-skycraft-swc-world-nsg"; RG=$ProdResourceGroup },
+            @{ Name="prod-skycraft-swc-db-nsg"; RG=$ProdResourceGroup },
+            @{ Name="platform-skycraft-swc-nsg"; RG=$PlatformResourceGroup }
+        )
 
-    # 1. Dissociate first. If the VNets cannot be listed, nothing is dissociated (the [ERROR] is
-    #    counted); an NSG still associated then fails its own delete below and is counted there.
-    Write-Host "`nDissociating NSGs from all subnets..." -ForegroundColor Yellow
-    $vnetLookup = Invoke-LabLookup -Target 'the virtual networks in the subscription' -Lookup {
-        Get-AzVirtualNetwork -ErrorAction Stop
-    }
-    foreach ($vnet in $vnetLookup.Value) {
-        $updated = $false
-        foreach ($subnet in $vnet.Subnets) {
-            if ($subnet.NetworkSecurityGroup) {
-                # Check if this subnet's NSG is one we want to remove
-                # (Simple check by name similarity or just blanket remove ID if it matches one of our targets)
-                foreach ($targetNsg in $nsgList) {
-                    if ($subnet.NetworkSecurityGroup.Id -match $targetNsg.Name) {
-                        Write-Host "  -> Removing $($targetNsg.Name) from $($vnet.Name)/$($subnet.Name)" -ForegroundColor Yellow
-                        $subnet.NetworkSecurityGroup = $null
-                        $updated = $true
-                        break
+        # 1. Dissociate first. If the VNets cannot be listed, nothing is dissociated (the [ERROR] is
+        #    counted); an NSG still associated then fails its own delete below and is counted there.
+        Write-Host "`nDissociating NSGs from all subnets..." -ForegroundColor Yellow
+        $vnetLookup = Invoke-LabLookup -Target 'the virtual networks in the subscription' -Lookup {
+            Get-AzVirtualNetwork -ErrorAction Stop
+        }
+        foreach ($vnet in $vnetLookup.Value) {
+            $updated = $false
+            foreach ($subnet in $vnet.Subnets) {
+                if ($subnet.NetworkSecurityGroup) {
+                    # Check if this subnet's NSG is one we want to remove
+                    # (Simple check by name similarity or just blanket remove ID if it matches one of our targets)
+                    foreach ($targetNsg in $nsgList) {
+                        if ($subnet.NetworkSecurityGroup.Id -match $targetNsg.Name) {
+                            Write-Host "  -> Removing $($targetNsg.Name) from $($vnet.Name)/$($subnet.Name)" -ForegroundColor Yellow
+                            $subnet.NetworkSecurityGroup = $null
+                            $updated = $true
+                            break
+                        }
+                    }
+                }
+            }
+            if ($updated) {
+                if ($PSCmdlet.ShouldProcess($vnet.Name, 'Dissociate NSGs from subnets')) {
+                    try {
+                        $vnet | Set-AzVirtualNetwork -ErrorAction Stop | Out-Null
+                    }
+                    catch {
+                        $script:cleanupFailures++
+                        Write-Host "  -> [ERROR] Could not dissociate the NSGs from $($vnet.Name): $_" -ForegroundColor Red
                     }
                 }
             }
         }
-        if ($updated) {
-            if ($PSCmdlet.ShouldProcess($vnet.Name, 'Dissociate NSGs from subnets')) {
-                try {
-                    $vnet | Set-AzVirtualNetwork -ErrorAction Stop | Out-Null
+        
+        # Wait for azure to settle
+        Start-Sleep -Seconds 10
+
+        # 2. Delete NSGs. Each is looked up first, so "does not exist" is a fact rather than a guess
+        #    made from a failed delete.
+        foreach ($targetNsg in $nsgList) {
+            Write-Host "Removing NSG: $($targetNsg.Name)..." -ForegroundColor Yellow
+            $nsgLookup = Invoke-LabLookup -Target "NSG $($targetNsg.Name)" -Lookup {
+                Get-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -ErrorAction Stop
+            }
+            if ($nsgLookup.Failed) { continue }
+            if ($nsgLookup.Value.Count -eq 0) {
+                Write-Host "  -> NSG does not exist, skipping" -ForegroundColor Gray
+                continue
+            }
+            try {
+                if ($PSCmdlet.ShouldProcess($targetNsg.Name, 'Remove network security group')) {
+                    Remove-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -Force -ErrorAction Stop
+                    Write-Host "  -> Success" -ForegroundColor Green
                 }
-                catch {
-                    $script:cleanupFailures++
-                    Write-Host "  -> [ERROR] Could not dissociate the NSGs from $($vnet.Name): $_" -ForegroundColor Red
-                }
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete $($targetNsg.Name): $_" -ForegroundColor Red
             }
         }
     }
-    
-    # Wait for azure to settle
-    Start-Sleep -Seconds 10
 
-    # 2. Delete NSGs. Each is looked up first, so "does not exist" is a fact rather than a guess
-    #    made from a failed delete.
-    foreach ($targetNsg in $nsgList) {
-        Write-Host "Removing NSG: $($targetNsg.Name)..." -ForegroundColor Yellow
-        $nsgLookup = Invoke-LabLookup -Target "NSG $($targetNsg.Name)" -Lookup {
-            Get-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -ErrorAction Stop
-        }
-        if ($nsgLookup.Failed) { continue }
-        if ($nsgLookup.Value.Count -eq 0) {
-            Write-Host "  -> NSG does not exist, skipping" -ForegroundColor Gray
-            continue
-        }
-        try {
-            if ($PSCmdlet.ShouldProcess($targetNsg.Name, 'Remove network security group')) {
-                Remove-AzNetworkSecurityGroup -ResourceGroupName $targetNsg.RG -Name $targetNsg.Name -Force -ErrorAction Stop
-                Write-Host "  -> Success" -ForegroundColor Green
+    # ===================================
+    # Remove Application Security Groups
+    # ===================================
+    if ($RemoveASGs -or $RemoveAll) {
+        Write-Host "`n=== Removing Application Security Groups ===" -ForegroundColor Cyan
+        
+        $asgList = @(
+            @{ Name="dev-skycraft-swc-asg-auth"; RG="dev-skycraft-swc-rg" },
+            @{ Name="dev-skycraft-swc-asg-world"; RG="dev-skycraft-swc-rg" },
+            @{ Name="dev-skycraft-swc-asg-db"; RG="dev-skycraft-swc-rg" },
+            @{ Name="prod-skycraft-swc-asg-auth"; RG=$ProdResourceGroup },
+            @{ Name="prod-skycraft-swc-asg-world"; RG=$ProdResourceGroup },
+            @{ Name="prod-skycraft-swc-asg-db"; RG=$ProdResourceGroup }
+        )
+
+        foreach ($asg in $asgList) {
+            Write-Host "Removing ASG: $($asg.Name)..." -ForegroundColor Yellow
+            $asgLookup = Invoke-LabLookup -Target "ASG $($asg.Name)" -Lookup {
+                Get-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -ErrorAction Stop
             }
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Could not delete $($targetNsg.Name): $_" -ForegroundColor Red
+            if ($asgLookup.Failed) { continue }
+            if ($asgLookup.Value.Count -eq 0) {
+                Write-Host "  -> ASG does not exist, skipping" -ForegroundColor Gray
+                continue
+            }
+            try {
+                if ($PSCmdlet.ShouldProcess($asg.Name, 'Remove application security group')) {
+                    Remove-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -Force -ErrorAction Stop
+                    Write-Host "  -> Success" -ForegroundColor Green
+                }
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  -> [ERROR] Could not delete $($asg.Name): $_" -ForegroundColor Red
+            }
         }
     }
 }
-
-# ===================================
-# Remove Application Security Groups
-# ===================================
-if ($RemoveASGs -or $RemoveAll) {
-    Write-Host "`n=== Removing Application Security Groups ===" -ForegroundColor Cyan
-    
-    $asgList = @(
-        @{ Name="dev-skycraft-swc-asg-auth"; RG="dev-skycraft-swc-rg" },
-        @{ Name="dev-skycraft-swc-asg-world"; RG="dev-skycraft-swc-rg" },
-        @{ Name="dev-skycraft-swc-asg-db"; RG="dev-skycraft-swc-rg" },
-        @{ Name="prod-skycraft-swc-asg-auth"; RG=$ProdResourceGroup },
-        @{ Name="prod-skycraft-swc-asg-world"; RG=$ProdResourceGroup },
-        @{ Name="prod-skycraft-swc-asg-db"; RG=$ProdResourceGroup }
-    )
-
-    foreach ($asg in $asgList) {
-        Write-Host "Removing ASG: $($asg.Name)..." -ForegroundColor Yellow
-        $asgLookup = Invoke-LabLookup -Target "ASG $($asg.Name)" -Lookup {
-            Get-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -ErrorAction Stop
-        }
-        if ($asgLookup.Failed) { continue }
-        if ($asgLookup.Value.Count -eq 0) {
-            Write-Host "  -> ASG does not exist, skipping" -ForegroundColor Gray
-            continue
-        }
-        try {
-            if ($PSCmdlet.ShouldProcess($asg.Name, 'Remove application security group')) {
-                Remove-AzApplicationSecurityGroup -ResourceGroupName $asg.RG -Name $asg.Name -Force -ErrorAction Stop
-                Write-Host "  -> Success" -ForegroundColor Green
-            }
-        } catch {
-            $script:cleanupFailures++
-            Write-Host "  -> [ERROR] Could not delete $($asg.Name): $_" -ForegroundColor Red
-        }
-    }
-}
+$script:cleanupFailures += $lockFailures
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s) - see the [ERROR] lines above." -ForegroundColor Red
