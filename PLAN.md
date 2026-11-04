@@ -15,9 +15,9 @@ Ownership check before starting: worktree `fix/257-exit-lab-helper` is open and 
 
 - [x] Re-read all 27 issues and merged PRs; status of each issue checked against `origin/main` on 2026-11-03.
 - [ ] Close #357 and #197 (code fixed on main, last issue comments stale; #197 still owes a Portal label check by the maintainer).
-- [ ] Close #398 only after R8 (count printed `[ERROR]` lines) and R9 (Az and Graph calls outside try/catch end through `Exit-Lab`) are confirmed in code; all 63 scripts already end through `Exit-Lab`.
-- [ ] Add label `fixed-awaiting-verification` to issues that need only a live run: #370, #373, #371 (after the 3.2 disk check), #340, #290, #238, #473, #408, #432.
-- [ ] Delete stale branch `origin/fix/257-exit-lab-helper` (78 files, 2026-10-21, superseded by #410, #423, #428, #494) only after the maintainer confirms.
+- [ ] #398: the three body requirements hold on main and are tested; R8 (count printed `[ERROR]` lines) and R9 (Az and Graph calls outside try/catch end through `Exit-Lab`) are not tested (checked 2026-11-04). Implement them in block 1 or split them into a new issue before closing.
+- [x] Add label `fixed-awaiting-verification` to issues that need only a live run: #370, #373, #371, #340, #290, #238, #473, #408, #432 (done 2026-11-04; #371 still owes the 3.2 disk check).
+- [x] Delete stale branch `origin/fix/257-exit-lab-helper` (done 2026-11-04 with the maintainer's approval; tip 5311c67 stays reachable through `refs/pull/379/head`).
 
 Test subscription for live runs: the maintainer's Visual Studio Enterprise MPN subscription, confirmed 2026-11-03 (id kept out of this file). Five subscriptions share that name in the tenant; before every live write, check the id with `az account show`.
 
