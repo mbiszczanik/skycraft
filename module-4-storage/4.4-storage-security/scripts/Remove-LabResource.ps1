@@ -70,6 +70,9 @@ $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 # The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and steps that could not be carried out. Absent objects are not

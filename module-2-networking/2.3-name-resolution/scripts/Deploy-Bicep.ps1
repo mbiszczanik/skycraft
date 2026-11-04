@@ -56,6 +56,9 @@ $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
+
 $deploymentName = "Lab-2.3-DNS-$(Get-Date -Format 'yyyyMMdd-HHmm')"
 
 Write-Host "=== Lab 2.3 - Deploy Bicep (DNS) ===" -ForegroundColor Cyan -BackgroundColor Black

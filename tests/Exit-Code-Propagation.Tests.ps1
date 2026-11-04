@@ -32,6 +32,8 @@
       - the failure paths too: a lab script that sets $ErrorActionPreference to 'Stop' calls no
         Write-Error outside a function. Under Stop it ends the script before the Exit-Lab after
         it, so at the prompt a failed run leaves the previous run's $LASTEXITCODE (#398);
+      - and the same script holds a script-level trap that prints [ERROR] and ends through
+        Exit-Lab, so an Az or Graph error outside any try/catch ends in exit 1 as well (#398);
       - the last-statement rule only for the lab folders listed in $ConvertedLabs ('scripts' is
         the repository-level scripts/), which each module's pull request extends as it converts
         its scripts; a listed folder that does not exist, or holds no lab script, fails the suite;
@@ -179,7 +181,18 @@ function Get-LabExitShape {
     }, $true) | Where-Object { -not (& $inFunction $_) } |
         ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Extent.Text)" })
 
+    # A trap statement at script level whose body ends through Exit-Lab (#398).
+    # The parser keeps a script's trap statements in the block's Traps list, not in Statements.
+    $endTraps = if ($ast.EndBlock -and $ast.EndBlock.Traps) { @($ast.EndBlock.Traps) } else { @() }
+    $trapThroughExit = @($endTraps | Where-Object {
+        @($_.Body.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Exit-Lab'
+        }, $true)).Count -gt 0
+    }).Count -gt 0
+
     [PSCustomObject]@{
+        StopPreference  = $stopPreference
+        TrapThroughExit = $trapThroughExit
         EndsThroughExit = $endsThroughExit
         StopWriteError = if ($stopPreference) { $writeError } else { @() }
         LastStatement  = if ($last) { "line $($last.Extent.StartLineNumber): $(($last.Extent.Text -split '\r?\n')[0].Trim())" } else { '' }
@@ -230,6 +243,8 @@ $LabCases = foreach ($item in $LabScriptFiles) {
         endsThroughExit = $shape.EndsThroughExit
         lastStatement  = $shape.LastStatement
         stopWriteError = $shape.StopWriteError
+        stopPreference  = $shape.StopPreference
+        trapThroughExit = $shape.TrapThroughExit
     }
 }
 $EntryLabCases = @($LabCases | Where-Object { -not $_.helper })
@@ -513,6 +528,12 @@ Describe 'SkyCraft PowerShell - every lab script ends through Exit-Lab (#257)' {
         # Falling off the end leaves $LASTEXITCODE at the previous run's value, so a passing
         # re-run in the same session reads as a failure.
         $endsThroughExit | Should -BeTrue -Because "the last top-level statement is '$lastStatement'; end the successful run with Exit-Lab -FailureCount 0 (or the count)"
+    }
+
+    It "'<file>', under a Stop error preference, holds a script-level trap that ends through Exit-Lab (#398)" -ForEach @($ConvertedEntryLabCases | Where-Object { $_.stopPreference }) {
+        # Without it, an Az or Graph error outside any try/catch ends the script before any Exit-Lab,
+        # so at the prompt a failed run keeps the previous run's $LASTEXITCODE.
+        $trapThroughExit | Should -BeTrue -Because 'add: trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }'
     }
 
     It "'<lab>', excused from the Write-Error rule, still holds a violation (#398)" -ForEach $WriteErrorPendingCases {

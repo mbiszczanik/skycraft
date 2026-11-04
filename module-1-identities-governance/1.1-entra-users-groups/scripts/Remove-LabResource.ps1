@@ -454,6 +454,9 @@ $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
+
 # The Microsoft Graph modules this script calls, imported here rather than with '#Requires -Modules'
 # (issue #375): Azure Cloud Shell does not ship Microsoft.Graph.Users, and #Requires would stop the
 # script with PowerShell's own error, which names no install command. Import-LabModule imports them
