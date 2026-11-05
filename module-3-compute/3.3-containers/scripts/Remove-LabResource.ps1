@@ -420,7 +420,7 @@ if ($script:aciWorkspaceCustomerId) {
             Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is Lab 5.1's shared workspace, which Module 5 uses, so this script never deletes it." -ForegroundColor Yellow
         } elseif (-not (Test-LabDefaultWorkspace -Workspace $aciWorkspace)) {
             Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is not Azure's default workspace (DefaultWorkspace-<subscription id>-<region> in DefaultResourceGroup-<region>), so this script does not delete it. If nothing else uses it, delete it with:" -ForegroundColor Yellow
-            Write-Host "     Remove-AzResource -ResourceId '$($aciWorkspace.ResourceId)' -ApiVersion $workspaceApiVersion -Force" -ForegroundColor Yellow
+            Write-Host "     Get-AzResource -ResourceGroupName '$($aciWorkspace.ResourceGroupName)' -ResourceType 'Microsoft.OperationalInsights/workspaces' -Name '$($aciWorkspace.Name)' | Remove-AzResource -ApiVersion $workspaceApiVersion -Force" -ForegroundColor Yellow
         } elseif (-not $PSCmdlet.ShouldProcess($aciWorkspace.Name, 'Remove Log Analytics workspace')) {
             # Under -WhatIf the default group check still runs, so it shows what it would delete.
             if ($WhatIfPreference) { $script:removedDefaultWorkspaces.Add($aciWorkspace) }

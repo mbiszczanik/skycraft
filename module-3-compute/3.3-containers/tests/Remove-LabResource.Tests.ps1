@@ -645,7 +645,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the container instance''s default wor
         $run.Calls | Should -Not -Contain 'Remove-AzResource DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS'
         $run.Calls | Should -Not -Match '^Remove-AzResourceGroup'
         $run.Output | Should -Match "\[WARN\] Kept DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS in my-logs-rg: dev-skycraft-swc-aci-auth sent its logs to it, but it is not Azure's default workspace"
-        $run.Output | Should -Match "Remove-AzResource -ResourceId '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-logs-rg/providers/Microsoft\.OperationalInsights/workspaces/DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' -ApiVersion 2023-09-01 -Force"
+        $run.Output | Should -Match "Get-AzResource -ResourceGroupName 'my-logs-rg' -ResourceType 'Microsoft\.OperationalInsights/workspaces' -Name 'DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' \| Remove-AzResource -ApiVersion 2023-09-01 -Force"
     }
 
     It 'keeps the workspace when the instance could not be deleted, counted once' {

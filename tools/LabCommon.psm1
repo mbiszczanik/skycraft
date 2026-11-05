@@ -1575,4 +1575,68 @@ function Remove-LabResourceDiagnosticSetting {
     return $failures
 }
 
-Export-ModuleMember -Function Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
+# --- Output redaction (#393) ---------------------------------------------------------------
+# Azure's error text names the signed-in user, their object id and the scope, and ids carry the
+# subscription id; a learner may quote a script's output in a report or a screenshot. Every lab
+# script writes through Write-Host, so the module shadows it: the subscription id is replaced by
+# <id> in every line, and the sign-in name and object id of the signed-in user in Azure's
+# authorization text ("The client '...' with object id '...'") by <user> and <id>. Other ids and
+# names stay: some scripts print a lab user's name or a tenant id on purpose, so that the learner
+# can tell which user is missing or which tenant an error names. The
+# shadow acts only for a call from a lab script or from tools/, so the commands the learner types
+# in the same session (the module stays imported after the script) pass through unchanged.
+$script:LabGuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+# The subscription id: in a resource id, and in "Subscription: <name> (<id>)".
+$script:LabSubscriptionPattern = "(?i)(/subscriptions/)$($script:LabGuid)\b"
+$script:LabSubscriptionLabelPattern = "(?i)(\bsubscription\b[^\r\n(]{0,80}\()$($script:LabGuid)(\))"
+# The signed-in user, as Azure names them in an authorization error: "The client '<sign-in name>'
+# with object id '<id>' does not have authorization ...".
+$script:LabAuthorizationClientPattern = "(?i)(\bclient\s+['""])[^'""\r\n]+(['""]\s+with\s+object\s+id\s+['""]?)$($script:LabGuid)\b"
+$script:LabScriptPathPattern = '[/\\](module-[^/\\]+[/\\][^/\\]+[/\\]scripts|tools)[/\\][^/\\]+$'
+
+function Protect-LabText {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $safe = [regex]::Replace($Text, $script:LabSubscriptionPattern, '${1}<id>')
+    $safe = [regex]::Replace($safe, $script:LabSubscriptionLabelPattern, '${1}<id>${2}')
+    $safe = [regex]::Replace($safe, $script:LabAuthorizationClientPattern, '${1}<user>${2}<id>')
+    return $safe
+}
+
+function Write-Host {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'Deliberate: redacts ids and sign-in names in lab script output (#393); passes everything else through.')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+        [AllowNull()]
+        [object]$Object,
+
+        [switch]$NoNewline,
+
+        [object]$Separator,
+
+        [System.ConsoleColor]$ForegroundColor,
+
+        [System.ConsoleColor]$BackgroundColor
+    )
+
+    $parameter = @{}
+    foreach ($name in $PSBoundParameters.Keys) { $parameter[$name] = $PSBoundParameters[$name] }
+    $caller = [string](Get-PSCallStack | Select-Object -Skip 1 -First 1).ScriptName
+    if ($caller -match $script:LabScriptPathPattern -and $PSBoundParameters.ContainsKey('Object')) {
+        $joiner = if ($PSBoundParameters.ContainsKey('Separator')) { [string]$Separator } else { ' ' }
+        $parameter['Object'] = Protect-LabText -Text (@($Object | ForEach-Object { "$_" }) -join $joiner)
+        $parameter.Remove('Separator')
+    }
+    Microsoft.PowerShell.Utility\Write-Host @parameter
+}
+
+Export-ModuleMember -Function Write-Host, Protect-LabText, Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
