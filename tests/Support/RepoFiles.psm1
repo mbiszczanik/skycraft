@@ -45,7 +45,8 @@ function Get-RepoFile {
     foreach ($relative in $listed) {
         $path = Join-Path $Root $relative
         # A file removed from the working tree is still in the index until it is staged.
-        if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Item -LiteralPath $path }
+        # -Force: on Linux Get-Item does not return a dot-file such as .editorconfig without it.
+        if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Item -LiteralPath $path -Force }
     }
 }
 
