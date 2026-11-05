@@ -1639,4 +1639,23 @@ function Write-Host {
     Microsoft.PowerShell.Utility\Write-Host @parameter
 }
 
-Export-ModuleMember -Function Write-Host, Protect-LabText, Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
+function Write-LabWhatIfResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [AllowNull()]
+        [object]$InputObject
+    )
+
+    begin { $items = [System.Collections.Generic.List[object]]::new() }
+    process { if ($null -ne $InputObject) { $items.Add($InputObject) } }
+    end {
+        if ($items.Count -eq 0) { return }
+        # Az formats what-if results itself; render to text so the ids can be redacted.
+        $text = ($items | Out-String).TrimEnd()
+        if ([string]::IsNullOrWhiteSpace($text)) { $items; return }
+        Microsoft.PowerShell.Utility\Write-Host (Protect-LabText -Text $text)
+    }
+}
+
+Export-ModuleMember -Function Write-LabWhatIfResult, Write-Host, Protect-LabText, Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting

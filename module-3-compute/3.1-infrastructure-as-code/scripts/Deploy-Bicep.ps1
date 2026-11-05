@@ -178,7 +178,7 @@ try {
 
     if ($WhatIf) {
         Write-Host "Running in what-if mode (dry run)..." -ForegroundColor Cyan
-        Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+        Get-AzSubscriptionDeploymentWhatIfResult @deployParams | Write-LabWhatIfResult
         Write-Host "`nWhat-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
     }
     else {

@@ -253,7 +253,7 @@ catch {
 Write-Host "`n[5/5] Deployment Results:" -ForegroundColor Yellow
 
 if ($WhatIf) {
-    $result
+    $result | Write-LabWhatIfResult
     Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
 } else {
     if ($deployment.ProvisioningState -ne 'Succeeded') {
