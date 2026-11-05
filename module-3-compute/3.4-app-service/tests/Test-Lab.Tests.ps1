@@ -171,8 +171,14 @@ function Get-AzResource {
         [string]$ResourceGroupName,
         [string]$Name,
         [switch]$ExpandProperties,
+        [string]$ApiVersion,
         [Parameter(ValueFromRemainingArguments)]$Rest
     )
+    # An autoscale setting read by id: the lab lists them, then reads each at a pinned version (#452).
+    if ($ResourceId -like '*/autoscalesettings/*') {
+        if ($ApiVersion -ne '2022-10-01') { throw "stub: autoscale setting read without the pinned api-version ($ApiVersion)" }
+        return @(Get-StubAutoscaleSetting) | Where-Object { $_.ResourceId -eq $ResourceId }
+    }
     if ($ResourceId) {
         # The app's or the slot's raw body, read for its VNet integration.
         $subnet = "$script:Rg/providers/Microsoft.Network/virtualNetworks/dev-skycraft-swc-vnet/subnets/AppServiceSubnet"
@@ -198,6 +204,10 @@ function Get-AzResource {
     if ($Name) { throw "stub: the lab finds the autoscale setting through its target, not by name ($Name)" }
     if ($env:SKYCRAFT_STUB_AUTOSCALE -eq 'fail') { Write-Error 'stub lookup failure: Get-AzResource autoscalesettings'; return }
 
+    Get-StubAutoscaleSetting
+}
+
+function Get-StubAutoscaleSetting {
     $plan = "$script:Rg/providers/Microsoft.Web/serverfarms/dev-skycraft-swc-asp"
     $vmss = "$script:Rg/providers/Microsoft.Compute/virtualMachineScaleSets/dev-skycraft-swc-vmss"
     New-StubAutoscale -Name 'dev-skycraft-swc-vmss-autoscale' -Target $vmss

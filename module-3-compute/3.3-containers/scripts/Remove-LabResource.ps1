@@ -137,6 +137,14 @@ if ($Force) { $ConfirmPreference = 'None' }
 # exits 1 if any did.
 $script:cleanupFailures = 0
 
+# Pinned api-versions: without one, Az.Resources asks for the provider's newest, which a region may
+# not serve yet (#452). Listed in Sweden Central, stable.
+$containerAppApiVersion = '2024-03-01'
+$caeApiVersion          = '2024-03-01'
+$workspaceApiVersion    = '2023-09-01'
+$aciApiVersion          = '2023-05-01'
+$acrApiVersion          = '2023-07-01'
+
 # Whether a lookup's error says the resource does not exist, rather than that the lookup failed.
 # Get-AzResource, asked for one name and type, reports a missing resource as an ARM 404: "The
 # Resource '<type>/<name>' under resource group '<rg>' was not found.", code ResourceNotFound; when
@@ -183,12 +191,12 @@ function Test-LabNotFoundError {
 function Invoke-LabWorkspaceDelete {
     param([Parameter(Mandatory)][string]$ResourceId)
     try {
-        Remove-AzResource -ResourceId $ResourceId -Force -ErrorAction Stop | Out-Null
+        Remove-AzResource -ResourceId $ResourceId -ApiVersion $workspaceApiVersion -Force -ErrorAction Stop | Out-Null
     } catch {
         if (-not (Test-LabNotFoundError -ErrorRecord $_)) { throw }
         $deleteError = $_
         try {
-            $null = Get-AzResource -ResourceId $ResourceId -ErrorAction Stop
+            $null = Get-AzResource -ResourceId $ResourceId -ApiVersion $workspaceApiVersion -ErrorAction Stop
         } catch {
             if (Test-LabNotFoundError -ErrorRecord $_) { return }
             throw
@@ -287,14 +295,14 @@ Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 # environment could not be (KeepWhenFailed names the steps whose failure keeps it, KeepReason
 # says why). A step without Find looks its one resource up by name.
 $steps = @(
-    @{ Type = 'Container App';              Name = $AcaName; ResourceType = 'Microsoft.App/containerApps'
-       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
-    @{ Type = 'Container Apps Environment'; Name = $CaeName; ResourceType = 'Microsoft.App/managedEnvironments'
+    @{ Type = 'Container App';              Name = $AcaName; ResourceType = 'Microsoft.App/containerApps'; ApiVersion = $containerAppApiVersion
+       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -ApiVersion $step.ApiVersion -Force -ErrorAction Stop | Out-Null } }
+    @{ Type = 'Container Apps Environment'; Name = $CaeName; ResourceType = 'Microsoft.App/managedEnvironments'; ApiVersion = $caeApiVersion
        KeepWhenFailed = @('Container App'); KeepReason = 'may still be in it'
        # Expanded, so the workspace step below can find the workspace this environment logs to.
-       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/managedEnvironments' -Name $CaeName -ExpandProperties -ErrorAction Stop }
-       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -Force -ErrorAction Stop | Out-Null } }
-    @{ Type = 'Log Analytics workspace';    Name = $caeWorkspaceLabel; ResourceType = 'Microsoft.OperationalInsights/workspaces'
+       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/managedEnvironments' -Name $CaeName -ApiVersion $caeApiVersion -ExpandProperties -ErrorAction Stop }
+       Remove = { param($r) Remove-AzResource -ResourceId $r.ResourceId -ApiVersion $step.ApiVersion -Force -ErrorAction Stop | Out-Null } }
+    @{ Type = 'Log Analytics workspace';    Name = $caeWorkspaceLabel; ResourceType = 'Microsoft.OperationalInsights/workspaces'; ApiVersion = $workspaceApiVersion
        KeepWhenFailed = @('Container App', 'Container Apps Environment'); KeepReason = 'may still send its logs to them'
        # The workspaces in this resource group with the Portal's automatic name, and the one the
        # environment sends its logs to, found by its customer id anywhere in the subscription
@@ -303,16 +311,18 @@ $steps = @(
            Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction Stop |
                Where-Object { $_.Name -match $autoWorkspacePattern }
            if ($script:caeWorkspaceCustomerId) {
-               Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
+               # A list read with -ExpandProperties uses the provider's newest version: list, then read by id.
+               Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction Stop |
+                   ForEach-Object { Get-AzResource -ResourceId $_.ResourceId -ApiVersion $workspaceApiVersion -ExpandProperties -ErrorAction Stop } |
                    Where-Object { "$($_.Properties.customerId)" -eq $script:caeWorkspaceCustomerId }
            }
        }
        Remove = { param($r) Invoke-LabWorkspaceDelete -ResourceId $r.ResourceId } }
-    @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'
+    @{ Type = 'Container Instance';         Name = $AciName; ResourceType = 'Microsoft.ContainerInstance/containerGroups'; ApiVersion = $aciApiVersion
        # Expanded, so the step after the loop can find the workspace the instance logs to.
-       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerInstance/containerGroups' -Name $AciName -ExpandProperties -ErrorAction Stop }
+       Find = { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerInstance/containerGroups' -Name $AciName -ApiVersion $aciApiVersion -ExpandProperties -ErrorAction Stop }
        Remove = { param($r) Remove-AzContainerGroup -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
-    @{ Type = 'Container Registry';         Name = $AcrName; ResourceType = 'Microsoft.ContainerRegistry/registries'
+    @{ Type = 'Container Registry';         Name = $AcrName; ResourceType = 'Microsoft.ContainerRegistry/registries'; ApiVersion = $acrApiVersion
        Remove = { param($r) Remove-AzContainerRegistry -Name $r.Name -ResourceGroupName $ResourceGroupName -ErrorAction Stop | Out-Null } }
 )
 
@@ -333,7 +343,7 @@ foreach ($step in $steps) {
     # resolves its target through the generic ARM lookup and the app/environment/workspace steps
     # delete through it too. The lookup runs before the confirmation, so that the prompt and
     # -WhatIf name the resource itself; a lookup changes nothing.
-    $find = if ($step.Find) { $step.Find } else { { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ErrorAction Stop } }
+    $find = if ($step.Find) { $step.Find } else { { Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType $step.ResourceType -Name $step.Name -ApiVersion $step.ApiVersion -ErrorAction Stop } }
     $lookup = Invoke-LabLookup -Target "$($step.Type) '$($step.Name)'" -Lookup $find
     if ($lookup.Failed) {
         $stepFailed[$step.Type] = 'looked up'
@@ -394,7 +404,8 @@ if ($script:aciWorkspaceCustomerId) {
         Write-Host "  -> [SKIP] Kept: the Container Instance could not be $($stepFailed['Container Instance']) and may still send its logs to it." -ForegroundColor Yellow
     } else {
         $aciWorkspaceLookup = Invoke-LabLookup -Target "the Log Analytics workspace of $AciName (customer id $($script:aciWorkspaceCustomerId))" -Lookup {
-            Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ExpandProperties -ErrorAction Stop |
+            Get-AzResource -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction Stop |
+                ForEach-Object { Get-AzResource -ResourceId $_.ResourceId -ApiVersion $workspaceApiVersion -ExpandProperties -ErrorAction Stop } |
                 Where-Object { "$($_.Properties.customerId)" -eq $script:aciWorkspaceCustomerId }
         }
         $aciWorkspace = @($aciWorkspaceLookup.Value | Where-Object { $_ }) | Select-Object -First 1
@@ -406,7 +417,7 @@ if ($script:aciWorkspaceCustomerId) {
             Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is Lab 5.1's shared workspace, which Module 5 uses, so this script never deletes it." -ForegroundColor Yellow
         } elseif (-not (Test-LabDefaultWorkspace -Workspace $aciWorkspace)) {
             Write-Host "  -> [WARN] Kept $($aciWorkspace.Name) in $($aciWorkspace.ResourceGroupName): $AciName sent its logs to it, but it is not Azure's default workspace (DefaultWorkspace-<subscription id>-<region> in DefaultResourceGroup-<region>), so this script does not delete it. If nothing else uses it, delete it with:" -ForegroundColor Yellow
-            Write-Host "     Remove-AzResource -ResourceId '$($aciWorkspace.ResourceId)' -Force" -ForegroundColor Yellow
+            Write-Host "     Remove-AzResource -ResourceId '$($aciWorkspace.ResourceId)' -ApiVersion $workspaceApiVersion -Force" -ForegroundColor Yellow
         } elseif (-not $PSCmdlet.ShouldProcess($aciWorkspace.Name, 'Remove Log Analytics workspace')) {
             # Under -WhatIf the default group check still runs, so it shows what it would delete.
             if ($WhatIfPreference) { $script:removedDefaultWorkspaces.Add($aciWorkspace) }

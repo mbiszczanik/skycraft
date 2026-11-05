@@ -159,7 +159,7 @@ function Invoke-StubLookup {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param($ResourceGroupName, $ResourceType, $Name, $ResourceId, [switch]$ExpandProperties)
+    param($ResourceGroupName, $ResourceType, $Name, $ResourceId, [switch]$ExpandProperties, $ApiVersion)
     # A lookup by id: not found once the stub removed it; SKYCRAFT_STUB_STILL_THERE 'name,...' keeps it.
     if ($ResourceId) {
         $idName = ($ResourceId -split '/')[-1]
@@ -167,6 +167,9 @@ function Get-AzResource {
         if ($script:Removed[$idName] -and @($env:SKYCRAFT_STUB_STILL_THERE -split ',') -notcontains $idName) {
             throw "ResourceNotFound : The Resource '$idName' was not found."
         }
+        # A workspace read by id (the listing is read per id, #452) carries its properties.
+        $workspace = @(Get-StubWorkspace | Where-Object { $_.ResourceId -eq $ResourceId }) | Select-Object -First 1
+        if ($workspace) { return $workspace }
         return [pscustomobject]@{ Name = $idName; ResourceId = $ResourceId }
     }
     # A lookup without a name lists a type: it is logged and keyed by the type, and one without a
@@ -227,7 +230,7 @@ function Get-AzResource {
 
 function Remove-AzResource {
     [CmdletBinding()]
-    param($ResourceId, [switch]$Force)
+    param($ResourceId, $ApiVersion, [switch]$Force)
     Invoke-StubGate -Name 'Remove-AzResource' -Target (($ResourceId -split '/')[-1])
 }
 
@@ -642,7 +645,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the container instance''s default wor
         $run.Calls | Should -Not -Contain 'Remove-AzResource DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS'
         $run.Calls | Should -Not -Match '^Remove-AzResourceGroup'
         $run.Output | Should -Match "\[WARN\] Kept DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS in my-logs-rg: dev-skycraft-swc-aci-auth sent its logs to it, but it is not Azure's default workspace"
-        $run.Output | Should -Match "Remove-AzResource -ResourceId '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-logs-rg/providers/Microsoft\.OperationalInsights/workspaces/DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' -Force"
+        $run.Output | Should -Match "Remove-AzResource -ResourceId '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-logs-rg/providers/Microsoft\.OperationalInsights/workspaces/DefaultWorkspace-00000000-0000-0000-0000-000000000000-EUS' -ApiVersion 2023-09-01 -Force"
     }
 
     It 'keeps the workspace when the instance could not be deleted, counted once' {

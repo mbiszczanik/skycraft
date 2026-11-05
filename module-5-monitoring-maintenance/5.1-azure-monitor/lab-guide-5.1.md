@@ -166,7 +166,7 @@ The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the 
 
 6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
 7. Click **Review + create** → **Create**.
-8. Open the VM → **Extensions + applications**. The wizard has installed `AzureMonitorLinuxAgent` itself: it is listed with **Provisioning succeeded** and the `Project` tag only. Run the block below only if the agent is missing, or to give it all four tags (the Portal offers no tags field for it). Running the block over an installed agent only sets its tags:
+8. Open the VM and, under **Settings** (expand it if it is collapsed), click **Extensions + applications**. The wizard has installed `AzureMonitorLinuxAgent` itself: it is listed with **Provisioning succeeded** and the `Project` tag only. Run the block below only if the agent is missing, or to give it all four tags (the Portal offers no tags field for it). Running the block over an installed agent only sets its tags:
 
    ```powershell
    $vm = Get-AzVM -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc-auth-vm
@@ -541,7 +541,7 @@ Lab 1.3's delete lock on the platform resource group refuses a manual delete of 
 **Solution**:
 
 - Ensure the VM is **Running**.
-- Check that the VM lists `AzureMonitorLinuxAgent` under **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
+- Check that the VM lists `AzureMonitorLinuxAgent` under **Settings** (expand it if it is collapsed) → **Extensions + applications** with **Provisioning succeeded**; if not, run the install block in Step 5.1.2.
 - Wait for the agent's first data: the first `Heartbeat` row can take up to about 90 minutes after the install (often much sooner on a workspace that already has the table), and on a new workspace the `Heartbeat` table appears only with it; a `BadRequest` or "Failed to resolve table" error before that is expected (Step 5.1.3). If more than 90 minutes have passed since the install, the agent is not sending: check that the VM is running and that the rule is associated with it.
 - Check if the **Data Collection Rule** is correctly associated with the VM.
 - `Heartbeat` has rows but `Perf` is empty: the rule must send **Performance Counters** to the workspace (destination type **Log Analytics Workspaces**). A rule made by VM insights sends `InsightsMetrics` instead.

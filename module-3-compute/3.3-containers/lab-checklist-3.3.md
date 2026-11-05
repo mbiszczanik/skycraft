@@ -117,7 +117,7 @@ Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc
 
 # Check the environment's logs destination
 (Get-AzResource -ResourceGroupName dev-skycraft-swc-rg -ResourceType 'Microsoft.App/managedEnvironments' `
-    -Name dev-skycraft-swc-cae-02 -ExpandProperties).Properties.appLogsConfiguration.destination
+    -Name dev-skycraft-swc-cae-02 -ApiVersion 2024-03-01 -ExpandProperties).Properties.appLogsConfiguration.destination
 
 # Expected output:
 # azure-monitor

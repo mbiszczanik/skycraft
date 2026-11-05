@@ -133,7 +133,9 @@ function Get-LabConsumptionOnlyEnvironment {
         [Parameter(Mandatory = $true)] [string]$ResourceGroupName,
         [Parameter(Mandatory = $true)] [string]$Name
     )
-    Get-AzResource -ResourceType 'Microsoft.App/managedEnvironments' -ExpandProperties -ErrorAction Stop |
+    # List, then read each by id at a pinned version: -ExpandProperties on a list uses the newest (#452).
+    Get-AzResource -ResourceType 'Microsoft.App/managedEnvironments' -ErrorAction Stop |
+        ForEach-Object { Get-AzResource -ResourceId $_.ResourceId -ApiVersion '2024-03-01' -ExpandProperties -ErrorAction Stop } |
         Where-Object { $_ -and $_.Name -eq $Name -and $_.ResourceGroupName -eq $ResourceGroupName -and -not @($_.Properties.workloadProfiles | Where-Object { $_ }) } |
         Select-Object -First 1
 }
@@ -153,7 +155,7 @@ if ($legacyCae) {
 }
 
 # A taken registry name otherwise fails the bootstrap, as AlreadyInUse (#438).
-$acrOwned = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerRegistry/registries' -Name $AcrName -ErrorAction SilentlyContinue)
+$acrOwned = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.ContainerRegistry/registries' -Name $AcrName -ApiVersion '2023-07-01' -ErrorAction SilentlyContinue)
 if (-not (Test-LabGlobalName -Kind ContainerRegistry -Name $AcrName -ParameterName 'AcrName' -Owned $acrOwned)) {
     Exit-Lab -FailureCount 1
 }

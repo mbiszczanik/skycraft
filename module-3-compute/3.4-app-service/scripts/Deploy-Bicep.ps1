@@ -96,7 +96,7 @@ Write-Host "  Web app: $AppName" -ForegroundColor Gray
 Write-Host "  Plan SKU: $PlanSku" -ForegroundColor Gray
 
 # 2. A taken app name otherwise fails the deployment after the plan is created (#438).
-$appOwned = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.Web/sites' -Name $AppName -ErrorAction SilentlyContinue)
+$appOwned = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.Web/sites' -Name $AppName -ApiVersion '2024-04-01' -ErrorAction SilentlyContinue)
 if (-not (Test-LabGlobalName -Kind WebApp -Name $AppName -ParameterName 'AppName' -Owned $appOwned -Location $Location)) {
     Exit-Lab -FailureCount 1
 }
