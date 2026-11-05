@@ -809,8 +809,8 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
         # 'Confirm **Service endpoints** shows:' names the setting to read, not a control to click,
         # on DatabaseSubnet and on WorldSubnet of both VNets (#283): WorldSubnet's 'Microsoft.Storage' is a check, not a click.
         @{ lab = '2.2'; id = '2.2.21'
-           labels = @('dev-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet',
-                      'prod-skycraft-swc-vnet', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
+           labels = @('dev-skycraft-swc-vnet', 'Settings', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet',
+                      'prod-skycraft-swc-vnet', 'Settings', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
            expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage; Microsoft.Storage; Microsoft.Sql; Microsoft.Storage; Microsoft.Storage' }
         # #344: the step then adds both VMs to the egress pool; ticking a row of the panel's table is no label.
         # #353: then both NICs into their ASGs, and the effective rules on the VM and the DB NSG.

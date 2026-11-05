@@ -650,7 +650,7 @@ Create health probe and rule for authentication servers:
 
 **Backend Pool**:
 
-4. Click **Backend pools** → **+ Add**.
+4. Under **Settings** (expand it if it is collapsed), click **Backend pools** → **+ Add**.
 5. Fill in:
 
 | Field                          | Value                         |
@@ -663,7 +663,7 @@ Create health probe and rule for authentication servers:
 
 **Load Balancing Rule**:
 
-7. Click **Load balancing rules** → **+ Add**.
+7. Under **Settings** (expand it if it is collapsed), click **Load balancing rules** → **+ Add**.
 8. Fill in:
 
 | Field                      | Value                            |
@@ -709,7 +709,7 @@ $lb | Set-AzLoadBalancer | Out-Null
 
 The load balancing rules do not give the backend VMs outbound access, and the VNet subnets are private, so a Module 3 VM reaches the internet (package installs, VM extensions) only through an outbound rule. One frontend IP can carry only one outbound rule, so the VMs do not get a rule per role pool: they share one egress pool, `dev-skycraft-swc-lb-be-outbound`, which Lab 3.2 puts both VMs into besides their role pools.
 
-12. Click **Backend pools** → **+ Add**.
+12. Under **Settings** (expand it if it is collapsed), click **Backend pools** → **+ Add**.
 13. Fill in:
 
 | Field                          | Value                             |
@@ -1496,7 +1496,7 @@ Test your understanding with these questions:
 
 **Solution**:
 
-- Check current quota usage: **Subscriptions** → **Usage + quotas**
+- Check current quota usage: **Subscriptions** → your subscription → under **Settings** (expand it if it is collapsed), **Usage + quotas**
 - Request quota increase if needed
 - Verify public IP is Standard SKU (matches Standard Load Balancer requirement)
 - Use existing public IPs where possible

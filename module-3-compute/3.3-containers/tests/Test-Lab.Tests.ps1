@@ -177,6 +177,12 @@ function Get-AzResource {
     }
 
     if ($ResourceType -ne 'Microsoft.App/containerApps') { throw "stub: unexpected Get-AzResource call (type '$ResourceType', name '$Name')" }
+    # The app is read at a pinned version (#452); a lookup can fail the way ARM fails it.
+    if ($Rest -notcontains '2024-03-01') { throw 'stub: container app read without the pinned api-version' }
+    switch ($script:Mode) {
+        'acadenied'   { Write-Error -ErrorId 'AuthorizationFailed' -Message "The client 'stub' does not have authorization to perform action 'read' over scope 'Microsoft.App/containerApps'."; return }
+        'acanotfound' { Write-Error -ErrorId 'ResourceNotFound' -Message "The Resource 'Microsoft.App/containerApps/$Name' under resource group '$ResourceGroupName' was not found."; return }
+    }
     $scale = if ($script:Mode -eq 'portaldefaults') {
         [pscustomobject]@{ minReplicas = 0; maxReplicas = 10; rules = @([pscustomobject]@{ name = 'http-scaler'; http = [pscustomobject]@{ metadata = [pscustomobject]@{ concurrentRequests = '10' } } }) }
     } else {
@@ -199,7 +205,7 @@ function Get-AzResource {
 '@
 
     function Invoke-ValidatorScript {
-        param([pscustomobject]$Stub, [ValidateSet('guide', 'powershell', 'nologs', 'nocontainers', 'portaldefaults', 'drift')][string]$Aca)
+        param([pscustomobject]$Stub, [ValidateSet('guide', 'powershell', 'nologs', 'nocontainers', 'portaldefaults', 'drift', 'acadenied', 'acanotfound')][string]$Aca)
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
             SKYCRAFT_STUB_ACA = $Aca
         }
@@ -221,7 +227,9 @@ function Get-AzResource {
     $script:NoLogs         = Invoke-ValidatorScript -Stub $script:Stub -Aca 'nologs'
     $script:PortalDefaults = Invoke-ValidatorScript -Stub $script:Stub -Aca 'portaldefaults'
     $script:Drift          = Invoke-ValidatorScript -Stub $script:Stub -Aca 'drift'
-    $script:AllRuns        = @($script:AsGuide, $script:AsPowerShell, $script:NoLogs, $script:NoContainers, $script:PortalDefaults, $script:Drift)
+    $script:AcaDenied      = Invoke-ValidatorScript -Stub $script:Stub -Aca 'acadenied'
+    $script:AcaNotFound    = Invoke-ValidatorScript -Stub $script:Stub -Aca 'acanotfound'
+    $script:AllRuns        = @($script:AsGuide, $script:AsPowerShell, $script:NoLogs, $script:NoContainers, $script:PortalDefaults, $script:Drift, $script:AcaDenied, $script:AcaNotFound)
 }
 
 AfterAll {
@@ -241,6 +249,23 @@ Describe 'Lab 3.3 Test-Lab.ps1 - test harness' {
         $called = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) |
             ForEach-Object { $_.GetCommandName() } | Where-Object { $_ -match '^\w+-Az' } | Sort-Object -Unique
         @($called | Where-Object { $_ -notin $script:StubCommands }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Lab 3.3 Test-Lab.ps1 - a failed container app lookup is not a missing app (#452)' {
+
+    It 'fails with the error text, counted, when the lookup is denied' {
+        $run = $script:AcaDenied
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'ACA dev-skycraft-swc-aca-world could not be looked up: .*does not have authorization'
+        $run.Output | Should -Not -Match 'ACA dev-skycraft-swc-aca-world not found'
+    }
+
+    It 'still reports an app that is not found as not found' {
+        $run = $script:AcaNotFound
+        $run.ExitCode | Should -Not -Be 0
+        $run.Output | Should -Match 'ACA dev-skycraft-swc-aca-world not found'
+        $run.Output | Should -Not -Match 'could not be looked up'
     }
 }
 

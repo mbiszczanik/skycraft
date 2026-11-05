@@ -43,7 +43,14 @@ BeforeAll {
 
     function Get-AzResource {
         [CmdletBinding()]
-        param([string]$ResourceType, [string]$Name, [string]$ResourceGroupName, [switch]$ExpandProperties)
+        param([string]$ResourceType, [string]$Name, [string]$ResourceGroupName, [switch]$ExpandProperties, [string]$ResourceId, [string]$ApiVersion)
+        if ($ResourceId) {
+            # The listing is read per id at a pinned version (#452).
+            $script:LookupCalls.Add("id:$(($ResourceId -split '/')[-1])|$ApiVersion|$ExpandProperties")
+            if ($script:LookupError) { Write-Error -ErrorId 'AuthorizationFailed' -Message $script:LookupError }
+            $script:Environments | Where-Object { $_.ResourceId -eq $ResourceId }
+            return
+        }
         $script:LookupCalls.Add("$ResourceType|$Name|$ResourceGroupName|$ExpandProperties")
         if ($script:LookupError) { Write-Error -ErrorId 'AuthorizationFailed' -Message $script:LookupError }
         # As Az.Resources did live on 2026-10-24: a lookup by name without a resource group, with
@@ -60,6 +67,7 @@ BeforeAll {
         [pscustomobject]@{
             Name              = $Name
             ResourceGroupName = $ResourceGroupName
+            ResourceId        = "/subscriptions/0/resourceGroups/$ResourceGroupName/providers/Microsoft.App/managedEnvironments/$Name"
             Properties        = [pscustomobject]@{ workloadProfiles = $WorkloadProfiles }
         }
     }
@@ -77,7 +85,8 @@ Describe 'Lab 3.3 Deploy-Bicep.ps1 - a Consumption-only environment stops the de
         $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae-02' -ResourceGroupName 'dev-skycraft-swc-rg' -WorkloadProfiles $null)
         $found = Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02'
         $found.Name | Should -Be 'dev-skycraft-swc-cae-02'
-        $script:LookupCalls | Should -Contain 'Microsoft.App/managedEnvironments|||True'
+        $script:LookupCalls | Should -Contain 'Microsoft.App/managedEnvironments|||False'
+        $script:LookupCalls | Should -Contain 'id:dev-skycraft-swc-cae-02|2024-03-01|True'
     }
 
     It 'returns nothing for a Workload profiles environment, which the template deploys onto' {

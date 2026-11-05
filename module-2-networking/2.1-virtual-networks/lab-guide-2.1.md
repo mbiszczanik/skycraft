@@ -929,7 +929,7 @@ It asks before each delete (`-WhatIf` lists them without deleting anything; `-Fo
 
 - Azure Bastion requires **Standard SKU** public IP
 - Cannot use Basic SKU
-- Verify: **Public IP** → **Configuration** → **SKU** shows "Standard"
+- Verify: **Public IP** → under **Settings** (expand it if it is collapsed), **Configuration** → **SKU** shows "Standard"
 - Recreate public IP if wrong SKU was selected
 
 ### Issue 6: Network Watcher not available

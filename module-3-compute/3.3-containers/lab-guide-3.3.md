@@ -569,7 +569,7 @@ The script finds `DefaultWorkspace-<subscription id>-EUS` only through the conta
 ```powershell
 Get-AzResource -ResourceGroupName 'DefaultResourceGroup-EUS' |
     Select-Object Name, ResourceType, ResourceId
-Remove-AzResource -ResourceId '<ResourceId of DefaultWorkspace-... from above>' -Force
+Remove-AzResource -ResourceId '<ResourceId of DefaultWorkspace-... from above>' -ApiVersion 2023-09-01 -Force
 # Only if the list above showed nothing but that workspace:
 Remove-AzResourceGroup -Name 'DefaultResourceGroup-EUS' -Force
 ```

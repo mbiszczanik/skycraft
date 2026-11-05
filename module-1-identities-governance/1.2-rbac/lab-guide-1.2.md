@@ -627,7 +627,7 @@ Complete this checklist to verify successful lab completion:
 1. Wait 5 minutes after creating users/groups (synchronization delay)
 2. Search by exact name: "SkyCraft-Developers"
 3. Refresh the browser (F5)
-4. Verify the user/group exists: **Entra ID** → **Users** or **Groups**
+4. Verify the user/group exists: **Entra ID** → **Manage** (expand it if it is collapsed) → **Users** or **Groups**
 
 ### Issue 3: Role assignment doesn't show in "Check access"
 

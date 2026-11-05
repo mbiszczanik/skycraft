@@ -147,10 +147,10 @@ function Get-AzVirtualNetwork {
         'prod-*'     { 'prod-to-hub' }
     }
     $links = @()
-    if ($Name -like 'prod-*' -and $env:SKYCRAFT_STUB_LINK -eq '1') {
+    if ($Name -like 'prod-*' -and $env:SKYCRAFT_STUB_LINK -in '1', '2') {
         $links = @([pscustomobject]@{
             Name        = 'AppServiceLink'
-            Link        = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Web/serverfarms/prod-skycraft-swc-asp'
+            Link        = if ($env:SKYCRAFT_STUB_LINK -eq '2') { '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Foo/things/prod-skycraft-swc-thing' } else { '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft.Web/serverfarms/prod-skycraft-swc-asp' }
             AllowDelete = $false
         })
     }
@@ -189,7 +189,8 @@ function Remove-AzPublicIpAddress {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId)
+    param([string]$ResourceId, [string]$ApiVersion)
+    Write-StubCall -Name "Get-AzResource:$(($ResourceId -split '/')[-1])@$ApiVersion"
     if (Invoke-StubLookup -Name "Get-AzResource:$(($ResourceId -split '/')[-1])") { return }
     [pscustomobject]@{ ResourceId = $ResourceId }
 }
@@ -243,6 +244,7 @@ function Invoke-AzRestMethod {
             [string[]]$ArgumentList = @('-Force'),
             [switch]$Empty,
             [switch]$Link,
+            [switch]$OtherLinkType,
             [string]$Dns = '0'
         )
 
@@ -253,7 +255,7 @@ function Invoke-AzRestMethod {
             SKYCRAFT_STUB_FAIL   = $Fail -join ','
             SKYCRAFT_STUB_LOOKUP = $Lookup -join ','
             SKYCRAFT_STUB_EMPTY  = if ($Empty) { '1' } else { '0' }
-            SKYCRAFT_STUB_LINK   = if ($Link) { '1' } else { '0' }
+            SKYCRAFT_STUB_LINK   = if ($OtherLinkType) { '2' } elseif ($Link) { '1' } else { '0' }
             SKYCRAFT_STUB_DNS    = $Dns
             SKYCRAFT_STUB_LOG    = $logPath
         }
@@ -290,6 +292,7 @@ function Invoke-AzRestMethod {
     )
     $script:LinkOrphaned   = Invoke-CleanupScript -Stub $script:Stub -Link -Lookup 'Get-AzResource:prod-skycraft-swc-asp=notfound'
     $script:LinkUnverified = Invoke-CleanupScript -Stub $script:Stub -Link -Lookup 'Get-AzResource:prod-skycraft-swc-asp=denied'
+    $script:LinkOtherType  = Invoke-CleanupScript -Stub $script:Stub -OtherLinkType
 
     $script:DnsLinks     = Invoke-CleanupScript -Stub $script:Stub -Dns '1'
     $script:DnsDenied    = Invoke-CleanupScript -Stub $script:Stub -Dns 'denied'
@@ -297,7 +300,7 @@ function Invoke-AzRestMethod {
 
     $script:AllRuns = @(
         $script:Clean, $script:WhatIf, $script:Nothing, $script:NotFound, $script:LookupsFail, $script:RemovalsFail,
-        $script:LinkOrphaned, $script:LinkUnverified, $script:DnsLinks, $script:DnsDenied, $script:DnsWhatIf
+        $script:LinkOrphaned, $script:LinkUnverified, $script:LinkOtherType, $script:DnsLinks, $script:DnsDenied, $script:DnsWhatIf
     )
 }
 
@@ -421,6 +424,18 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - the preflight tells an orphan from an
         $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^\r\n]*target unverified'
         $run.Output | Should -Not -Match 'ORPHANED'
         $run.Output | Should -Not -Match 'orphaned link\(s\)'
+    }
+
+    It 'reads the link target at a pinned api-version (#452)' {
+        $script:LinkOrphaned.Calls | Should -Contain 'Get-AzResource:prod-skycraft-swc-asp@2024-04-01'
+    }
+
+    It 'leaves a link whose target type has no pinned api-version unverified, without a lookup (#452)' {
+        $run = $script:LinkOtherType
+        $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^
+]*target unverified'
+        $run.Output | Should -Not -Match 'ORPHANED'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzResource:*' }) | Should -BeNullOrEmpty
     }
 
     It 'never changes the exit code on its own' {

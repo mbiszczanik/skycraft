@@ -260,11 +260,16 @@ foreach ($lab in $labVnets) {
     foreach ($link in $links) {
         # Only a lookup that reports the target as not found proves it gone; any other failure
         # leaves it unverified, rather than calling a link whose target may still exist an orphan.
+        # Read by id at a pinned version (#452); a target type without one stays unverified.
         $targetExists = $null
-        try {
-            $targetExists = [bool](Get-AzResource -ResourceId $link.LinkedResourceId -ErrorAction Stop)
-        } catch {
-            $targetExists = if (Test-LabNotFoundError -ErrorRecord $_) { $false } else { $null }
+        $targetType = if ("$($link.LinkedResourceId)" -match '/providers/(?<type>[^/]+/[^/]+)/') { $Matches['type'] } else { '' }
+        $targetApiVersion = @{ 'microsoft.web/serverfarms' = '2024-04-01' }[$targetType.ToLowerInvariant()]
+        if ($targetApiVersion) {
+            try {
+                $targetExists = [bool](Get-AzResource -ResourceId $link.LinkedResourceId -ApiVersion $targetApiVersion -ErrorAction Stop)
+            } catch {
+                $targetExists = if (Test-LabNotFoundError -ErrorRecord $_) { $false } else { $null }
+            }
         }
 
         if ($targetExists -eq $false) { $orphanedLinkCount++ }

@@ -81,7 +81,7 @@ function Test-SiteVnetIntegration {
     param($Site, [string]$Label)
     $props = $null
     try {
-        $props = (Get-AzResource -ResourceId $Site.Id -ExpandProperties -ErrorAction Stop).Properties
+        $props = (Get-AzResource -ResourceId $Site.Id -ApiVersion '2024-04-01' -ExpandProperties -ErrorAction Stop).Properties
     } catch {
         Write-Host "  [FAIL] $Label VNet integration could not be read: $($_.Exception.Message)" -ForegroundColor Red
         $script:failures++
@@ -153,7 +153,9 @@ if (-not $asp) {
     $asRes = $null
     $lookupError = $null
     try {
-        $asRes = @(Get-AzResource -ResourceType 'Microsoft.Insights/autoscalesettings' -ExpandProperties -ErrorAction Stop |
+        # List, then read each by id at a pinned version: -ExpandProperties on a list uses the newest (#452).
+        $asRes = @(Get-AzResource -ResourceType 'Microsoft.Insights/autoscalesettings' -ErrorAction Stop |
+                ForEach-Object { Get-AzResource -ResourceId $_.ResourceId -ApiVersion '2022-10-01' -ExpandProperties -ErrorAction Stop } |
                 Where-Object { $_ -and "$($_.Properties.targetResourceUri)" -eq $asp.Id }) |
             Select-Object -First 1
     } catch {

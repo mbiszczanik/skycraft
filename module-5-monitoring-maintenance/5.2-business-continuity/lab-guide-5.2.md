@@ -145,7 +145,7 @@ module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.
 
 The Backup Vault uses `avm/res/data-protection/backup-vault:0.13.2` the same way; its diagnostic setting is the one resource without an AVM parameter and lives in `bicep/modules/backup-vault-diagnostics.bicep`. Backup policies stay in the scripts (`docs/bicep-standards.md` §10.4): `Deploy-Bicep.ps1` creates the VM policy, `New-LabBlobBackup.ps1` the blob policy.
 
-**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed in Sweden Central with the four tags; **Properties** → **Backup Configuration** has an **Update** link that opens the storage replication pane.
+**Expected Result**: Vault `platform-skycraft-swc-rsv` is deployed in Sweden Central with the four tags; under **Settings** (expand it if it is collapsed), **Properties** → **Backup Configuration** has an **Update** link that opens the storage replication pane.
 
 ---
 
@@ -600,7 +600,7 @@ Azure Backup raises built-in Azure Monitor alerts on the vault. No alert rule of
 2. Verify if any Critical or Warning alerts exist. After `Deploy-Bicep.ps1` expect one built-in alert on `platform-skycraft-swc-rsv` (a policy you created in the Portal with 2 days from the start raises none):
    - **Modify policy with shorter retention** (0 - Critical) - raised because `Deploy-Bicep.ps1` shortens instant-restore retention to 2 days after creating the Enhanced policy. Expected; it is a security alert about the change, not a failure.
 
-   A **Backup Failure** (1 - Error) alert is **not** expected. It means a VM has no recovery point; open the failed job under **Backup jobs** and see Troubleshooting, Issues 2 and 4.
+   A **Backup Failure** (1 - Error) alert is **not** expected. It means a VM has no recovery point; open the failed job (under **Monitoring** (expand it if it is collapsed), click **Backup jobs**) and see Troubleshooting, Issues 2 and 4.
 
 **b. E-mail the Critical alerts with an alert processing rule**
 
@@ -663,7 +663,7 @@ module modAlertProcessingRule 'br/public:avm/res/alerts-management/action-rule:0
 
 ### Good to know: File Recovery
 
-Azure Backup can restore single files from a recovery point without restoring the whole VM. In the vault, open **Backup items** → **Azure Virtual Machine** → the VM → **File Recovery**, select a recovery point and click **Download Script**. The script mounts the recovery point's disks on the machine where it runs, and **Unmount Disks** on the same pane closes the connection. It does not work on an ADE-encrypted VM such as the auth VM.
+Azure Backup can restore single files from a recovery point without restoring the whole VM. In the vault, under **Protected items** (expand it if it is collapsed), open **Backup items** → **Azure Virtual Machine** → the VM → **File Recovery**, select a recovery point and click **Download Script**. The script mounts the recovery point's disks on the machine where it runs, and **Unmount Disks** on the same pane closes the connection. It does not work on an ADE-encrypted VM such as the auth VM.
 
 This lab does not exercise it. On today's Ubuntu 22.04 image the script needs manual workarounds (the multipath service holds the disk copy, and an unformatted data disk makes the script ask a question it cannot get answered from Run command), and the result does not repay the time. The supported procedure is in the Microsoft Learn article under Additional Resources.
 
@@ -729,7 +729,7 @@ If the Activity Log names the restore point collection, check that `platform-sky
 2. Lab 1.3's lock `lock-no-delete-platform` on `platform-skycraft-swc-rg` blocks the delete. Remove it for the moment: the group's **Settings** → **Locks** → delete `lock-no-delete-platform` (it is recreated in step 5).
 3. Delete the vault: `Remove-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv`. The deleted vault stays soft-deleted for its retention period; Azure still allows a new vault with the same name.
 4. **Wait about a minute**, then create it again with the Bicep (`Deploy-Bicep.ps1`) or the request in Step 5.2.4; `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused (Step 5.2.4). Recreating it at once failed once in a live run with `Identity operation for resource ... failed ... BadRequest ... was not found`; the same command a minute later worked. Recreate the diagnostic setting `bv-backup-reports-diag` (Step 5.2.8 b) and the blob policy (Step 5.2.5 a): they went with the vault.
-5. Put the lock back: re-run Lab 1.3's `Deploy-Bicep.ps1`, or the group's **Locks** → **+ Add**, name `lock-no-delete-platform`, type **Delete**.
+5. Put the lock back: re-run Lab 1.3's `Deploy-Bicep.ps1`, or the group's **Settings** (expand it if it is collapsed) → **Locks** → **+ Add**, name `lock-no-delete-platform`, type **Delete**.
 
 ### Issue 4: Enable backup fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`
 

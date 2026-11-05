@@ -222,8 +222,18 @@ try {
 Write-Host "`n=== 3. Validating Azure Container Apps ===" -ForegroundColor Cyan
 
 # Generic ARM lookup (no native Az cmdlet for Container Apps in base modules)
-$aca = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $AcaName -ExpandProperties -ErrorAction SilentlyContinue
-if ($aca) {
+$aca = $null
+$acaLookupError = $null
+try {
+    $aca = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $AcaName -ApiVersion '2024-03-01' -ExpandProperties -ErrorAction Stop
+} catch {
+    # Only a not-found answer means the app is missing; any other error fails the check with its text (#452).
+    if ("$_ $($_.Exception.Message)" -notmatch '\bResource(Group)?NotFound\b|was not found|could not be found|\b404\b') { $acaLookupError = $_.Exception.Message }
+}
+if ($acaLookupError) {
+    Write-Host "[FAIL] ACA $AcaName could not be looked up: $acaLookupError" -ForegroundColor Red
+    $failCount++
+} elseif ($aca) {
     Write-Host "[OK] ACA found: $AcaName" -ForegroundColor Green
     $props = $aca.Properties
 
@@ -294,7 +304,7 @@ if ($aca) {
     # destination) creates none either. The Portal's default, Azure Log Analytics, creates one.
     if ($envId) {
         try {
-            $cae = Get-AzResource -ResourceId $envId -ExpandProperties -ErrorAction Stop
+            $cae = Get-AzResource -ResourceId $envId -ApiVersion '2024-03-01' -ExpandProperties -ErrorAction Stop
             # An environment whose create failed still shows up by id (#371).
             if ("$($cae.Properties.provisioningState)" -eq 'Succeeded') {
                 Write-Host "  - Environment provisioning state: Succeeded" -ForegroundColor Green
