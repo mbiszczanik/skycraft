@@ -196,19 +196,25 @@ function Remove-AzVmss {
 
 function Get-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceGroupName, [string]$ResourceType, [switch]$ExpandProperties)
-    if (Invoke-StubLookup -Name 'Get-AzResource:autoscale' -ResourceGroup $ResourceGroupName) { return }
+    param([string]$ResourceGroupName, [string]$ResourceType, [string]$ResourceId, [string]$ApiVersion, [switch]$ExpandProperties)
+    # The listing is read per id at a pinned version (#452); only the listing can fail here.
+    if (-not $ResourceId -and (Invoke-StubLookup -Name 'Get-AzResource:autoscale' -ResourceGroup $ResourceGroupName)) { return }
     if (Test-StubEmpty) { return }
-    $providers = "/subscriptions/s/resourceGroups/$ResourceGroupName/providers"
-    [pscustomobject]@{ Name = 'dev-skycraft-swc-world-vmssautoscale'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-world-vmssautoscale"
-        Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Compute/virtualMachineScaleSets/dev-skycraft-swc-world-vmss" } }
-    [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-Autoscale-1'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-asp-Autoscale-1"
-        Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Web/serverfarms/dev-skycraft-swc-asp" } }
+    $group = if ($ResourceGroupName) { $ResourceGroupName } else { 'dev-skycraft-swc-rg' }
+    $providers = "/subscriptions/s/resourceGroups/$group/providers"
+    $settings = @(
+        [pscustomobject]@{ Name = 'dev-skycraft-swc-world-vmssautoscale'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-world-vmssautoscale"
+            Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Compute/virtualMachineScaleSets/dev-skycraft-swc-world-vmss" } }
+        [pscustomobject]@{ Name = 'dev-skycraft-swc-asp-Autoscale-1'; ResourceId = "$providers/Microsoft.Insights/autoscalesettings/dev-skycraft-swc-asp-Autoscale-1"
+            Properties = [pscustomobject]@{ targetResourceUri = "$providers/Microsoft.Web/serverfarms/dev-skycraft-swc-asp" } }
+    )
+    if ($ResourceId) { return $settings | Where-Object { $_.ResourceId -eq $ResourceId } }
+    $settings
 }
 
 function Remove-AzResource {
     [CmdletBinding()]
-    param([string]$ResourceId, [switch]$Force)
+    param([string]$ResourceId, [string]$ApiVersion, [switch]$Force)
     Invoke-StubRemoval -Command 'Remove-AzResource' -Name ($ResourceId -split '/')[-1]
 }
 

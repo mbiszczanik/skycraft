@@ -187,7 +187,9 @@ if ($vmssLookup.Value) {
 if (-not $vmssLookup.Failed) {
     # The Portal names the autoscale setting itself, so it is found through its target.
     $autoscaleLookup = Invoke-LabLookup -Target "autoscale settings in $rgName" -Lookup {
-        Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Insights/autoscalesettings' -ExpandProperties -ErrorAction Stop
+        # List, then read each by id at a pinned version: -ExpandProperties on a list uses the provider's newest (#452).
+        Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.Insights/autoscalesettings' -ErrorAction Stop |
+            ForEach-Object { Get-AzResource -ResourceId $_.ResourceId -ApiVersion '2022-10-01' -ExpandProperties -ErrorAction Stop }
     }
     foreach ($setting in $autoscaleLookup.Value | Where-Object { "$($_.Properties.targetResourceUri)" -like "*/virtualMachineScaleSets/$vmssName" }) {
         $resourcesToDelete += @{ Type = 'Autoscale'; Name = $setting.Name; ResourceId = $setting.ResourceId }
@@ -268,7 +270,7 @@ foreach ($resource in $resourcesToDelete | Where-Object { $_.Type -eq 'Autoscale
     if ($PSCmdlet.ShouldProcess($resource.Name, 'Remove autoscale setting')) {
         Write-Host "  Deleting autoscale setting: $($resource.Name)..." -ForegroundColor Gray
         try {
-            Remove-AzResource -ResourceId $resource.ResourceId -Force -ErrorAction Stop | Out-Null
+            Remove-AzResource -ResourceId $resource.ResourceId -ApiVersion '2022-10-01' -Force -ErrorAction Stop | Out-Null
             Write-Host "  ✓ Deleted" -ForegroundColor Green
         }
         catch {

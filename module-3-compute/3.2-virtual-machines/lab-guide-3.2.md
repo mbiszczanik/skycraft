@@ -631,7 +631,7 @@ As in Step 3.2.4, replace the new VNet, subnet and public IP the wizard pre-fill
 
 The list's **Public IP address** column shows the load balancer's public IP for both VMs. That is the address of the frontend they sit behind, not an address of their own: neither VM has a public IP.
 
-3. Navigate to **Load balancers** → `dev-skycraft-swc-lb` → **Backend pools**
+3. Navigate to **Load balancers** → `dev-skycraft-swc-lb` → under **Settings** (expand it if it is collapsed), **Backend pools**
 4. Verify both backend pools have VMs:
    - `dev-skycraft-swc-lb-be-auth`: 1 VM
    - `dev-skycraft-swc-lb-be-world`: 1 VM
@@ -640,7 +640,7 @@ The list's **Public IP address** column shows the load balancer's public IP for 
 
 The subnets are private (Lab 2.1), so the VMs reach the internet (package updates, VM extensions) only through the load balancer's outbound rule from Lab 2.3, `dev-skycraft-swc-lb-outbound`. One frontend IP can carry only one outbound rule, so that rule serves one pool, `dev-skycraft-swc-lb-be-outbound`, and both VMs share it. The VM wizard puts a VM into a single backend pool, so add both VMs to the outbound pool here.
 
-5. Click **Backend pools** → `dev-skycraft-swc-lb-be-outbound`
+5. Under **Settings**, click **Backend pools** → `dev-skycraft-swc-lb-be-outbound`
 6. Under **IP configurations**, click **+ Add**
 7. Under **Add IP configurations to backend pool**, tick the rows of `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm`
 8. Click **Add**
@@ -1432,7 +1432,7 @@ The pane opens on the first subnet of the VNet (`AppServiceSubnet`) with **Publi
 
 1. Navigate to **Virtual machine scale sets** → `dev-skycraft-swc-world-vmss`
 
-2. Click **Instances** in the left menu
+2. In the left menu, under **Settings** (expand it if it is collapsed), click **Instances**
 
 3. Verify you see 2 instances running in different zones:
 
@@ -1511,7 +1511,7 @@ New-AzAutoscaleSetting -Name dev-skycraft-swc-world-vmss-autoscale -ResourceGrou
 
 4. Click **Save** at the top
 
-5. Click **Instances** to watch a new instance being created
+5. Under **Settings**, click **Instances** to watch a new instance being created
 
 6. Wait for the 3rd instance to reach **Running** state
 
@@ -1525,7 +1525,7 @@ New-AzAutoscaleSetting -Name dev-skycraft-swc-world-vmss-autoscale -ResourceGrou
 
 ### Step 3.2.32: Connect to VMSS Instance via Bastion
 
-1. In the VMSS blade, click **Instances**
+1. In the VMSS blade, under **Settings** (expand it if it is collapsed), click **Instances**
 
 2. Select an instance (e.g., `dev-skycraft-swc-world-vmss_0`)
 
@@ -1907,7 +1907,7 @@ Test your understanding with these questions:
 **Solution**:
 
 - Check current quota: `Get-AzVMUsage -Location swedencentral | Where-Object CurrentValue -gt 0`
-- Request quota increase: Azure Portal → Subscriptions → Usage + quotas → Request increase
+- Request quota increase: Azure Portal → Subscriptions → your subscription → **Settings** (expand it if it is collapsed) → Usage + quotas → Request increase
 - Alternatively, use smaller VM size or different region
 - MSDN subscriptions have limited quotas (~20 cores)
 

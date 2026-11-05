@@ -918,24 +918,24 @@ This is a rule evaluation exercise, not a live connection test. The lab has no V
 
 > **Note**: Clicking a subnet opens its **Edit subnet** pane, and its **Service endpoints** section lists the services. Close the pane with **Cancel** after you have read it; there is nothing to save.
 
-1. Navigate to **dev-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
+1. Navigate to **dev-skycraft-swc-vnet** → **Settings** (expand it if it is collapsed) → **Subnets** → **DatabaseSubnet**
 2. Confirm **Service endpoints** shows:
 
    - Microsoft.Sql
    - Microsoft.Storage
 
-3. Navigate to **Subnets** → **WorldSubnet**
+3. Under **Settings** (expand it if it is collapsed), click **Subnets** → **WorldSubnet**
 4. Confirm **Service endpoints** shows:
 
    - Microsoft.Storage
 
-5. Navigate to **prod-skycraft-swc-vnet** → **Subnets** → **DatabaseSubnet**
+5. Navigate to **prod-skycraft-swc-vnet** → **Settings** (expand it if it is collapsed) → **Subnets** → **DatabaseSubnet**
 6. Confirm **Service endpoints** shows:
 
    - Microsoft.Sql
    - Microsoft.Storage
 
-7. Navigate to **Subnets** → **WorldSubnet**
+7. Under **Settings** (expand it if it is collapsed), click **Subnets** → **WorldSubnet**
 8. Confirm **Service endpoints** shows:
 
    - Microsoft.Storage

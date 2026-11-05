@@ -23,10 +23,9 @@
       and read each resource with -ResourceId and -ApiVersion instead.
     A call that splats its arguments cannot be checked and counts as a finding.
 
-    Modules 1 to 3 are pinned by the running course (issue #300), so their calls are listed in
-    $AllowedCalls with the number of calls allowed per file. The list is exact: a new call in a
-    listed file fails, and so does an entry that no longer matches a call, so the list can only
-    shrink. Module 4, Module 5 and tools/ have no entry and may have none.
+    $AllowedCalls (empty) would list a file with the number of calls allowed in it. The list is
+    exact: a new call in a listed file fails, and so does an entry that no longer matches a call.
+    Every module and tools/ are clean, so it has no entry.
 
     Lab tests/ folders are not scanned; their stubs name the cmdlets on purpose. The test fails
     when it finds no file, no versioned call in Module 5 or no guide block, so a broken scan cannot
@@ -45,19 +44,9 @@
 BeforeDiscovery {
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-    # Owed for Modules 1 to 3 (pinned, #300): file -> number of unversioned calls it holds today.
-    $script:AllowedCalls = @{
-        'module-2-networking/2.1-virtual-networks/scripts/Remove-LabResource.ps1' = 1
-        'module-3-compute/3.2-virtual-machines/scripts/Deploy-Bicep.ps1'          = 1
-        'module-3-compute/3.2-virtual-machines/scripts/Remove-LabResource.ps1'    = 2
-        'module-3-compute/3.3-containers/scripts/Deploy-Bicep.ps1'                = 2
-        'module-3-compute/3.3-containers/scripts/Remove-LabResource.ps1'          = 9
-        'module-3-compute/3.3-containers/scripts/Test-Lab.ps1'                    = 2
-        'module-3-compute/3.3-containers/lab-checklist-3.3.md'                    = 1
-        'module-3-compute/3.3-containers/lab-guide-3.3.md'                        = 1
-        'module-3-compute/3.4-app-service/scripts/Deploy-Bicep.ps1'               = 1
-        'module-3-compute/3.4-app-service/scripts/Test-Lab.ps1'                   = 2
-    }
+    # Unversioned calls owed, file -> number allowed. Empty since #452 closed Modules 1 to 3; a new call
+    # anywhere fails the test.
+    $script:AllowedCalls = @{}
 
     # Tracked files only: a worktree under a tool folder or a scratch file is not the repository.
     $tracked = @(git -C $repoRoot ls-files -- 'module-*' 'tools')
@@ -205,8 +194,7 @@ Describe 'ARM calls with an explicit api-version - every lab script, tool, guide
         $stale | Should -BeNullOrEmpty -Because 'an allowance for a file that is gone hides nothing and should be removed'
     }
 
-    It 'allows no call in Module 4, Module 5 or tools' -TestCases @(@{ allowed = $script:Allowed }) {
-        $owed = @($allowed.Keys | Where-Object { $_ -notmatch '^module-[123]-' })
-        $owed | Should -BeNullOrEmpty -Because 'only Modules 1 to 3 are pinned by the running course (#300)'
+    It 'allows no call anywhere' -TestCases @(@{ allowed = $script:Allowed }) {
+        @($allowed.Keys) | Should -BeNullOrEmpty -Because 'Modules 1 to 3 were the last owed calls (#452)'
     }
 }

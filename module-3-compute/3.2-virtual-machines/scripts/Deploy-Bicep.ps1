@@ -180,7 +180,7 @@ if ($Environment -eq 'dev') {
 
 # A taken vault name otherwise fails the deployment minutes in, as VaultAlreadyExists (#438).
 if ($EncryptionStrategy -eq 'AzureDiskEncryption') {
-    $vaultOwned = [bool](Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.KeyVault/vaults' -Name $KeyVaultName -ErrorAction SilentlyContinue)
+    $vaultOwned = [bool](Get-AzResource -ResourceGroupName $rgName -ResourceType 'Microsoft.KeyVault/vaults' -Name $KeyVaultName -ApiVersion '2023-07-01' -ErrorAction SilentlyContinue)
     if (-not (Test-LabGlobalName -Kind KeyVault -Name $KeyVaultName -ParameterName 'KeyVaultName' -Owned $vaultOwned)) {
         Exit-Lab -FailureCount 1
     }
