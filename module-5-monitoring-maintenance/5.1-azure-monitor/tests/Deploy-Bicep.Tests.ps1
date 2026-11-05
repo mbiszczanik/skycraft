@@ -48,6 +48,8 @@ BeforeAll {
     #   thrown-then-ok   the first call throws InvalidOutputTable, the second succeeds
     #   failed-then-ok   the first two calls return a Failed deployment whose operation error is
     #                    InvalidPayload, the third succeeds
+    #   failed-nested-then-ok  the first call returns Failed whose operation StatusMessage is a nested
+    #                    object (as Az returns it), the second succeeds
     #   failed-other     one call returns Failed with an error that is not a table-not-ready error
     #   failed-always    every call returns Failed with InvalidOutputTable
     $script:StubBody = @'
@@ -88,6 +90,7 @@ function New-AzSubscriptionDeployment {
     switch ($env:SKYCRAFT_STUB_DEPLOY) {
         'thrown-then-ok' { if ($call -eq 1) { throw 'InvalidOutputTable: the table does not exist yet' } }
         'failed-then-ok' { if ($call -le 2) { return $failed } }
+        'failed-nested-then-ok' { if ($call -eq 1) { return $failed } }
         'failed-other'   { return $failed }
         'failed-always'  { return $failed }
     }
@@ -96,6 +99,14 @@ function New-AzSubscriptionDeployment {
 function Get-AzDeploymentOperation {
     [CmdletBinding()]
     param($DeploymentName)
+    # StatusMessage is a System.Object in Az: a nested object, not a string, as ARM returns it.
+    if ($env:SKYCRAFT_STUB_DEPLOY -eq 'failed-nested-then-ok') {
+        return [pscustomobject]@{ StatusMessage = [pscustomobject]@{ error = [pscustomobject]@{
+                    code    = 'DeploymentFailed'
+                    message = 'At least one resource deployment operation failed.'
+                    details = @([pscustomobject]@{ code = 'InvalidPayload'; message = 'Data collection rule is invalid' })
+                } } }
+    }
     $text = switch ($env:SKYCRAFT_STUB_DEPLOY) {
         'failed-other'  { 'QuotaExceeded: the subscription is out of quota' }
         'failed-always' { 'InvalidOutputTable: table Perf is not available for destination' }
@@ -117,7 +128,7 @@ function New-AzDataCollectionRuleAssociation {
         -Body $script:StubBody -RequiredModule $script:RequiredModules
 
     function Invoke-DeployScript {
-        param([ValidateSet('thrown-then-ok', 'failed-then-ok', 'failed-other', 'failed-always')][string]$Deploy)
+        param([ValidateSet('thrown-then-ok', 'failed-then-ok', 'failed-nested-then-ok', 'failed-other', 'failed-always')][string]$Deploy)
         $state = Join-Path $script:Stub.Directory "state-$Deploy.log"
         Remove-Item -LiteralPath $state -Force -ErrorAction SilentlyContinue
         $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath `
@@ -137,6 +148,7 @@ function New-AzDataCollectionRuleAssociation {
 
     $script:Thrown      = Invoke-DeployScript -Deploy 'thrown-then-ok'
     $script:ReturnedOk  = Invoke-DeployScript -Deploy 'failed-then-ok'
+    $script:Nested      = Invoke-DeployScript -Deploy 'failed-nested-then-ok'
     $script:Other       = Invoke-DeployScript -Deploy 'failed-other'
     $script:Always      = Invoke-DeployScript -Deploy 'failed-always'
 }
@@ -164,7 +176,7 @@ Describe 'Lab 5.1 Deploy-Bicep.ps1 retry - script text' {
 Describe 'Lab 5.1 Deploy-Bicep.ps1 retry - the script run against a stub (#473)' {
 
     It 'never reaches a real subscription' {
-        foreach ($run in $script:Thrown, $script:ReturnedOk, $script:Other, $script:Always) {
+        foreach ($run in $script:Thrown, $script:ReturnedOk, $script:Nested, $script:Other, $script:Always) {
             $run.Refused | Should -BeFalse -Because "the harness must not fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -185,6 +197,13 @@ Describe 'Lab 5.1 Deploy-Bicep.ps1 retry - the script run against a stub (#473)'
         $run.Output | Should -Match '\[RETRY 2/3\] Deployment returned Failed'
         $run.Output | Should -Not -Match '\[RETRY 3/3\]'
         $run.Output | Should -Match 'Deployment succeeded'
+    }
+
+    It 'reads the error of a returned Failed deployment when ARM gives it as a nested object, not a string' {
+        $run = $script:Nested
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Deploys | Should -Be 2
+        $run.Output | Should -Match '\[RETRY 1/3\] Deployment returned Failed'
     }
 
     It 'does not retry a Failed deployment whose error is not a table-not-ready error, and exits 1' {
