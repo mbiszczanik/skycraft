@@ -63,12 +63,13 @@ function ConvertTo-RepoCase {
 # -Filter '*.bicep' does not match '*.bicepparam', which is how 16 parameter-file
 # headers kept an `az deployment sub create` EXAMPLE line through #134 (#141).
 # Both extensions are collected here.
-$BicepCases = Get-ChildItem -Path $RepoRoot -Recurse -File |
+Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+$BicepCases = Get-RepoFile -Root $RepoRoot |
     Where-Object { $_.Extension -in '.bicep', '.bicepparam' } |
     Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d.*/bicep/' } |
     ForEach-Object { ConvertTo-RepoCase $_ }
 
-$ChecklistCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter 'lab-checklist-*.md' |
+$ChecklistCases = Get-RepoFile -Root $RepoRoot -Filter 'lab-checklist-*.md' |
     Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d' } |
     ForEach-Object { ConvertTo-RepoCase $_ }
 
@@ -79,7 +80,7 @@ $ReadmeCases = $ModuleDirectory |
     Where-Object { Test-Path -LiteralPath $_ } |
     ForEach-Object { ConvertTo-RepoCase (Get-Item -LiteralPath $_) }
 
-$GuideCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter 'lab-guide-*.md' |
+$GuideCases = Get-RepoFile -Root $RepoRoot -Filter 'lab-guide-*.md' |
     Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^module-\d' } |
     ForEach-Object { ConvertTo-RepoCase $_ }
 
