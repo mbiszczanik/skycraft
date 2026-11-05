@@ -195,7 +195,7 @@ else {
                 $failedMsg = @(Get-AzDeploymentOperation -DeploymentName $deployParams.Name -ErrorAction SilentlyContinue |
                     ForEach-Object { $_.StatusMessage } | ForEach-Object { "$_" }) -join ' '
                 if ($failedMsg -match 'InvalidOutputTable|not available for destination|InvalidPayload') {
-                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
+                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Deployment returned Failed, workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
                     Start-Sleep -Seconds 45
                     continue
                 }
