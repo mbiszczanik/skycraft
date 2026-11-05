@@ -415,6 +415,7 @@ Write-Host "[Azure Monitor Agent]" -ForegroundColor Yellow
 $agentTypes  = @('AzureMonitorLinuxAgent', 'AzureMonitorWindowsAgent')
 $agentStates = [ordered]@{}   # VM name -> provisioning state, 'missing', or the read error
 $agentExtIds = @{}            # VM name -> the agent extension's resource id
+$vmCreated   = @{}            # VM name -> when this build of the VM was created (UTC), or why it is not known
 $agentsReady = $false
 if ($dcrVmIds.Count -gt 0) {
     for ($i = 0; $i -lt $dcrVmIds.Count; $i++) {
@@ -425,7 +426,20 @@ if ($dcrVmIds.Count -gt 0) {
                 Where-Object { $_.properties.publisher -eq 'Microsoft.Azure.Monitor' -and $_.properties.type -in $agentTypes } |
                 Select-Object -First 1
             $agentStates[$dcrVmNames[$i]] = if ($agent) { "$($agent.properties.provisioningState)" } else { 'missing' }
-            if ($agent) { $agentExtIds[$dcrVmNames[$i]] = "$($dcrVmIds[$i])/extensions/$($agent.name)" }
+            if ($agent) {
+                $agentExtIds[$dcrVmNames[$i]] = "$($dcrVmIds[$i])/extensions/$($agent.name)"
+                # The activity log keeps the events of an earlier build of a VM with the same name (#513).
+                try {
+                    $vmResponse = Invoke-AzRestMethod -Method GET -Path "$($dcrVmIds[$i])?api-version=2024-07-01" -ErrorAction Stop
+                    if ($vmResponse.StatusCode -ne 200) { throw "HTTP $($vmResponse.StatusCode)" }
+                    $created = ($vmResponse.Content | ConvertFrom-Json).properties.timeCreated
+                    if (-not $created) { throw 'the VM has no timeCreated' }
+                    $vmCreated[$dcrVmNames[$i]] = [pscustomobject]@{ Time = ([datetime]$created).ToUniversalTime(); Reason = $null }
+                }
+                catch {
+                    $vmCreated[$dcrVmNames[$i]] = [pscustomobject]@{ Time = $null; Reason = $_.Exception.Message }
+                }
+            }
         }
         catch {
             $agentStates[$dcrVmNames[$i]] = "unreadable: $($_.Exception.Message)"
@@ -452,7 +466,13 @@ Invoke-Test "Azure Monitor Agent Succeeded on the rule's VMs" {
 # When a VM's agent extension last installed successfully, as UTC, or $null with the reason. The
 # extension's instance view has no time, the activity log has one event per write (issue #369).
 function Get-AgentInstallTime {
-    param([string]$ExtensionId)
+    param([string]$ExtensionId, $VmCreated)
+    # Events from before this build of the VM belong to an earlier VM of the same name, and the log
+    # lags the install by a few minutes; without the creation time they cannot be told apart (#513).
+    if (-not $VmCreated -or -not $VmCreated.Time) {
+        $why = if ($VmCreated -and $VmCreated.Reason) { $VmCreated.Reason } else { 'it was not read' }
+        return [pscustomobject]@{ Time = $null; Reason = "the VM creation time is not known ($why), so earlier builds' install events cannot be ruled out" }
+    }
     try {
         $events = @(Get-AzActivityLog -ResourceId $ExtensionId -StartTime (Get-Date).AddDays(-14) -WarningAction SilentlyContinue -ErrorAction Stop)
     }
@@ -468,7 +488,11 @@ function Get-AgentInstallTime {
     if ($writes.Count -eq 0) {
         return [pscustomobject]@{ Time = $null; Reason = 'the activity log has no successful install of the extension in the last 14 days' }
     }
-    $latest = ($writes | Sort-Object -Property EventTimestamp -Descending | Select-Object -First 1).EventTimestamp
+    $current = @($writes | Where-Object { ([datetime]$_.EventTimestamp).ToUniversalTime() -ge $VmCreated.Time })
+    if ($current.Count -eq 0) {
+        return [pscustomobject]@{ Time = $null; Reason = 'the activity log shows no successful install since the VM was created (the log can lag a few minutes)' }
+    }
+    $latest = ($current | Sort-Object -Property EventTimestamp -Descending | Select-Object -First 1).EventTimestamp
     [pscustomobject]@{ Time = ([datetime]$latest).ToUniversalTime(); Reason = $null }
 }
 
@@ -534,7 +558,7 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         foreach ($name in $missing) {
             # Read again every 5 minutes: a reinstall during the wait moves the install time.
             if (-not $installs.ContainsKey($name) -or ((Get-Date) - $installs[$name].ReadAt).TotalMinutes -ge 5) {
-                $read = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] }
+                $read = if ($agentExtIds[$name]) { Get-AgentInstallTime -ExtensionId $agentExtIds[$name] -VmCreated $vmCreated[$name] }
                         else { [pscustomobject]@{ Time = $null; Reason = 'the extension id is not known' } }
                 # A read that fails later keeps the time already known.
                 if (-not $read.Time -and $installs.ContainsKey($name) -and $installs[$name].Time) { $read = $installs[$name] }
