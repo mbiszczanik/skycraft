@@ -193,9 +193,10 @@ else {
             # The cmdlet can also return a Failed deployment without throwing (#473).
             if ($deployment.ProvisioningState -eq 'Failed' -and $attempt -lt $maxAttempts) {
                 $failedMsg = @(Get-AzDeploymentOperation -DeploymentName $deployParams.Name -ErrorAction SilentlyContinue |
-                    ForEach-Object { $_.StatusMessage } | ForEach-Object { "$_" }) -join ' '
+                    ForEach-Object { $_.StatusMessage } | Where-Object { $null -ne $_ } |
+                    ForEach-Object { if ($_ -is [string]) { $_ } else { $_ | ConvertTo-Json -Depth 10 -Compress } }) -join ' '
                 if ($failedMsg -match 'InvalidOutputTable|not available for destination|InvalidPayload') {
-                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
+                    Write-Host "  [RETRY $attempt/$($maxAttempts-1)] Deployment returned Failed, workspace tables not ready yet; waiting 45s..." -ForegroundColor DarkYellow
                     Start-Sleep -Seconds 45
                     continue
                 }
