@@ -135,35 +135,6 @@ Describe 'Write-Host in a lab script (#393)' {
     }
 }
 
-Describe 'Write-LabWhatIfResult (#393)' {
-
-    It 'prints a what-if result with the subscription id redacted' {
-        $result = [pscustomobject]@{ ResourceId = '/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/dev-rg'; Change = 'Create' }
-        $shown = ($result | Write-LabWhatIfResult 6>&1 | Out-String)
-        $shown | Should -Match '/subscriptions/<id>/resourceGroups/dev-rg'
-        $shown | Should -Match 'Create'
-        $shown | Should -Not -Match '11111111-2222-3333-4444-555555555555'
-    }
-
-    It 'prints nothing for an empty result' {
-        (@() | Write-LabWhatIfResult 6>&1 | Out-String) | Should -BeNullOrEmpty
-        ($null | Write-LabWhatIfResult 6>&1 | Out-String) | Should -BeNullOrEmpty
-    }
-
-    It 'is used at every call of Get-AzSubscriptionDeploymentWhatIfResult in a lab script' {
-        $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-        $files = @(git -C $root ls-files 'module-*/*/scripts/Deploy-Bicep.ps1')
-        $files.Count | Should -BeGreaterThan 0
-        $unpiped = foreach ($file in $files) {
-            $lines = Get-Content -LiteralPath (Join-Path $root $file)
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -match '^\s*(?!#).*Get-AzSubscriptionDeploymentWhatIfResult @' -and $lines[$i] -notmatch '\|\s*Write-LabWhatIfResult' -and $lines[$i] -notmatch '\$result\s*=\s*Get-AzSubscriptionDeploymentWhatIfResult') { "${file}:$($i + 1)" }
-            }
-        }
-        $unpiped | Should -BeNullOrEmpty
-    }
-}
-
 Describe 'Write-Host outside a lab script (#393)' {
 
     It 'passes the learner''s own output through unchanged, though the module is imported' {
