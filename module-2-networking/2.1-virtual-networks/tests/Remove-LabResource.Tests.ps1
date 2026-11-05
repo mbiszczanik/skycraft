@@ -432,8 +432,7 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - the preflight tells an orphan from an
 
     It 'leaves a link whose target type has no pinned api-version unverified, without a lookup (#452)' {
         $run = $script:LinkOtherType
-        $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^
-]*target unverified'
+        $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^\r\n]*target unverified'
         $run.Output | Should -Not -Match 'ORPHANED'
         @($run.Calls | Where-Object { $_ -like 'Get-AzResource:*' }) | Should -BeNullOrEmpty
     }
