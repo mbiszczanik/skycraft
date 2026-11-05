@@ -314,6 +314,7 @@ function Invoke-AzRestMethod {
     [CmdletBinding()]
     param([string]$Method, [string]$Path, [Parameter(ValueFromRemainingArguments)]$Rest)
     if ($Path -match '/virtualMachines/[^/]+/extensions\?') { return Get-StubExtensions -Path $Path }
+    if ($Path -match '/virtualMachines/[^/]+\?api-version') { return Get-StubVm }
     if ($Path -notmatch '/providers/Microsoft\.Insights/dataCollectionRuleAssociations\?') { throw "stub: unexpected REST path $Path" }
     if ($env:SKYCRAFT_STUB_DCR -eq 'fail') { throw 'stub lookup failure: Invoke-AzRestMethod dataCollectionRuleAssociations' }
     if ($env:SKYCRAFT_STUB_DCR -eq 'vmthrows' -and $Path -like '*/virtualMachines/dev-skycraft-swc-world-vm/*') {
@@ -343,6 +344,16 @@ function Invoke-AzRestMethod {
         }
     }
     [pscustomobject]@{ StatusCode = 200; Content = (@{ value = $associations } | ConvertTo-Json -Depth 5) }
+}
+
+# Reads a VM, as GET <vm id> does, with when this build of it was created, as SKYCRAFT_STUB_VMCREATED
+# says: 'old' (default, 7 days ago, before every install event of the install cases), 'recent'
+# (10 minutes ago), 'unreadable' fails, 'nocreated' answers without timeCreated.
+function Get-StubVm {
+    if ($env:SKYCRAFT_STUB_VMCREATED -eq 'unreadable') { throw 'stub lookup failure: VM' }
+    if ($env:SKYCRAFT_STUB_VMCREATED -eq 'nocreated') { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = @{} } | ConvertTo-Json -Depth 5) } }
+    $minutes = if ($env:SKYCRAFT_STUB_VMCREATED -eq 'recent') { 10 } else { 7 * 24 * 60 }
+    [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = @{ timeCreated = [datetime]::UtcNow.AddMinutes(-$minutes).ToString('o') } } | ConvertTo-Json -Depth 5) }
 }
 
 # Lists a VM's extensions, as GET <vm id>/extensions does. Every VM carries the Network Watcher
@@ -409,6 +420,7 @@ function Get-AzActivityLog {
         'recent' { 5 }
         'mid'    { 30 }
         'old'    { 180 }
+        'stale'  { 1667 }
         { $_ -in 'reinstall', 'reinstallthenfails' } { 40 }
         default  { return @() }
     }
@@ -494,8 +506,10 @@ function Get-AzDiagnosticSetting {
             # 0 by default: a run that waited would spin on the real clock with the stubbed sleep.
             [int]$WaitMinutes = 0,
             [int]$TableWaitMinutes = 0,
-            [ValidateSet('none', 'recent', 'mid', 'old', 'throws', 'reinstall', 'reinstallthenfails')]
+            [ValidateSet('none', 'recent', 'mid', 'old', 'stale', 'throws', 'reinstall', 'reinstallthenfails')]
             [string]$Install = 'none',
+            [ValidateSet('old', 'recent', 'unreadable', 'nocreated')]
+            [string]$VmCreated = 'old',
             [int]$InstallWaitMinutes = 45,
             [ValidateSet('ok', 'rulefailed')]
             [string]$State = 'ok'
@@ -506,6 +520,7 @@ function Get-AzDiagnosticSetting {
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
             SKYCRAFT_STUB_ACTLOG    = $readLog
             SKYCRAFT_STUB_INSTALL   = $Install
+            SKYCRAFT_STUB_VMCREATED = $VmCreated
             SKYCRAFT_STUB_DCR       = $Dcr
             SKYCRAFT_STUB_ALERT     = $Alert
             SKYCRAFT_STUB_AGENT     = $Agent
@@ -559,6 +574,11 @@ function Get-AzDiagnosticSetting {
     $script:OldWithRow       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'rows' -WaitMinutes 10 -Install 'old'
     $script:InstallLogFails  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'throws'
     $script:InstallLogEmpty  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'none'
+    # #513: the log holds only the install of an earlier build of the VM (27 hours ago); this build is 10 minutes old.
+    $script:StaleNoRow       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'stale' -VmCreated 'recent'
+    $script:StaleThenRow     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'late' -WaitMinutes 5 -Install 'stale' -VmCreated 'recent'
+    $script:VmCreatedFails   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'recent' -VmCreated 'unreadable'
+    $script:VmNoCreatedTime  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'recent' -VmCreated 'nocreated'
     $script:InstallZeroWait  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent' -InstallWaitMinutes 0
     $script:AgentFailedRecent = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'none' -WaitMinutes 10 -Install 'recent'
     # 'slow' answers on the 21st query (20 minutes in); the agent first installed 40 minutes before the start.
@@ -954,6 +974,33 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
         $run.Output | Should -Match 'install time unknown: the activity log has no successful install of the extension in the last 14 days; waited 2 minutes'
+    }
+
+    It 'ignores install events from before the VM was created and waits as for an unknown install time (#513)' {
+        $run = $script:StaleNoRow
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
+        $run.Output | Should -Not -Match 'agent installed 16[0-9]{2} minutes ago'
+        $run.Output | Should -Match 'install time unknown: the activity log shows no successful install since the VM was created \(the log can lag a few minutes\); waited 2 minutes'
+    }
+
+    It 'passes once the first row arrives, though the log still shows only the earlier build (#513)' {
+        $run = $script:StaleThenRow
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Failed: 0\b'
+    }
+
+    It 'says why and waits the flat time when the VM creation time cannot be read (#513)' {
+        $run = $script:VmCreatedFails
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
+        $run.Output | Should -Match 'install time unknown: the VM creation time is not known \(stub lookup failure: VM\)'
+    }
+
+    It 'treats a VM answer without timeCreated as an unknown creation time (#513)' {
+        $run = $script:VmNoCreatedTime
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'install time unknown: the VM creation time is not known \(the VM has no timeCreated\)'
     }
 
     It 'does not wait for a Failed agent however recent its install' {
