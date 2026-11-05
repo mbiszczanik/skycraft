@@ -51,6 +51,9 @@ $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 # The module's role assignment helpers use the ARM API, not Microsoft Graph (#397).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 if ($Force) { $ConfirmPreference = 'None' }
 
 # Counts lookups that failed and objects that exist but could not be removed. Absent objects
@@ -125,6 +128,45 @@ function Invoke-LabLookup {
     }
 }
 
+# The tenant's domains, as Microsoft Graph lists them (GET /v1.0/domains: id, isInitial, ...).
+# Az.Resources has no domain cmdlet, so the list comes through Invoke-AzRestMethod, which calls
+# Graph with the same Az token Get-AzADUser uses: still one sign-in and no extra module. It
+# answers an HTTP error with a status code rather than an exception, so the code is checked here:
+# a failed lookup is an error, never an empty list.
+function Get-LabDirectoryDomain {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+
+    $response = Invoke-AzRestMethod -Method GET -Uri 'https://graph.microsoft.com/v1.0/domains?$select=id,isInitial' -ErrorAction Stop
+    if ([int]$response.StatusCode -ne 200) {
+        throw "Microsoft Graph answered $($response.StatusCode) to GET /v1.0/domains: $($response.Content)"
+    }
+    return @(($response.Content | ConvertFrom-Json).value)
+}
+
+# --- The users' domain (issues #193, #237) --------------------------------------------------
+# Lab 1.1 creates its users on the tenant's INITIAL *.onmicrosoft.com domain, the one its guide's
+# '<name>@[yourtenant].onmicrosoft.com' means, so this script looks them up there. Not the default
+# domain: in a tenant whose default is a custom domain, that names users Lab 1.1 never created.
+# And no guess when the tenant lists no initial domain. A byte-identical copy of the function in
+# Lab 1.1's scripts and in New-LabRoleAssignment.ps1; tests/Module1-Initial-Domain.Tests.ps1 holds
+# the copies together.
+function Select-LabInitialDomain {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Domain
+    )
+
+    $initial = @($Domain | Where-Object { $_ -and $_.IsInitial -eq $true } | ForEach-Object { [string]$_.Id } | Where-Object { $_ })
+    if ($initial.Count -eq 0) { throw 'the tenant lists no domain marked IsInitial' }
+    return $initial[0]
+}
+
 Write-Host "=== Lab 1.2: Cleanup Resources ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Context
@@ -140,29 +182,44 @@ Write-Host "Using Subscription: $($context.Subscription.Name)" -ForegroundColor 
 
 
 Write-Host "`n1. Removing Subscription-Level Role Assignment (Owner)..." -ForegroundColor Cyan
-# Malfurion is found in Entra ID by his userPrincipalName prefix (the domain varies), through the
-# Az sign-in's Graph token - the one Microsoft Graph call left in this script (issue #397). A
-# lookup that fails is counted and names the sign-in that provides Graph; a directory without him
-# leaves no assignment this script can attribute to him.
+# Malfurion is found in Entra ID by his full userPrincipalName on the tenant's initial domain, where
+# Lab 1.1 creates him; a user of that name on another domain is not his (issue #380). Both lookups
+# go through the Az sign-in's Graph token - the Microsoft Graph calls left in this script (issue
+# #397). A lookup that fails, or a tenant with no initial domain, is counted and names the sign-in
+# that provides Graph; no Owner assignment is removed then.
 $subscriptionScope = "/subscriptions/$subId"
-$userLookup = Invoke-LabLookup -Target 'Malfurion in Entra ID' -Lookup {
-    Get-AzADUser -Filter "startsWith(userPrincipalName,'malfurion.stormrage@')" -ErrorAction Stop
+$domainLookup = Invoke-LabLookup -Target "the tenant's initial domain" -Lookup {
+    Select-LabInitialDomain -Domain @(Get-LabDirectoryDomain)
+}
+if (-not $domainLookup.Failed -and @($domainLookup.Value).Count -eq 0) {
+    $script:cleanupFailures++
+    Write-Host "  -> [ERROR] The tenant's initial domain could not be determined; removing no Owner assignment." -ForegroundColor Red
+    $domainLookup = [pscustomobject]@{ Value = @(); NotFound = $false; Failed = $true }
 }
 $malfurionId = $null
-if ($userLookup.Failed) {
+if ($domainLookup.Failed) {
     Write-Host "     $(Get-LabGraphSignInHint -Client Az)" -ForegroundColor Gray
 }
 else {
-    $users = @($userLookup.Value | Where-Object { $_ })
-    if ($users.Count -gt 1) {
-        $script:cleanupFailures++
-        Write-Host "  -> [ERROR] $($users.Count) users match malfurion.stormrage@*; removing no Owner assignment. Remove the right one in the Portal (Subscription > Access control (IAM))." -ForegroundColor Red
+    $malfurionUpn = "malfurion.stormrage@$(@($domainLookup.Value)[0])"
+    $userLookup = Invoke-LabLookup -Target "Malfurion ($malfurionUpn) in Entra ID" -Lookup {
+        Get-AzADUser -Filter "userPrincipalName eq '$malfurionUpn'" -ErrorAction Stop
     }
-    elseif ($users.Count -eq 0) {
-        Write-Host "  -> [INFO] Malfurion not found in Entra ID; no Owner assignment of his to remove." -ForegroundColor Gray
+    if ($userLookup.Failed) {
+        Write-Host "     $(Get-LabGraphSignInHint -Client Az)" -ForegroundColor Gray
     }
     else {
-        $malfurionId = [string]$users[0].Id
+        $users = @($userLookup.Value | Where-Object { $_ })
+        if ($users.Count -gt 1) {
+            $script:cleanupFailures++
+            Write-Host "  -> [ERROR] $($users.Count) users match $malfurionUpn; removing no Owner assignment. Remove the right one in the Portal (Subscription > Access control (IAM))." -ForegroundColor Red
+        }
+        elseif ($users.Count -eq 0) {
+            Write-Host "  -> [INFO] $malfurionUpn not found in Entra ID; no Owner assignment of his to remove." -ForegroundColor Gray
+        }
+        else {
+            $malfurionId = [string]$users[0].Id
+        }
     }
 }
 

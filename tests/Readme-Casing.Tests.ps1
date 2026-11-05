@@ -25,17 +25,17 @@ $ModuleCases = $ModuleDirs | ForEach-Object {
     @{ module = $_.Name; path = $_.FullName }
 }
 
-# Scan every .md file below the repo root for 'README.MD' references,
-# skipping ignored working directories.
-$MarkdownFiles = Get-ChildItem -Path $RepoRoot -Recurse -File |
-                 Where-Object {
-                     $_.Extension -ieq '.md' -and
-                     $_.FullName -notlike "*\.patches\*"
-                 }
+# Scan every tracked or new-but-unignored .md file for 'README.MD' references. git, not
+# Get-ChildItem: the Linux runner skips dot-directories (.github) without -Force, and -Force
+# would pull in ignored worktrees and .patches.
+$MarkdownFiles = @(& git -C $RepoRoot ls-files --cached --others --exclude-standard -- '*.md' '*.MD')
+if ($LASTEXITCODE -ne 0 -or $MarkdownFiles.Count -eq 0) {
+    throw "git ls-files returned no Markdown files (exit $LASTEXITCODE); the casing scan cannot run."
+}
 $MarkdownCases = $MarkdownFiles | ForEach-Object {
     @{
-        file = $_.FullName.Substring($RepoRoot.Length + 1)
-        path = $_.FullName
+        file = $_
+        path = Join-Path $RepoRoot $_
     }
 }
 
@@ -62,6 +62,12 @@ Describe 'README filename casing' {
 }
 
 Describe 'README link casing in Markdown' {
+    It 'scans Markdown under dot-directories' {
+        # Discovery-phase variables are not visible inside It, so list again.
+        $listed = @(& git -C (Join-Path $PSScriptRoot '..') ls-files --cached --others --exclude-standard -- '*.md' '*.MD')
+        $listed | Should -Contain '.github/PULL_REQUEST_TEMPLATE.md' -Because 'the scan must list the same files on Windows and Linux'
+    }
+
     It "'<file>' contains no link to 'README.MD'" -ForEach $MarkdownCases {
         $text = Get-Content -Raw -LiteralPath $path
         # Case-sensitive: 'README.MD' must not appear literally; 'README.md' is fine.

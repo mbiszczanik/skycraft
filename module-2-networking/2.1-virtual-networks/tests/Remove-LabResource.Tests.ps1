@@ -208,6 +208,8 @@ function Invoke-AzRestMethod {
     }
     $reply = { param($Status, $Body) [pscustomobject]@{ StatusCode = $Status; Content = ($Body | ConvertTo-Json -Depth 6 -Compress) } }
     $target = ($Path -split '\?')[0]
+    # Lab 1.3's delete locks (Invoke-LabWithoutLock, #372): none in this stub, so the cleanup deletes as is.
+    if ($target -match '/providers/Microsoft\.Authorization/locks/') { return & $reply 404 @{ error = @{ code = 'LockNotFound'; message = 'The lock was not found.' } } }
     Write-StubCall -Name "Invoke-AzRestMethod:$Method"
 
     if ($env:SKYCRAFT_STUB_DNS -eq 'denied') { return & $reply 403 @{ error = @{ code = 'AuthorizationFailed'; message = "The client 'stub' does not have authorization to list $target." } } }
@@ -430,8 +432,7 @@ Describe 'Lab 2.1 Remove-LabResource.ps1 - the preflight tells an orphan from an
 
     It 'leaves a link whose target type has no pinned api-version unverified, without a lookup (#452)' {
         $run = $script:LinkOtherType
-        $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^
-]*target unverified'
+        $run.Output | Should -Match 'AppServiceSubnet carries serviceAssociationLink [^\r\n]*target unverified'
         $run.Output | Should -Not -Match 'ORPHANED'
         @($run.Calls | Where-Object { $_ -like 'Get-AzResource:*' }) | Should -BeNullOrEmpty
     }

@@ -51,6 +51,9 @@ $ErrorActionPreference = 'Stop'
 # Get-LabArmBudget reads the budgets without Az.Billing (#411).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
+
 Write-Host "=== Lab 1.3: Validation ===" -ForegroundColor Cyan -BackgroundColor Black
 
 # Check Azure Connection

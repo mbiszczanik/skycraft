@@ -1811,6 +1811,16 @@ Set-Content -LiteralPath (Join-Path $LogDirectory 'fake-remove-names.txt') -Valu
         $manifest.SoftDeleteGuards[0].Name | Should -Be 'dev-skycraft-swc-kv' -Because 'the guards are copied'
     }
 
+    It 'drops the guards of labs outside the selection (#415)' {
+        $guards = @(
+            @{ Kind = 'KeyVault';     Name = 'a'; Lab = 'module-3-compute/3.2-virtual-machines' }
+            @{ Kind = 'LogAnalytics'; Name = 'b'; Lab = 'module-5-monitoring-maintenance/5.1-azure-monitor' }
+        )
+        @(Get-LabCycleSoftDeleteGuard -Guards $guards -Labs @('module-1-identities-governance/1.2-rbac') | ForEach-Object { $_.Name }) | Should -BeNullOrEmpty
+        @(Get-LabCycleSoftDeleteGuard -Guards $guards -Labs @('module-5-monitoring-maintenance/5.1-azure-monitor') | ForEach-Object { $_.Name }) | Should -Be @('b')
+        @(Get-LabCycleSoftDeleteGuard -Guards $guards | ForEach-Object { $_.Name }) | Should -Be @('a', 'b') -Because 'without -Labs every guard stays'
+    }
+
     It 'keeps every guard as it is without -UniqueNames' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:NamesManifest
         @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames @{} | ForEach-Object { $_.Name }) |
@@ -2568,6 +2578,29 @@ Describe 'Preflight - a leftover check that fails is a stop, not "clear" (#290)'
 
     AfterEach {
         Restore-AzPoison -Name 'Get-AzKeyVault', 'Get-AzResource'
+    }
+
+    It 'stops at the ssh key check when a selected lab needs the key and it is missing' {
+        $probes = @{} + $script:PreflightBase
+        $probes.SshKeyPath = Join-Path $script:Scratch 'no-such-key.pub'
+
+        $results = @(Test-LabCyclePreflight @probes)
+
+        $results[-1].Name | Should -Be 'ssh key'
+        $results[-1].Ok   | Should -BeFalse
+    }
+
+    It 'passes the ssh key check, saying so, when no selected lab needs the key (#415)' {
+        $probes = @{} + $script:PreflightBase
+        $probes.SshKeyPath    = Join-Path $script:Scratch 'no-such-key.pub'
+        $probes.RequireSshKey = $false
+        $probes.LeftoverProbe = { @() }
+
+        $results = @(Test-LabCyclePreflight @probes)
+
+        ($results | Where-Object Name -eq 'ssh key').Ok | Should -BeTrue
+        ($results | Where-Object Name -eq 'ssh key').Detail | Should -Match 'not needed'
+        $results[-1].Name | Should -Be 'pester canary' -Because 'the run went on to the last check'
     }
 
     It 'stops at the leftovers check when the probe throws, and runs nothing after it' {

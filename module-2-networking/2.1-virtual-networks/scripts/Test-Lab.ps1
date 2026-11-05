@@ -36,6 +36,9 @@ param()
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $script:failCount = 0
 
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -118,7 +121,7 @@ function Test-AppServiceDelegation {
     else {
         $actual = @($Subnet.Delegations.ServiceName | Where-Object { $_ })
         $shown  = if ($actual.Count) { $actual -join ', ' } else { 'none' }
-        Write-Host "    - [FAIL] Subnet $($Subnet.Name) is not delegated to $service (delegations: $shown)." -ForegroundColor Red
+        Write-Host "    - [FAIL] Subnet $($Subnet.Name) is not delegated to $service (delegations: $shown). Delegate it as the guide says: Step 2.1.6 (dev) or Step 2.1.8 (prod)." -ForegroundColor Red
         $script:failCount++
     }
 }

@@ -397,7 +397,9 @@ if ($uniqueNameProblems.Count -gt 0) {
     $Host.SetShouldExit(2)
     exit 2
 }
-$guards = @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames $UniqueNames)
+# Only the selected labs' prerequisites gate the run (#415).
+$guards = @(Get-LabCycleSoftDeleteGuard -Guards $manifest.SoftDeleteGuards -Declared $manifest.UniqueNames -UniqueNames $UniqueNames -Labs @($live | ForEach-Object { $_.Lab }))
+$requireSshKey = @($live | Where-Object { $_.RequiresSshKey }).Count -gt 0
 
 # Ordering happens before anything runs. A cycle throws out of Get-PhaseOrder, and that is the
 # intended behaviour rather than something to catch and continue past: half a cyclic graph
@@ -514,6 +516,7 @@ if (-not $PreflightRunner) {
     $PreflightRunner = {
         Test-LabCyclePreflight -SubscriptionId $SubscriptionId `
             -Guards $guards `
+            -RequireSshKey $requireSshKey `
             -LockPath $LockPath `
             -ContextProbe $ContextProbe
     }.GetNewClosure()

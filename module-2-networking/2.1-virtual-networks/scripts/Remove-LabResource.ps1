@@ -58,6 +58,9 @@ param(
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
+
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 if ($Force) { $ConfirmPreference = 'None' }
 
 Write-Host "=== Lab 2.1 - Resource Cleanup ===" -ForegroundColor Cyan -BackgroundColor Black
@@ -282,124 +285,129 @@ if ($orphanedLinkCount -gt 0) {
 
 Write-Host "`nStarting cleanup..." -ForegroundColor Cyan
 
-# Each VNet is looked up once, here, and the result serves both steps below. A VNet that could not
-# be looked up is one [ERROR], counted by Invoke-LabLookup, and neither its peerings nor the VNet
-# itself are touched (#255).
-$vnetLookups = @{}
-foreach ($lab in $labVnets) {
-    $vnetLookups[$lab.Name] = Invoke-LabLookup -Target "VNet $($lab.Name)" -Lookup {
-        Get-AzVirtualNetwork -Name $lab.Name -ResourceGroupName $lab.Rg -ErrorAction Stop
+# Lab 1.3's CanNotDelete locks on the platform and prod groups refuse every delete below
+# (ScopeLocked); Invoke-LabWithoutLock lifts them for the deletes and puts them back (#372).
+$lockFailures = Invoke-LabWithoutLock -ResourceGroupName @($hubRgName, $devRgName, $prodRgName) -WhatIf:$WhatIfPreference -Action {
+    # Each VNet is looked up once, here, and the result serves both steps below. A VNet that could not
+    # be looked up is one [ERROR], counted by Invoke-LabLookup, and neither its peerings nor the VNet
+    # itself are touched (#255).
+    $vnetLookups = @{}
+    foreach ($lab in $labVnets) {
+        $vnetLookups[$lab.Name] = Invoke-LabLookup -Target "VNet $($lab.Name)" -Lookup {
+            Get-AzVirtualNetwork -Name $lab.Name -ResourceGroupName $lab.Rg -ErrorAction Stop
+        }
     }
-}
 
-# Function to remove peerings
-function Remove-VNetPeering {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-    param($VnetName, $RgName, $Lookup)
-    Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
-    $vnet = $Lookup.Value | Select-Object -First 1
-    try {
-        if ($vnet) {
-            # No name filter: SkyCraft peerings are named hub-to-dev / dev-to-hub etc., and every peering
-            # on a lab VNet is lab state. Leaving the spoke side behind is what caused
-            # RemotePeeringIsDisconnected on the next Lab 2.1 deployment during the #87 live cycle.
-            $peerings = $vnet.VirtualNetworkPeerings
-            foreach ($p in $peerings) {
-                if ($PSCmdlet.ShouldProcess("$VnetName/$($p.Name)", 'Remove VNet peering')) {
-                    Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
-                    Remove-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $p.Name -Force -ErrorAction Stop
+    # Function to remove peerings
+    function Remove-VNetPeering {
+        [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+        param($VnetName, $RgName, $Lookup)
+        Write-Host "Removing peerings on $VnetName..." -ForegroundColor Yellow
+        $vnet = $Lookup.Value | Select-Object -First 1
+        try {
+            if ($vnet) {
+                # No name filter: SkyCraft peerings are named hub-to-dev / dev-to-hub etc., and every peering
+                # on a lab VNet is lab state. Leaving the spoke side behind is what caused
+                # RemotePeeringIsDisconnected on the next Lab 2.1 deployment during the #87 live cycle.
+                $peerings = $vnet.VirtualNetworkPeerings
+                foreach ($p in $peerings) {
+                    if ($PSCmdlet.ShouldProcess("$VnetName/$($p.Name)", 'Remove VNet peering')) {
+                        Write-Host "  -> Deleting $($p.Name)" -ForegroundColor Gray
+                        Remove-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $p.Name -Force -ErrorAction Stop
+                    }
                 }
             }
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  - [ERROR] Failed to remove peering on ${VnetName}: $($_.Exception.Message)" -ForegroundColor Red
         }
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  - [ERROR] Failed to remove peering on ${VnetName}: $($_.Exception.Message)" -ForegroundColor Red
     }
-}
 
-Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
-Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
-Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
+    Remove-VNetPeering -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
+    Remove-VNetPeering -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
+    Remove-VNetPeering -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
 
-# Private DNS zone links (Lab 2.3's skycraft.internal) outlive the VNet they point at. Left behind,
-# they no longer serve a VNet created again under the same name, and Lab 2.3 cannot deploy until
-# they are deleted (#444). Only links to the VNets this cleanup deletes are touched.
-$labVnetIds = @($labVnets | ForEach-Object { ($vnetLookups[$_.Name].Value | Select-Object -First 1).Id } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
-if ($labVnetIds.Count -gt 0) {
-    $dnsLinkLookup = Invoke-LabLookup -Target 'the private DNS zone links to the lab VNets' -Lookup { Get-LabDnsLink }
-    foreach ($dnsLink in @($dnsLinkLookup.Value | Where-Object { $_ -and $_.VirtualNetworkId.ToLowerInvariant() -in $labVnetIds })) {
+    # Private DNS zone links (Lab 2.3's skycraft.internal) outlive the VNet they point at. Left behind,
+    # they no longer serve a VNet created again under the same name, and Lab 2.3 cannot deploy until
+    # they are deleted (#444). Only links to the VNets this cleanup deletes are touched.
+    $labVnetIds = @($labVnets | ForEach-Object { ($vnetLookups[$_.Name].Value | Select-Object -First 1).Id } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+    if ($labVnetIds.Count -gt 0) {
+        $dnsLinkLookup = Invoke-LabLookup -Target 'the private DNS zone links to the lab VNets' -Lookup { Get-LabDnsLink }
+        foreach ($dnsLink in @($dnsLinkLookup.Value | Where-Object { $_ -and $_.VirtualNetworkId.ToLowerInvariant() -in $labVnetIds })) {
+            try {
+                Write-Host "Removing private DNS link: $($dnsLink.Name)..." -ForegroundColor Yellow
+                if ($PSCmdlet.ShouldProcess($dnsLink.Name, 'Remove private DNS zone link')) {
+                    Remove-LabDnsLink -Id $dnsLink.Id -Confirm:$false
+                    Write-Host "  -> Success" -ForegroundColor Green
+                }
+            } catch {
+                $script:cleanupFailures++
+                Write-Host "  - [ERROR] Failed to remove private DNS link $($dnsLink.Name): $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+
+    # Function to remove VNet
+    function Remove-VNet {
+        [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+        param($VnetName, $RgName, $Lookup)
+
+        # Probe first. A bare catch reported every failure as "not found or already deleted", which
+        # hid a real InUseSubnetCannotBeDeleted on the prod VNet during the #93 live cycle (#96). The
+        # probe is the lookup made before the peerings were removed. One that failed is no proof of
+        # absence either (#255): it was counted there, and the VNet is left alone.
+        if ($Lookup.Failed) { return }
+        $vnet = $Lookup.Value | Select-Object -First 1
+        if (-not $vnet) {
+            Write-Host "  - [INFO] VNet $VnetName not found or already deleted." -ForegroundColor Gray
+            return
+        }
+
         try {
-            Write-Host "Removing private DNS link: $($dnsLink.Name)..." -ForegroundColor Yellow
-            if ($PSCmdlet.ShouldProcess($dnsLink.Name, 'Remove private DNS zone link')) {
-                Remove-LabDnsLink -Id $dnsLink.Id -Confirm:$false
+            Write-Host "Removing VNet: $VnetName..." -ForegroundColor Yellow
+            if ($PSCmdlet.ShouldProcess($VnetName, 'Remove virtual network')) {
+                Remove-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -Force -ErrorAction Stop
                 Write-Host "  -> Success" -ForegroundColor Green
             }
         } catch {
             $script:cleanupFailures++
-            Write-Host "  - [ERROR] Failed to remove private DNS link $($dnsLink.Name): $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  - [ERROR] Failed to remove VNet ${VnetName}: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    Remove-VNet -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
+    Remove-VNet -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
+    Remove-VNet -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
+
+    # Check for and remove PIPs
+    $pips = @(
+        @{"Name"="dev-skycraft-swc-lb-pip"; "RG"=$devRgName},
+        @{"Name"="prod-skycraft-swc-lb-pip"; "RG"=$prodRgName}
+    )
+
+    foreach ($pip in $pips) {
+        $pipLookup = Invoke-LabLookup -Target "PIP $($pip.Name)" -Lookup {
+            Get-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -ErrorAction Stop
+        }
+        if ($pipLookup.Failed) { continue }
+        if ($pipLookup.Value.Count -eq 0) {
+            Write-Host "  - [INFO] PIP $($pip.Name) not found or already deleted." -ForegroundColor Gray
+            continue
+        }
+
+        try {
+            Write-Host "Removing Public IP: $($pip.Name)..." -ForegroundColor Yellow
+            if ($PSCmdlet.ShouldProcess($pip.Name, 'Remove public IP address')) {
+                Remove-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -Force -ErrorAction Stop
+                Write-Host "  -> Success" -ForegroundColor Green
+            }
+        } catch {
+            $script:cleanupFailures++
+            Write-Host "  - [ERROR] Failed to remove PIP $($pip.Name): $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 }
-
-# Function to remove VNet
-function Remove-VNet {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
-    param($VnetName, $RgName, $Lookup)
-
-    # Probe first. A bare catch reported every failure as "not found or already deleted", which
-    # hid a real InUseSubnetCannotBeDeleted on the prod VNet during the #93 live cycle (#96). The
-    # probe is the lookup made before the peerings were removed. One that failed is no proof of
-    # absence either (#255): it was counted there, and the VNet is left alone.
-    if ($Lookup.Failed) { return }
-    $vnet = $Lookup.Value | Select-Object -First 1
-    if (-not $vnet) {
-        Write-Host "  - [INFO] VNet $VnetName not found or already deleted." -ForegroundColor Gray
-        return
-    }
-
-    try {
-        Write-Host "Removing VNet: $VnetName..." -ForegroundColor Yellow
-        if ($PSCmdlet.ShouldProcess($VnetName, 'Remove virtual network')) {
-            Remove-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -Force -ErrorAction Stop
-            Write-Host "  -> Success" -ForegroundColor Green
-        }
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  - [ERROR] Failed to remove VNet ${VnetName}: $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
-
-Remove-VNet -VnetName $hubVnetName -RgName $hubRgName -Lookup $vnetLookups[$hubVnetName]
-Remove-VNet -VnetName $devVnetName -RgName $devRgName -Lookup $vnetLookups[$devVnetName]
-Remove-VNet -VnetName $prodVnetName -RgName $prodRgName -Lookup $vnetLookups[$prodVnetName]
-
-# Check for and remove PIPs
-$pips = @(
-    @{"Name"="dev-skycraft-swc-lb-pip"; "RG"=$devRgName},
-    @{"Name"="prod-skycraft-swc-lb-pip"; "RG"=$prodRgName}
-)
-
-foreach ($pip in $pips) {
-    $pipLookup = Invoke-LabLookup -Target "PIP $($pip.Name)" -Lookup {
-        Get-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -ErrorAction Stop
-    }
-    if ($pipLookup.Failed) { continue }
-    if ($pipLookup.Value.Count -eq 0) {
-        Write-Host "  - [INFO] PIP $($pip.Name) not found or already deleted." -ForegroundColor Gray
-        continue
-    }
-
-    try {
-        Write-Host "Removing Public IP: $($pip.Name)..." -ForegroundColor Yellow
-        if ($PSCmdlet.ShouldProcess($pip.Name, 'Remove public IP address')) {
-            Remove-AzPublicIpAddress -Name $pip.Name -ResourceGroupName $pip.RG -Force -ErrorAction Stop
-            Write-Host "  -> Success" -ForegroundColor Green
-        }
-    } catch {
-        $script:cleanupFailures++
-        Write-Host "  - [ERROR] Failed to remove PIP $($pip.Name): $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
+$script:cleanupFailures += $lockFailures
 
 if ($script:cleanupFailures -gt 0) {
     Write-Host "`nCleanup finished with $($script:cleanupFailures) failure(s) - see the [ERROR] lines above." -ForegroundColor Red

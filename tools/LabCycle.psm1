@@ -1202,6 +1202,7 @@ function Test-LabCyclePreflight {
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SubscriptionId', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Guards', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'RequireSshKey', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SshKeyPath', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'LockPath', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ContextProbe', Justification = 'False positive: read inside the $checks scriptblocks, which PSSA cannot correlate with the param block.')]
@@ -1221,6 +1222,9 @@ function Test-LabCyclePreflight {
 
         [Parameter()]
         [string]$SshKeyPath = (Join-Path $HOME '.ssh/skycraft-dev.pub'),
+
+        [Parameter()]
+        [bool]$RequireSshKey = $true,
 
         [Parameter()]
         [string]$LockPath,
@@ -1326,7 +1330,8 @@ function Test-LabCyclePreflight {
         }
 
         {
-            if (Test-Path -LiteralPath $SshKeyPath) { ConvertTo-CheckResult -Name 'ssh key' -Ok $true -Detail $SshKeyPath }
+            if (-not $RequireSshKey) { ConvertTo-CheckResult -Name 'ssh key' -Ok $true -Detail 'not needed: no selected lab requires it' }
+            elseif (Test-Path -LiteralPath $SshKeyPath) { ConvertTo-CheckResult -Name 'ssh key' -Ok $true -Detail $SshKeyPath }
             else { ConvertTo-CheckResult -Name 'ssh key' -Ok $false -Detail "lab 3.2 requires a public key at $SshKeyPath" }
         }
 
@@ -1749,6 +1754,9 @@ function Get-LabCycleSoftDeleteGuard {
     .PARAMETER UniqueNames
         The names the operator passed, parameter name to value.
 
+    .PARAMETER Labs
+        Lab paths of the selected phases. When given, a guard for any other lab is dropped (#415).
+
     .OUTPUTS
         [hashtable] One guard per item, copied.
 
@@ -1761,10 +1769,12 @@ function Get-LabCycleSoftDeleteGuard {
     param(
         [Parameter()] [AllowNull()] [object[]]$Guards,
         [Parameter()] [AllowNull()] [object[]]$Declared,
-        [Parameter()] [AllowNull()] [hashtable]$UniqueNames
+        [Parameter()] [AllowNull()] [hashtable]$UniqueNames,
+        [Parameter()] [string[]]$Labs
     )
 
     foreach ($guard in @($Guards | Where-Object { $_ })) {
+        if ($PSBoundParameters.ContainsKey('Labs') -and $guard.Lab -notin $Labs) { continue }
         $copy = @{}
         foreach ($key in $guard.Keys) { $copy[$key] = $guard[$key] }
         $match = @($Declared | Where-Object { $_ -and $_.Lab -eq $guard.Lab -and $_.Default -eq $guard.Name }) | Select-Object -First 1

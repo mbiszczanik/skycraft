@@ -84,6 +84,8 @@ BeforeAll {
     #                                 Conditions-tab option but "Allow user to assign all roles"
     #                                 does in the Portal (#325)
     #   SKYCRAFT_STUB_DUPLICATEPRINCIPAL  principals (by name) the directory holds twice
+    #   SKYCRAFT_STUB_DOMAIN_FAIL / SKYCRAFT_STUB_NOINITIAL  the tenant's domain list (issue #380) is
+    #                                 refused, or holds no initial domain
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:SubId   = '00000000-0000-0000-0000-000000000000'
@@ -143,7 +145,7 @@ function Get-AzADUser {
     param([string]$Filter)
     Write-StubCall -Name "Get-AzADUser|$Filter"
     switch ($Filter) {
-        "startsWith(userPrincipalName,'malfurion.stormrage@')" { Find-StubPrincipal -Name 'malfurion.stormrage' }
+        "userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'" { Find-StubPrincipal -Name 'malfurion.stormrage' }
         "mail eq 'istormrage@illidari.com'" { Find-StubPrincipal -Name 'istormrage@illidari.com' }
         default { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
     }
@@ -209,6 +211,8 @@ function Get-StubRoleAssignment {
             [string[]]$MissingPrincipal = @(),
             [string[]]$DuplicatePrincipal = @(),
             [switch]$NoContext,
+            [switch]$DomainFail,
+            [switch]$NoInitial,
             [string[]]$ArgumentList = @()
         )
 
@@ -224,6 +228,8 @@ function Get-StubRoleAssignment {
             SKYCRAFT_STUB_MISSINGPRINCIPAL = $MissingPrincipal -join ','
             SKYCRAFT_STUB_DUPLICATEPRINCIPAL = $DuplicatePrincipal -join ','
             SKYCRAFT_STUB_NOCONTEXT      = if ($NoContext) { '1' } else { '0' }
+            SKYCRAFT_STUB_DOMAIN_FAIL    = if ($DomainFail) { '1' } else { '0' }
+            SKYCRAFT_STUB_NOINITIAL      = if ($NoInitial) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
         }
 
@@ -239,7 +245,7 @@ function Get-StubRoleAssignment {
     }
 
     $script:Stub    = Initialize-LabScriptStub -Name $script:StubModuleName -Command $script:StubCommands `
-        -Body ($script:StubBody + (Get-LabArmRoleAssignmentStub)) -RequiredModule $script:RequiredModules
+        -Body ($script:StubBody + (Get-LabArmStub -Api RoleAssignment, Domain)) -RequiredModule $script:RequiredModules
     $script:StubDir = $script:Stub.Directory
 
     # One invocation per scenario, reused by the assertions below - each child process costs
@@ -254,6 +260,9 @@ function Get-StubRoleAssignment {
     $script:NoDevelopers   = Invoke-ValidatorScript -Stub $script:Stub -MissingPrincipal 'SkyCraft-Developers'
     $script:TwoDevelopers  = Invoke-ValidatorScript -Stub $script:Stub -DuplicatePrincipal 'SkyCraft-Developers'
     $script:NoContext      = Invoke-ValidatorScript -Stub $script:Stub -NoContext
+    # The tenant's initial domain cannot be determined (issue #380).
+    $script:DomainDenied   = Invoke-ValidatorScript -Stub $script:Stub -DomainFail
+    $script:NoInitialDomain = Invoke-ValidatorScript -Stub $script:Stub -NoInitial
     # The lab cycle's run: resource groups deployed, no role assignment made.
     $script:CycleRun       = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-SkipRoleAssignments' `
         -MissingRole 'owner', 'developers', 'testers-dev', 'testers-prod', 'partner'
@@ -263,7 +272,7 @@ function Get-StubRoleAssignment {
     $script:AllRuns = @(
         $script:AllPass, $script:RgMissing, $script:RoleMissing, $script:RoleLookupFail,
         $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing, $script:GraphFail, $script:NoDevelopers,
-        $script:TwoDevelopers
+        $script:TwoDevelopers, $script:DomainDenied, $script:NoInitialDomain
     )
 }
 
@@ -355,7 +364,7 @@ Describe 'Lab 1.2 Test-Lab.ps1 - role assignments without Microsoft Graph (#397)
 
     It 'looks each principal up once, by the names Lab 1.1 gives them' {
         $calls = $script:AllPass.Calls
-        $calls | Should -Contain "Get-AzADUser|startsWith(userPrincipalName,'malfurion.stormrage@')"
+        $calls | Should -Contain "Get-AzADUser|userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'"
         $calls | Should -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'"
         @($calls | Where-Object { $_ -eq 'Get-AzADGroup|SkyCraft-Testers' }).Count | Should -Be 1
         @($calls | Where-Object { $_ -eq 'Get-AzADGroup|SkyCraft-Developers' }).Count | Should -Be 1
@@ -387,6 +396,33 @@ Describe 'Lab 1.2 Test-Lab.ps1 - role assignments without Microsoft Graph (#397)
         $run.Output | Should -Not -Match 'AuthScope'
         $run.Output | Should -Match 'Passed: 7\b'
         $run.Output | Should -Match 'Failed: 1\b'
+    }
+}
+
+Describe 'Lab 1.2 Test-Lab.ps1 - Malfurion is the initial-domain user only (#380)' {
+
+    It 'looks him up by his full address on the initial domain, the one filter the stub accepts' {
+        # The stub fails the suite for any other Get-AzADUser filter, so a prefix match on any
+        # domain cannot pass; the all-pass run reaches his Owner check through the accepted one.
+        $script:AllPass.Calls | Should -Contain "Get-AzADUser|userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'"
+        $script:AllPass.ExitCode | Should -Be 0
+    }
+
+    It 'fails his check, says the domain is unknown, and still checks the rest, when the domain list is refused' {
+        $run = $script:DomainDenied
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Malfurion \(Admin\)\.\.\. \[FAIL\] Could not determine the tenant's initial \*\.onmicrosoft\.com domain: Microsoft Graph answered 403"
+        $run.Output | Should -Match 'Passed: 7\b'
+        $run.Output | Should -Match 'Failed: 1\b'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzADUser|userPrincipalName*' }) | Should -BeNullOrEmpty -Because 'no user is looked up on a domain that was never determined'
+    }
+
+    It 'fails his check, and does not guess a domain, when the tenant lists no initial domain' {
+        $run = $script:NoInitialDomain
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "Malfurion \(Admin\)\.\.\. \[FAIL\] Could not determine the tenant's initial \*\.onmicrosoft\.com domain: the tenant lists no domain marked IsInitial"
+        $run.Output | Should -Match 'Failed: 1\b'
+        @($run.Calls | Where-Object { $_ -like 'Get-AzADUser|userPrincipalName*' }) | Should -BeNullOrEmpty
     }
 }
 

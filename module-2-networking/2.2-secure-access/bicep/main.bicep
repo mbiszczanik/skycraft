@@ -57,6 +57,14 @@ param parVnetNamePlatform string = 'platform-skycraft-swc-vnet'
 @description('Deploy Azure Bastion (Basic SKU, incurs ~$140/month cost)')
 param parDeployBastion bool = false
 
+// Whether each spoke exists (Lab 2.1 deployed it). Deploy-Bicep.ps1 looks the VNets up and passes
+// the answer; a spoke that is missing is skipped instead of failing its subnet PUTs (issue #275).
+@description('Whether the dev spoke VNet exists. Skipped, with its ASGs, when false.')
+param parDevSpokeExists bool = true
+
+@description('Whether the prod spoke VNet exists. Skipped when false.')
+param parProdSpokeExists bool = true
+
 /*******************
 *    Variables     *
 *******************/
@@ -89,11 +97,12 @@ var varBastionSubnetCidr = '10.0.0.0/26'
 var varBastionName = 'platform-skycraft-swc-bas'
 var varBastionPipName = 'platform-skycraft-swc-bas-pip'
 
-// One entry per spoke; every spoke-scoped module below loops over this list.
-// Index 0 = dev, index 1 = prod (the outputs rely on this order).
-var varSpokes = [
+// One entry per spoke; every spoke-scoped module below loops over varSpokes, the entries whose
+// VNet exists. Order is dev then prod, so prod is the last entry when it is present.
+var varAllSpokes = [
   {
     prefix: 'dev'
+    exists: parDevSpokeExists
     resourceGroupName: parResourceGroupNameDev
     vnetName: parVnetNameDev
     tags: varTagsDev
@@ -103,6 +112,7 @@ var varSpokes = [
   }
   {
     prefix: 'prod'
+    exists: parProdSpokeExists
     resourceGroupName: parResourceGroupNameProd
     vnetName: parVnetNameProd
     tags: varTagsProd
@@ -111,6 +121,8 @@ var varSpokes = [
     dbSubnetCidr: '10.2.3.0/24'
   }
 ]
+
+var varSpokes = filter(varAllSpokes, spoke => spoke.exists)
 
 /*******************
 *    Resources     *
@@ -135,7 +147,7 @@ resource resVnetHub 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 
 var varAsgTiers = ['auth', 'world', 'db']
 
-module modAsg 'br/public:avm/res/network/application-security-group:0.2.2' = [for tier in varAsgTiers: {
+module modAsg 'br/public:avm/res/network/application-security-group:0.2.2' = [for tier in varAsgTiers: if (parDevSpokeExists) {
   name: 'dev-asg-${tier}-deployment'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
@@ -365,5 +377,5 @@ module modBastion 'br/public:avm/res/network/bastion-host:0.8.2' = if (parDeploy
 *     Outputs     *
 ******************/
 
-output outProdNsgAuthId string = modNsgAuth[1].outputs.resourceId // varSpokes[1] = prod
+output outProdNsgAuthId string = parProdSpokeExists ? modNsgAuth[length(varSpokes) - 1].outputs.resourceId : '' // prod is the last spoke present
 output outBastionId string = modBastion.?outputs.resourceId ?? ''

@@ -79,6 +79,9 @@ $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
 Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -Verbose:$false
 
+# A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
+trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
+
 # Runs an Az lookup and returns its result, or $null when the resource (or its resource group)
 # does not exist. Any other failure is rethrown: treating "could not read it" as "absent" would
 # redeploy a resource that stands, which is exactly the overwrite the lookup is there to prevent.
