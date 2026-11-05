@@ -124,7 +124,8 @@ function Get-DeploymentSite {
 
 # Path matching is separator-agnostic so the suite runs identically on the Windows dev box
 # and the Linux CI runner.
-$DeploymentCases = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
+Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+$DeploymentCases = Get-RepoFile -Root $RepoRoot -Filter '*.ps1' |
                    Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' } |
                    ForEach-Object {
                        $file = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'

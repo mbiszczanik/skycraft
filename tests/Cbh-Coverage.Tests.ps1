@@ -32,7 +32,8 @@
 
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # Repo-root scripts/ is included alongside the per-lab ones (issue #116).
-$PsScripts  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.ps1' |
+Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+$PsScripts  = Get-RepoFile -Root $RepoRoot -Filter '*.ps1' |
               Where-Object { (($_.FullName.Substring($RepoRoot.Length + 1)) -replace '\\', '/') -match '^(module-\d.*/)?(scripts|tools)/' }
 
 # The leading Comment-Based Help block, or '' when the script has none. Read from the token stream

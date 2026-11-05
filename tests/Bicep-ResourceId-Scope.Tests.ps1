@@ -48,7 +48,8 @@ BeforeDiscovery {
     }
 
     $script:SubscriptionTemplates = @(
-        Get-ChildItem -Path $repoRoot -Recurse -File -Filter '*.bicep' |
+        Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+        Get-RepoFile -Root $repoRoot -Filter '*.bicep' |
             Where-Object { $_.FullName -match '[/\\]module-\d[^/\\]*[/\\]' } |
             ForEach-Object {
                 $text = Get-Content -Raw -LiteralPath $_.FullName

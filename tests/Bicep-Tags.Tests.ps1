@@ -30,7 +30,8 @@
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-$AllBicepFiles = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep'
+Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+$AllBicepFiles = Get-RepoFile -Root $RepoRoot -Filter '*.bicep'
 $AllCases = $AllBicepFiles | ForEach-Object {
     @{
         file = ($_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/')

@@ -27,7 +27,8 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 $RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$BicepFiles  = Get-ChildItem -Path $RepoRoot -Recurse -File -Filter '*.bicep' |
+Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+$BicepFiles  = Get-RepoFile -Root $RepoRoot -Filter '*.bicep' |
                Where-Object { $_.FullName -match '[/\\]module-\d.*[/\\]bicep[/\\]' }
 
 # Allow-list: resource types that have NEVER shipped a stable API version.

@@ -464,7 +464,8 @@ Describe 'Manifest - accounts for every parameter file in the repository' {
 
     It 'names every .bicepparam in the repository exactly once, across Phases and CompileOnly' {
         $onDisk = @(
-            Get-ChildItem -Path $script:RepoRoot -Recurse -File -Filter '*.bicepparam' |
+            Import-Module (Join-Path $PSScriptRoot 'Support/RepoFiles.psm1') -Force -Verbose:$false
+            Get-RepoFile -Root $script:RepoRoot -Filter '*.bicepparam' |
                 ForEach-Object { $_.FullName.Substring($script:RepoRoot.Length + 1).Replace([char]92, [char]47) }
         ) | Sort-Object
 
