@@ -680,6 +680,7 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
             'Test-LabGlobalName'
             'Write-Host'
             'Write-LabDeploymentOutput'
+            'Write-LabWhatIfResult'
         )
     }
 }

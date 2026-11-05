@@ -168,7 +168,7 @@ if (-not (Test-LabGlobalName -Kind ContainerRegistry -Name $AcrName -ParameterNa
 if ($WhatIf) {
     Write-Host "`nRunning in what-if mode (dry run)..." -ForegroundColor Cyan
     Write-Host "  Phase 1 (resource group, ACR bootstrap, image import) is skipped, not simulated." -ForegroundColor Gray
-    Get-AzSubscriptionDeploymentWhatIfResult @deployParams
+    Get-AzSubscriptionDeploymentWhatIfResult @deployParams | Write-LabWhatIfResult
     Write-Host "`nWhat-if completed. Review the changes above - nothing was deployed." -ForegroundColor Cyan
     Exit-Lab -FailureCount 0
 }

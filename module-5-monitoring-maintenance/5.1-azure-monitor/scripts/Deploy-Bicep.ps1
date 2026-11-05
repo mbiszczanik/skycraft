@@ -246,7 +246,7 @@ if (-not $WhatIf) {
 Write-Host "`n[6/6] Deployment Results:" -ForegroundColor Yellow
 
 if ($WhatIf) {
-    $result
+    $result | Write-LabWhatIfResult
     Write-Host "`n  What-if completed. Review changes above." -ForegroundColor Cyan
 } else {
     Write-Host "  ✓ Deployment succeeded!" -ForegroundColor Green
