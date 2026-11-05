@@ -827,7 +827,7 @@ Set-Alias -Name Get-AzSubscriptionDeploymentWhatIfResult -Value Get-AzDeployment
         # It used to print [KEEP] and exit 0, while Test-Lab.ps1 fails it.
         $run = $script:Conditioned
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[ERROR\] Role assignment deployment failed: admin-owner: the Owner assignment at /subscriptions/11111111-1111-1111-1111-111111111111 has a condition[^\r\n]*Issue 6'
+        $run.Output | Should -Match '\[ERROR\] Role assignment deployment failed: admin-owner: the Owner assignment at /subscriptions/<id> has a condition[^\r\n]*Issue 6'
         $run.Output | Should -Not -Match '\[KEEP\]|Deployment Complete'
         $run.RoleWhatIf.Count | Should -Be 0
         $run.RoleDeploy.Count | Should -Be 0

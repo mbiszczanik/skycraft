@@ -562,7 +562,7 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         # -ResourceGroupName also returns locks inherited from the subscription.
         $run = $script:LockOnSub
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-prod \(CanNotDelete\) at /subscriptions/00000000-0000-0000-0000-000000000000\. Expected'
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-prod \(CanNotDelete\) at /subscriptions/<id>\. Expected'
         $run.FailLines | Should -Be 1
         $run.OkLines | Should -Be 8
         $run.Output | Should -Match 'Failed: 1\b'

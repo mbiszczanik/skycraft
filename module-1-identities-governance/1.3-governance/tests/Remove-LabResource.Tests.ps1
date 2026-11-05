@@ -596,7 +596,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes Inherit-Project-Tag after its
             $role | Should -BeGreaterThan -1
             $policy | Should -BeGreaterThan $role -Because 'removed after the assignment, the role assignment would stay behind for an unknown identity'
         }
-        $script:Clean.Output | Should -Match '\[SUCCESS\] Removed role assignment: Contributor at /subscriptions/00000000-0000-0000-0000-000000000000 for the identity of Inherit-Project-Tag'
+        $script:Clean.Output | Should -Match '\[SUCCESS\] Removed role assignment: Contributor at /subscriptions/<id> for the identity of Inherit-Project-Tag'
     }
 
     It 'leaves another principal''s role assignment and one inherited from a management group alone' {
@@ -620,7 +620,7 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - removes Inherit-Project-Tag after its
     It 'keeps Inherit-Project-Tag when its identity''s role assignment cannot be removed, and exits 1' {
         $run = $script:RoleRemovalFails
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match '\[ERROR\] Failed to remove role assignment Contributor at /subscriptions/00000000-0000-0000-0000-000000000000 for the identity of Inherit-Project-Tag'
+        $run.Output | Should -Match '\[ERROR\] Failed to remove role assignment Contributor at /subscriptions/<id> for the identity of Inherit-Project-Tag'
         $run.Calls  | Should -Not -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa4'
         $run.Calls  | Should -Contain 'Remove-AzPolicyAssignment:aaaaaaaaaaaaaaaaaaaaaaa2'
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
@@ -719,8 +719,8 @@ Describe 'Lab 1.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#252
 
     It 'prints the HTTP status and the service''s message of each failed budget read (#411)' {
         $run = $script:NewLookupsFail
-        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Monthly-Budget on the subscription: ARM GET /subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft\.Consumption/budgets returned HTTP 403 \(AuthorizationFailed\)'
-        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Prod-Monthly on prod-skycraft-swc-rg: ARM GET /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft\.Consumption/budgets returned HTTP 429 \(TooManyRequests\)'
+        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Monthly-Budget on the subscription: ARM GET /subscriptions/<id>/providers/Microsoft\.Consumption/budgets returned HTTP 403 \(AuthorizationFailed\)'
+        $run.Output | Should -Match '\[ERROR\] Could not look up budget SkyCraft-Prod-Monthly on prod-skycraft-swc-rg: ARM GET /subscriptions/<id>/resourceGroups/prod-skycraft-swc-rg/providers/Microsoft\.Consumption/budgets returned HTTP 429 \(TooManyRequests\)'
     }
 
     It 'points each failed budget read to the Portal, and nothing else' {

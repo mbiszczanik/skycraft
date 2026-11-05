@@ -672,11 +672,13 @@ Describe 'SkyCraft PowerShell - Exit-Lab tells the entry point of a pwsh -File p
             'Import-LabModule'
             'Invoke-LabWithoutLock'
             'New-LabArmRoleAssignment'
+            'Protect-LabText'
             'Remove-LabArmBudget'
             'Remove-LabArmRoleAssignment'
             'Remove-LabDnsLink'
             'Remove-LabResourceDiagnosticSetting'
             'Test-LabGlobalName'
+            'Write-Host'
             'Write-LabDeploymentOutput'
         )
     }
