@@ -88,7 +88,7 @@
 
     THE ONE LIMIT THAT WAS ACTUALLY TOO LOW was lab 3.3's TEARDOWN, and it is the reason this note
     is no longer speculative. Measured on 2026-08-30: the Container App deleted immediately and
-    then 'Removing Container Apps Environment: dev-skycraft-swc-cae-02' was still running when the
+    then 'Removing Container Apps Environment: dev-skycraft-swc-cae' was still running when the
     20-minute limit killed it - the one teardown failure in an otherwise clean run. Nothing was
     left behind, because the resource group delete that follows swept the environment up anyway,
     but a teardown that reports a failure on every clean run is exactly what teaches an operator to

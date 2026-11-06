@@ -326,13 +326,13 @@ Describe 'Resource audit - regression guards for issue #116' {
     # the live run found eight prod and platform container resources the audit
     # could not account for (#121). The lab now composes its names from
     # parEnvironment - '${parEnvironment}skycraftswcacr01' in the template,
-    # "$Environment-skycraft-swc-cae-02" in the scripts - so every environment
+    # "$Environment-skycraft-swc-cae" in the scripts - so every environment
     # the @allowed set declares is a name the repository can produce.
     It 'recognises <_>, a Lab 3.3 container name composed from the environment' -ForEach @(
         'prodskycraftswcacr01'
         'platformskycraftswcacr01'
         'prod-skycraft-swc-aci-auth'
-        'platform-skycraft-swc-cae-02'
+        'platform-skycraft-swc-cae'
         'platform-skycraft-swc-aca-world'
     ) {
         Test-LabResourceKnown -Name $_ -KnownName $script:RealKnown | Should -BeTrue

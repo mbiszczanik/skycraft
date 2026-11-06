@@ -82,28 +82,28 @@ Describe 'Lab 3.3 Deploy-Bicep.ps1 - a Consumption-only environment stops the de
     }
 
     It 'returns the environment an older template deployed, without workload profiles' {
-        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae-02' -ResourceGroupName 'dev-skycraft-swc-rg' -WorkloadProfiles $null)
-        $found = Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02'
-        $found.Name | Should -Be 'dev-skycraft-swc-cae-02'
+        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae' -ResourceGroupName 'dev-skycraft-swc-rg' -WorkloadProfiles $null)
+        $found = Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae'
+        $found.Name | Should -Be 'dev-skycraft-swc-cae'
         $script:LookupCalls | Should -Contain 'Microsoft.App/managedEnvironments|||False'
-        $script:LookupCalls | Should -Contain 'id:dev-skycraft-swc-cae-02|2024-03-01|True'
+        $script:LookupCalls | Should -Contain 'id:dev-skycraft-swc-cae|2024-03-01|True'
     }
 
     It 'returns nothing for a Workload profiles environment, which the template deploys onto' {
-        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae-02' -ResourceGroupName 'dev-skycraft-swc-rg' `
+        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae' -ResourceGroupName 'dev-skycraft-swc-rg' `
             -WorkloadProfiles @([pscustomobject]@{ name = 'Consumption'; workloadProfileType = 'Consumption' }))
-        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02' | Should -BeNullOrEmpty
+        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae' | Should -BeNullOrEmpty
     }
 
     It 'returns nothing when no environment exists, or only one in another resource group' {
-        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02' | Should -BeNullOrEmpty
-        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae-02' -ResourceGroupName 'another-rg' -WorkloadProfiles $null)
-        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02' | Should -BeNullOrEmpty
+        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae' | Should -BeNullOrEmpty
+        $script:Environments = @(Get-StubEnvironment -Name 'dev-skycraft-swc-cae' -ResourceGroupName 'another-rg' -WorkloadProfiles $null)
+        Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae' | Should -BeNullOrEmpty
     }
 
     It 'throws when the lookup fails, so the script reports it instead of deploying blind' {
         $script:LookupError = "The client 'stub' does not have authorization to perform action 'read'."
-        { Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae-02' } | Should -Throw '*does not have authorization*'
+        { Get-LabConsumptionOnlyEnvironment -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'dev-skycraft-swc-cae' } | Should -Throw '*does not have authorization*'
     }
 
     It 'is called before the what-if and before Phase 1, and its result stops the script through Exit-Lab' {

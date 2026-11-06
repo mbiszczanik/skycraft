@@ -130,7 +130,7 @@ function Get-StubGroupListing {
     $drift = $script:Mode -eq 'drift'
     [pscustomobject]@{ Name = 'devskycraftswcacr01'; ResourceType = 'Microsoft.ContainerRegistry/registries'; Location = 'swedencentral'; Tags = $tags }
     [pscustomobject]@{ Name = 'dev-skycraft-swc-aci-auth'; ResourceType = 'Microsoft.ContainerInstance/containerGroups'; Location = 'swedencentral'; Tags = $(if ($drift) { $driftTags } else { $tags }) }
-    [pscustomobject]@{ Name = 'dev-skycraft-swc-cae-02'; ResourceType = 'Microsoft.App/managedEnvironments'; Location = 'swedencentral'; Tags = $tags }
+    [pscustomobject]@{ Name = 'dev-skycraft-swc-cae'; ResourceType = 'Microsoft.App/managedEnvironments'; Location = 'swedencentral'; Tags = $tags }
     [pscustomobject]@{ Name = 'dev-skycraft-swc-aca-world'; ResourceType = 'Microsoft.App/containerApps'; Location = $(if ($drift) { 'westus2' } else { 'swedencentral' }); Tags = $tags }
     # Another lab's resource in the same group is not this validator's business.
     [pscustomobject]@{ Name = 'dev-skycraft-swc-vnet'; ResourceType = 'Microsoft.Network/virtualNetworks'; Location = 'westeurope'; Tags = @{} }
@@ -198,7 +198,7 @@ function Get-AzResource {
             provisioningState    = 'Succeeded'
             configuration        = [pscustomobject]@{ ingress = [pscustomobject]@{ external = $true; targetPort = 80; fqdn = "$Name.example.swedencentral.azurecontainerapps.io" } }
             template             = $template
-            managedEnvironmentId = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.App/managedEnvironments/dev-skycraft-swc-cae-02"
+            managedEnvironmentId = "$script:Sub/resourceGroups/$ResourceGroupName/providers/Microsoft.App/managedEnvironments/dev-skycraft-swc-cae"
         }
     }
 }
