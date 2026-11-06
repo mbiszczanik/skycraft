@@ -83,8 +83,8 @@ You can build this lab in the Portal by following this guide, with Az PowerShell
 | Path | What it creates |
 | ---- | --------------- |
 | Portal (this guide) | Everything in the steps below |
-| `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; the locks of Steps 1.3.11 and 1.3.13 |
-| `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script |
+| `scripts/Invoke-LabGovernance.ps1` (Az PowerShell) | The tags of Steps 1.3.1-1.3.3; the four policy assignments of Steps 1.3.5, 1.3.8 and 1.3.9, including the managed identity of `Inherit-Project-Tag` and its role; with `-ApplyLocks`, the locks of Steps 1.3.11 and 1.3.13, which Step 1.3.14 removes again |
+| `scripts/Deploy-Bicep.ps1` (Bicep, `bicep/main.bicep`) | The same as the PowerShell script; the locks only when `parApplyLocks` is `true` (add `param parApplyLocks = true` to `bicep/parameters/main.bicepparam`) |
 
 You can also run a script after building the lab in the Portal. `scripts/Invoke-LabGovernance.ps1` and `scripts/Deploy-Bicep.ps1` find your assignments by their policy definition, their scope and the assignment name this guide gives, whatever their resource name, and create no second one; `Deploy-Bicep.ps1` prints `[KEEP]` for each and grants the identity's role only when it does not hold it yet. When one of your assignments has other parameters, another enforcement mode or exclusions that this guide does not give, both scripts name the difference and leave the assignment as it is, and `Deploy-Bicep.ps1` deploys nothing (Troubleshooting, Issue 9). They also stop, rather than create a second assignment, when one of yours has the right definition under another assignment name, or this guide's assignment name on another definition (Issue 10).
 
@@ -418,7 +418,7 @@ Now assign the second tag policy of this step, `Inherit-Project-Tag`. It copies 
 
 **Why two tag policies**: Azure Policy evaluates a create or update request in a fixed order: Modify policies change the request first, and Deny policies check the changed request afterwards. When you create a resource without the `Project` tag in a resource group that carries `Project` = `SkyCraft`, `Inherit-Project-Tag` adds the tag, and `Enforce-Project-Tag` then lets the resource pass. In later labs this covers resources you cannot tag yourself: VM extensions, autoscale settings, deployment slots, and resources a service creates for you in a tagged group (a backup's restore point collection, for example). Two cases stay refused, because there is nothing to inherit: a resource in a group without the `Project` tag (such as `NetworkWatcherRG`, which Azure creates on its own without tags), and a resource group that a service creates itself, such as Site Recovery's target group or `DefaultResourceGroup-*` (refused by `Require-Environment-Tag-RG`). Before you reach such a step in a later lab, create the group yourself, in the region where the service would create it, with the four SkyCraft tags (as in Step 1.3.1, with the **Environment** value of the lab's environment), and pick it where the wizard asks for a group; see Troubleshooting, Issue 7.
 
-**With Az PowerShell** (instead of items 8-14; the other assignments, the tags and the locks of this lab are created by `scripts/Invoke-LabGovernance.ps1`):
+**With Az PowerShell** (instead of items 8-14; the other assignments and the tags of this lab are created by `scripts/Invoke-LabGovernance.ps1`, the locks only with its `-ApplyLocks`):
 
 ```powershell
 $subscriptionScope = "/subscriptions/$((Get-AzContext).Subscription.Id)"
@@ -583,7 +583,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 | Lock type | Delete                                               |
 | Notes     | Cannot delete resource or child resources.           |
 
-> The Bicep path applies both locks through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it checks that each group carries, on the group itself, a lock with the name given in step 1.3.11 or 1.3.13 and the **Delete** (`CanNotDelete`) type.
+> The Bicep path applies both locks only when `parApplyLocks` is `true`, through the AVM resource-group module, which sets this notes text itself; the notes are not configurable through the module. If you create the locks in the portal, use the same text so your locks match the checklist. `Test-Lab.ps1` does not read the notes: it fails a lock on the group under another name or type than the one given in step 1.3.11 or 1.3.13 (**Delete**, `CanNotDelete`), and it passes a group with no lock, the state after Step 1.3.14.
 
 **Note**: **Lock type** starts at **Read-only**. Change it to **Delete**: a read-only lock on the group would block every change to it and its resources, not only deletion.
 
@@ -630,7 +630,7 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 
 4. Click **OK**
 
-### Step 1.3.14: Understand Lock Hierarchy
+### Step 1.3.14: Understand Lock Hierarchy and Remove the Two Locks
 
 **Important Concepts**:
 
@@ -643,6 +643,20 @@ Locks applied at parent scope (subscription/resource group) are inherited by chi
 - Use **CanNotDelete** on production resource groups
 - Use **ReadOnly** very carefully (can break automation)
 - Document all locks with clear notes
+
+**Remove the two delete locks.**
+
+The locks taught what they were for in Step 1.3.12. Labs 2.1 to 5.3 create and delete resources in `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`, and a lock on those groups would refuse their cleanups and some of their steps (the Portal's delete of an alert rule or a flow log, for example), so remove both locks now.
+
+1. In `prod-skycraft-swc-rg`, in the left menu, under **Settings** (expand it if it is collapsed), click **Locks**.
+2. Select `lock-no-delete-prod` and click **Delete**, then confirm.
+3. In `platform-skycraft-swc-rg`, do the same for `lock-no-delete-platform`.
+
+**With Az PowerShell**: `Remove-AzResourceLock -ResourceGroupName 'prod-skycraft-swc-rg' -LockName 'lock-no-delete-prod' -Force`, then the same for `platform-skycraft-swc-rg` and `lock-no-delete-platform`.
+
+**Expected Result**: **Locks** lists nothing on either group. `Test-Lab.ps1` reports "no delete lock on the group" for both and passes.
+
+> A lock takes a minute or two to disappear everywhere. If a delete in a later lab still reports that the scope is locked right after this step, wait and try again.
 
 ---
 
@@ -908,6 +922,7 @@ The service opens as **Resource Manager | Management groups**.
 - [ ] CanNotDelete lock on platform-skycraft-swc-rg
 - [ ] Tested lock (attempted to delete locked resource group)
 - [ ] Lock notes documented
+- [ ] Both locks removed (Step 1.3.14), so Labs 2.1 to 5.3 run without a delete lock
 
 ### Cost Management
 
@@ -937,7 +952,7 @@ The service opens as **Resource Manager | Management groups**.
 
 ## 📦 What This Lab Leaves Behind
 
-No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 1.3. Every later lab in this subscription runs under its policies and locks, though, and they change what you can create and delete there. Everything below costs nothing per day.
+No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 1.3. Every later lab in this subscription runs under its policies, though, and they change what you can create there. Everything below costs nothing per day.
 
 | Left behind | Where | Daily cost | What it does in later labs |
 | --- | --- | --- | --- |
@@ -946,13 +961,12 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | `Inherit-Project-Tag` | Subscription | 0 | Adds the resource group's `Project` tag to a new resource created without it, so resources you cannot tag (VM extensions, autoscale settings, deployment slots) pass `Enforce-Project-Tag` in a tagged group |
 | Managed identity of `Inherit-Project-Tag`, with Contributor | Subscription | 0 | Can change any resource in the subscription; only a remediation task uses it |
 | `Restrict-Azure-Regions` | Subscription | 0 | Refuses a resource outside Sweden Central and North Europe |
-| `lock-no-delete-prod`, `lock-no-delete-platform` | prod and platform resource groups | 0 | Block every delete in those groups, including a later lab's cleanup, until the locks are removed |
 | Tags on the three resource groups | dev, prod and platform resource groups | 0 | The `Project` tag that `Inherit-Project-Tag` copies to new resources |
 | `SkyCraft-Monthly-Budget`, `SkyCraft-Prod-Monthly` | Subscription, prod resource group | 0 | Send emails at their thresholds; they never stop a deployment |
 | `Advisor-Cost-Recommendations` and its action group `skycraft-advisor-ag` | prod resource group | 0 | Nothing reaches you: Step 1.3.7 creates the action group without any notification or action, so a new Advisor cost recommendation sends no email or other message |
 | `Microsoft.Insights` resource provider registered (on a new subscription, Prerequisites) | Subscription | 0 | Lets later labs create action groups, alert rules and diagnostic settings |
 
-`scripts/Remove-LabResource.ps1` removes all of these except the tags and the resource provider registration, whichever path created them. It removes the locks first, and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because the locks block that delete.
+`scripts/Remove-LabResource.ps1` removes all of these except the tags and the resource provider registration, whichever path created them. It removes the two locks first when they still exist (you skipped the removal in Step 1.3.14), and the identity's role before its assignment. Run it before Lab 1.2's cleanup deletes the resource groups, because a lock would block that delete.
 
 ---
 
@@ -987,7 +1001,8 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 
 - Check for resource locks: **Resource** → **Settings** (expand it if it is collapsed) → **Locks**
 - If the Portal's **Delete confirmation** offers **Attempt override of delete lock**, leave it unticked: ticking it deletes the resource permanently
-- Remove lock temporarily (document why)
+- Lab 1.3's own two locks are removed in Step 1.3.14; if one is still there, remove it the same way
+- Remove any other lock temporarily (document why)
 - Delete resource
 - Re-apply lock if needed
 
