@@ -337,7 +337,7 @@ function Remove-AzResourceGroup {
         -CaeCustomerId 'aaaaaaaa-0000-0000-0000-000000000001' -DeleteNotFound 'workspacedevskycraftswcrg1a2b' `
         -StillThere 'workspacedevskycraftswcrg1a2b'
     $script:EnvStuck = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
-        -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Fail 'Remove-AzResource:dev-skycraft-swc-cae-02'
+        -CaeCustomerId 'cccccccc-0000-0000-0000-000000000003' -Fail 'Remove-AzResource:dev-skycraft-swc-cae'
     $script:WorkspaceDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
         -Lookup 'Get-AzResource:Microsoft.OperationalInsights/workspaces=denied'
     $script:RelationDenied = Invoke-CleanupScript -Stub $script:Stub -Workspace $script:LabWorkspaces `
@@ -432,7 +432,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - exit code contract' {
         $run = $script:TwoStuck
         $run.Output | Should -Match "\[ERROR\] Could not delete Container App 'dev-skycraft-swc-aca-world': stub failure"
         $run.Output | Should -Match 'Kept: the Container App could not be deleted and may still be in it'
-        $run.Calls  | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
+        $run.Calls  | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae'
         $run.Calls  | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
     }
 
@@ -471,7 +471,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
 
     It 'still deletes the resources it could look up' {
         $script:LookupsFail.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-aca-world'
-        $script:LookupsFail.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
+        $script:LookupsFail.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-cae'
     }
 
     It 'keeps the Container Apps environment when its app could not be looked up' {
@@ -479,8 +479,8 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - a failed lookup is not "absent" (#290
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.Output   | Should -Match 'Cleanup finished with 1 failure\(s\)'
         $run.Output   | Should -Match 'Kept: the Container App could not be looked up'
-        $run.Calls    | Should -Not -Contain 'Get-AzResource dev-skycraft-swc-cae-02'
-        $run.Calls    | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
+        $run.Calls    | Should -Not -Contain 'Get-AzResource dev-skycraft-swc-cae'
+        $run.Calls    | Should -Not -Contain 'Remove-AzResource dev-skycraft-swc-cae'
         $run.Calls    | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
         $run.Calls    | Should -Contain 'Remove-AzContainerRegistry devskycraftswcacr01'
     }
@@ -533,7 +533,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
         $run.Calls | Should -Contain 'Get-AzResource Microsoft.OperationalInsights/workspaces'
         $run.Calls | Should -Not -Contain 'Remove-AzResource platform-skycraft-swc-law'
         $run.Calls | Should -Contain 'Remove-AzResource workspaceplatformskycraftswcrg9f8e'
-        $run.Output | Should -Match '\[WARN\] Kept platform-skycraft-swc-law in platform-skycraft-swc-rg: platform-skycraft-swc-cae-02 sent its logs to it, but it is Lab 5.1''s shared workspace'
+        $run.Output | Should -Match '\[WARN\] Kept platform-skycraft-swc-law in platform-skycraft-swc-rg: platform-skycraft-swc-cae sent its logs to it, but it is Lab 5.1''s shared workspace'
     }
 
     It 'never deletes another environment''s shared workspace either' {
@@ -554,7 +554,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
 
     It 'deletes the workspaces after the environment, and before the instance and the registry' {
         $calls = $script:Workspaces.Calls
-        $env = [array]::IndexOf($calls, 'Remove-AzResource dev-skycraft-swc-cae-02')
+        $env = [array]::IndexOf($calls, 'Remove-AzResource dev-skycraft-swc-cae')
         $workspace = [array]::IndexOf($calls, 'Remove-AzResource workspacedevskycraftswcrg1a2b')
         $related = [array]::IndexOf($calls, 'Remove-AzResource my-env-logs')
         $aci = [array]::IndexOf($calls, 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth')
@@ -565,14 +565,14 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
     }
 
     It 'finds nothing to delete on the guide''s path, where no workspace exists' {
-        $script:Clean.Output | Should -Match "Removing Log Analytics workspace: the one dev-skycraft-swc-cae-02 logs to \(never \*-skycraft-swc-law\), and any named workspacedevskycraftswcrg\.\.\. \(the Portal's automatic name\)\.\.\.\s+-> \[INFO\] Not found - nothing to delete\."
+        $script:Clean.Output | Should -Match "Removing Log Analytics workspace: the one dev-skycraft-swc-cae logs to \(never \*-skycraft-swc-law\), and any named workspacedevskycraftswcrg\.\.\. \(the Portal's automatic name\)\.\.\.\s+-> \[INFO\] Not found - nothing to delete\."
         @($script:Clean.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' }) | Should -BeNullOrEmpty
     }
 
     It 'keeps the workspaces when the environment could not be deleted, counted once' {
         $run = $script:EnvStuck
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[ERROR\] Could not delete Container Apps Environment 'dev-skycraft-swc-cae-02': stub failure"
+        $run.Output | Should -Match "\[ERROR\] Could not delete Container Apps Environment 'dev-skycraft-swc-cae': stub failure"
         $run.Output | Should -Match 'Kept: the Container Apps Environment could not be deleted and may still send its logs to them'
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
         @($run.Calls | Where-Object { $_ -in 'Remove-AzResource workspacedevskycraftswcrg1a2b', 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
@@ -588,7 +588,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
     It 'counts a failed workspace lookup in the group and deletes none of them' {
         $run = $script:WorkspaceDenied
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'the one dev-skycraft-swc-cae-02 logs to[^\r\n]*does not have authorization"
+        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'the one dev-skycraft-swc-cae logs to[^\r\n]*does not have authorization"
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
         @($run.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' -or $_ -eq 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
         $run.Calls | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
@@ -597,7 +597,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - the Container Apps environment''s Log
     It 'counts a failed lookup of the environment''s workspace and deletes none of them' {
         $run = $script:RelationDenied
         $run.ExitCode | Should -Be 1 -Because "a workspace it could not see must not read as absent; output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'the one dev-skycraft-swc-cae-02 logs to[^\r\n]*does not have authorization"
+        $run.Output | Should -Match "\[ERROR\] Could not look up Log Analytics workspace 'the one dev-skycraft-swc-cae logs to[^\r\n]*does not have authorization"
         $run.Output | Should -Match 'Cleanup finished with 1 failure\(s\)'
         $run.Output | Should -Not -Match 'Removing Log Analytics workspace: [^\r\n]*\r?\n\s*-> \[INFO\] Not found'
         @($run.Calls | Where-Object { $_ -like 'Remove-AzResource workspace*' -or $_ -eq 'Remove-AzResource my-env-logs' }) | Should -BeNullOrEmpty
@@ -691,7 +691,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - -WhatIf' {
         $run = $script:WhatIf
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         $run.Calls    | Should -Not -Match '^Remove-'
-        $run.Output   | Should -Match 'What if: .*dev-skycraft-swc-cae-02'
+        $run.Output   | Should -Match 'What if: .*dev-skycraft-swc-cae'
     }
 }
 
@@ -699,7 +699,7 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - names follow -Environment and the ove
 
     It 'deletes the dev names by default' {
         $script:Clean.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-aca-world'
-        $script:Clean.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-cae-02'
+        $script:Clean.Calls | Should -Contain 'Remove-AzResource dev-skycraft-swc-cae'
         $script:Clean.Calls | Should -Contain 'Remove-AzContainerGroup dev-skycraft-swc-aci-auth'
         $script:Clean.Calls | Should -Contain 'Remove-AzContainerRegistry devskycraftswcacr01'
     }
@@ -707,14 +707,14 @@ Describe 'Lab 3.3 Remove-LabResource.ps1 - names follow -Environment and the ove
     It 'deletes the prod names with -Environment prod, honouring an -AcaName override' {
         $script:Prod.ExitCode | Should -Be 0
         $script:Prod.Calls | Should -Contain 'Remove-AzResource prod-skycraft-swc-aca-world-02'
-        $script:Prod.Calls | Should -Contain 'Remove-AzResource prod-skycraft-swc-cae-02'
+        $script:Prod.Calls | Should -Contain 'Remove-AzResource prod-skycraft-swc-cae'
         $script:Prod.Calls | Should -Contain 'Remove-AzContainerGroup prod-skycraft-swc-aci-auth'
         $script:Prod.Calls | Should -Contain 'Remove-AzContainerRegistry prodskycraftswcacr01'
     }
 
     It 'deletes the app before its environment' {
         $app = [array]::IndexOf($script:Clean.Calls, 'Remove-AzResource dev-skycraft-swc-aca-world')
-        $env = [array]::IndexOf($script:Clean.Calls, 'Remove-AzResource dev-skycraft-swc-cae-02')
+        $env = [array]::IndexOf($script:Clean.Calls, 'Remove-AzResource dev-skycraft-swc-cae')
         $app | Should -BeLessThan $env
     }
 }

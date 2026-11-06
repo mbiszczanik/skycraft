@@ -39,7 +39,7 @@
 
 .EXAMPLE
     .\Deploy-Bicep.ps1 -Environment prod
-    Deploys prodskycraftswcacr01, prod-skycraft-swc-aci-auth, prod-skycraft-swc-cae-02 and
+    Deploys prodskycraftswcacr01, prod-skycraft-swc-aci-auth, prod-skycraft-swc-cae and
     prod-skycraft-swc-aca-world into prod-skycraft-swc-rg.
 
 .EXAMPLE
@@ -143,7 +143,7 @@ function Get-LabConsumptionOnlyEnvironment {
         Select-Object -First 1
 }
 
-$caeName = "$Environment-skycraft-swc-cae-02"   # main.bicep's parCaeName default
+$caeName = "$Environment-skycraft-swc-cae"   # main.bicep's parCaeName default
 try {
     $legacyCae = Get-LabConsumptionOnlyEnvironment -ResourceGroupName $ResourceGroupName -Name $caeName
 } catch {

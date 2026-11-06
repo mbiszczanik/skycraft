@@ -69,7 +69,8 @@
     The container instance name. Default: '<Environment>-skycraft-swc-aci-auth'
 
 .PARAMETER CaeName
-    The Container Apps environment name. Default: '<Environment>-skycraft-swc-cae-02'
+    The Container Apps environment name. Default: '<Environment>-skycraft-swc-cae'. Override it to
+    remove an environment deployed under the earlier name, e.g. dev-skycraft-swc-cae-02 (#433).
 
 .PARAMETER AcaName
     The container app name. Default: '<Environment>-skycraft-swc-aca-world'. Override it to
@@ -117,7 +118,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$CaeName = "$Environment-skycraft-swc-cae-02",
+    [string]$CaeName = "$Environment-skycraft-swc-cae",
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
