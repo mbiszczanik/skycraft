@@ -418,7 +418,7 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 - Check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag` with **Tag Name** `Project`. If it is missing, assign it as in Lab 1.3, Step 1.3.8, and wait about ten minutes. Do not delete `Enforce-Project-Tag`: Lab 1.3's `Test-Lab.ps1` checks it.
 - Check that `platform-skycraft-swc-rg` carries `Project` = `SkyCraft` on its **Tags** page.
-- Delete the Failed flow log (under **Logs**, **Flow logs**, tick the box of `prod-skycraft-swc-vnet-flowlog` → **Delete**) and create it again with Step 5.3.5. A flow log with retention keeps a lifecycle rule on its storage account, which sits in `platform-skycraft-swc-rg`: with Lab 1.3's `lock-no-delete-platform` in place, the delete fails with `ScopeLocked` and leaves the flow log **Failed**. See Issue 7.
+- Delete the Failed flow log (under **Logs**, **Flow logs**, tick the box of `prod-skycraft-swc-vnet-flowlog` → **Delete**) and create it again with Step 5.3.5. A flow log with retention keeps a lifecycle rule on its storage account, which sits in `platform-skycraft-swc-rg`: if you kept Lab 1.3's `lock-no-delete-platform` (you skipped Lab 1.3, Step 1.3.14), the delete fails with `ScopeLocked` and leaves the flow log **Failed**. See Issue 7.
 
 ### Issue 5: Creating the Connection Monitor fails with no reason on the page
 
@@ -448,12 +448,12 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 **Symptom**: **Delete** on `prod-skycraft-swc-vnet-flowlog` (or `az network watcher flow-log delete`) fails with `ScopeLocked` on `managementPolicies/default` of `platformskycraftswcsa`, and the flow log is left **Failed**.
 
-**Root Cause**: A flow log with retention keeps a lifecycle rule on its storage account, and Lab 1.3's `lock-no-delete-platform` on `platform-skycraft-swc-rg` refuses that delete. The Portal cannot lift a lock for you.
+**Root Cause**: A flow log with retention keeps a lifecycle rule on its storage account, and Lab 1.3's `lock-no-delete-platform` on `platform-skycraft-swc-rg`, still there because Step 1.3.14 was skipped, refuses that delete. The Portal cannot lift a lock for you.
 
 **Solution**:
 
 - Run `scripts/Remove-LabResource.ps1`: it lifts the lock for the deletes and restores it with the same name, level and notes.
-- Or remove the lock yourself, delete the flow log, then add the lock back as in Lab 1.3, Step 1.3.13.
+- Or remove the lock yourself (Lab 1.3, Step 1.3.14), then delete the flow log. The rest of the course needs no lock on the group.
 
 ---
 

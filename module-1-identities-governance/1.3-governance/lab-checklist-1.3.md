@@ -104,6 +104,7 @@
 - [ ] Know difference between CanNotDelete and ReadOnly
 - [ ] Understand how to remove locks when needed
 - [ ] Know that locks apply even to Owners
+- [ ] Removed both locks (Step 1.3.14), so Labs 2.1 to 5.3 run without a delete lock
 
 ---
 
@@ -296,7 +297,7 @@ the subscription and then to prod-skycraft-swc-rg.
 - Tags appear on all three resource groups
 - 4 policy assignments visible, each with the dashed name in **DisplayName** (every path) and in **Name** (Bicep and PowerShell paths; the Portal path shows a generated id there)
 - `Inherit-Project-Tag` listed with IdentityType `SystemAssigned` and TagName `Project`
-- 2 resource locks confirmed
+- 2 resource locks confirmed, then removed (Step 1.3.14); `Test-Lab.ps1` passes a group with no lock
 - SkyCraft-Monthly-Budget listed by the first budget command
 - SkyCraft-Prod-Monthly listed by the second budget command
 
@@ -308,7 +309,7 @@ the subscription and then to prod-skycraft-swc-rg.
 |-----------|-------------|-------|---------|
 | Tags | ✅ | 12 tags (4 per RG) | Resource organization and cost tracking |
 | Azure Policies | ✅ | 4 assignments (3 Deny, 1 Modify) | Enforce standards and compliance |
-| Resource Locks | ✅ | 2 locks | Prevent accidental deletion |
+| Resource Locks | ✅ | 2 locks, removed in Step 1.3.14 | Taught the lock, then left no delete lock for Labs 2.1 to 5.3 |
 | Budgets | ✅ | 2 budgets | Cost control and alerts |
 | Advisor Alerts | ✅ | 1 alert rule | Proactive optimization |
 

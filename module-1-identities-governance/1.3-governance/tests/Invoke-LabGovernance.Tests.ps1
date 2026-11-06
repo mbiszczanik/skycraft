@@ -234,7 +234,7 @@ function New-StubRoleAssignment {
 
 function Get-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
 
-function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) if ($env:SKYCRAFT_STUB_LOG) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value 'New-AzResourceLock' } }
 '@
 
     function Invoke-GovernanceScript {
@@ -247,13 +247,15 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
             [switch]$NoIdentity,
             [switch]$GrantFail,
             [switch]$Drift,
-            [switch]$RoleLookupFail
+            [switch]$RoleLookupFail,
+            [switch]$ApplyLocks
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -Environment @{
+        $arguments = if ($ApplyLocks) { @('-ApplyLocks') } else { @() }
+        $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
             SKYCRAFT_STUB_POLICYSET  = $PolicySet
             SKYCRAFT_STUB_LOOKUPFAIL = if ($LookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_ROLEHELD   = if ($RoleHeld) { '1' } else { '0' }
@@ -281,6 +283,7 @@ function New-AzResourceLock { [CmdletBinding()] param([Parameter(ValueFromRemain
     $script:StubDir = $script:Stub.Directory
 
     $script:Fresh      = Invoke-GovernanceScript -Stub $script:Stub
+    $script:LocksApplied = Invoke-GovernanceScript -Stub $script:Stub -ApplyLocks
     $script:BicepMade  = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'bicep'
     $script:PortalMade = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'portal'
     $script:TwoSets    = Invoke-GovernanceScript -Stub $script:Stub -PolicySet 'both'
@@ -452,6 +455,18 @@ Describe 'Lab 1.3 Invoke-LabGovernance.ps1 - exits 1 when anything failed (#350)
             $run.Output | Should -Match 'Imperative Deployment finished with \d+ error\(s\)'
             $run.Output | Should -Not -Match 'Imperative Deployment Complete'
         }
+    }
+
+    It 'creates no lock by default and says so, because the lab ends without locks (#501)' {
+        $script:Fresh.ExitCode | Should -Be 0 -Because "output was:`n$($script:Fresh.Output)"
+        @($script:Fresh.Calls | Where-Object { $_ -eq 'New-AzResourceLock' }).Count | Should -Be 0
+        $script:Fresh.Output | Should -Match 'Locks skipped: the lab ends without them \(Step 1\.3\.14\)'
+    }
+
+    It 'creates the two locks with -ApplyLocks (#501)' {
+        $script:LocksApplied.ExitCode | Should -Be 0 -Because "output was:`n$($script:LocksApplied.Output)"
+        @($script:LocksApplied.Calls | Where-Object { $_ -eq 'New-AzResourceLock' }).Count | Should -Be 2
+        $script:LocksApplied.Output | Should -Not -Match 'Locks skipped'
     }
 
     It 'still applies the locks after a policy [ERROR]' {

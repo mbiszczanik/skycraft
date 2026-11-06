@@ -165,7 +165,7 @@ Inside that group Azure Backup then creates a restore point collection per VM, `
 
    The **Tags** tab knows Lab 1.3's policies: *Click here to set required tags* fills in the names they require.
 
-   Do **not** lock this group. Azure Backup deletes expired snapshots from it, and a lock makes backups fail with `UserErrorRpCollectionLimitReached`. This is also why the snapshots do not go into `platform-skycraft-swc-rg`, which Lab 1.3 locks.
+   Do **not** lock this group. Azure Backup deletes expired snapshots from it, and a lock makes backups fail with `UserErrorRpCollectionLimitReached`. This is also why the snapshots do not go into `platform-skycraft-swc-rg`, which would carry Lab 1.3's lock if you kept it.
 
 2. Open the vault and, under **Manage** (expand it if it is collapsed), click **Backup policies**.
 3. Click **+ Add** → **Azure Virtual Machine**.
@@ -342,7 +342,7 @@ New-AzDataProtectionBackupPolicy -ResourceGroupName platform-skycraft-swc-rg -Va
 ```
 
 > [!WARNING]
-> A backup policy cannot be changed after it is created (`UserErrorBMSUpdatePolicyNotSupported`), and Lab 1.3's lock on `platform-skycraft-swc-rg` blocks deleting one. A `SkyCraft-Blob-Policy` created in the Portal by mistake keeps its billed vaulted rule until you delete it: see Troubleshooting, Issue 5.
+> A backup policy cannot be changed after it is created (`UserErrorBMSUpdatePolicyNotSupported`), and, if you kept Lab 1.3's lock on `platform-skycraft-swc-rg`, the lock blocks deleting one. A `SkyCraft-Blob-Policy` created in the Portal by mistake keeps its billed vaulted rule until you delete it: see Troubleshooting, Issue 5.
 
 **b. Grant the Backup Vault identity access to the storage account**
 
@@ -726,10 +726,10 @@ If the Activity Log names the restore point collection, check that `platform-sky
 **Solution**:
 
 1. Make sure the vault protects nothing yet (no backup instance; delete `prodskycraftswcsa`'s instance first if there is one).
-2. Lab 1.3's lock `lock-no-delete-platform` on `platform-skycraft-swc-rg` blocks the delete. Remove it for the moment: the group's **Settings** → **Locks** → delete `lock-no-delete-platform` (it is recreated in step 5).
+2. If you kept Lab 1.3's lock `lock-no-delete-platform` on `platform-skycraft-swc-rg` (you skipped Lab 1.3, Step 1.3.14), it blocks the delete: remove it first, in the group's **Settings** → **Locks** → delete `lock-no-delete-platform`. Without that lock, go on with step 3.
 3. Delete the vault: `Remove-AzDataProtectionBackupVault -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv`. The deleted vault stays soft-deleted for its retention period; Azure still allows a new vault with the same name.
 4. **Wait about a minute**, then create it again with the Bicep (`Deploy-Bicep.ps1`) or the request in Step 5.2.4; `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused (Step 5.2.4). Recreating it at once failed once in a live run with `Identity operation for resource ... failed ... BadRequest ... was not found`; the same command a minute later worked. Recreate the diagnostic setting `bv-backup-reports-diag` (Step 5.2.8 b) and the blob policy (Step 5.2.5 a): they went with the vault.
-5. Put the lock back: re-run Lab 1.3's `Deploy-Bicep.ps1`, or the group's **Settings** (expand it if it is collapsed) → **Locks** → **+ Add**, name `lock-no-delete-platform`, type **Delete**.
+5. If you removed the lock in step 2, leave it off, as Lab 1.3, Step 1.3.14 does for the rest of the course. To put it back anyway, add it in the group's **Settings** (expand it if it is collapsed) → **Locks** → **+ Add**, name `lock-no-delete-platform`, type **Delete**.
 
 ### Issue 4: Enable backup fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`
 
@@ -745,7 +745,7 @@ If the Activity Log names the restore point collection, check that `platform-sky
 
 **Root Cause**: The policy was created in the Portal, which always adds **Vaulted backup** to a new blob policy. A policy cannot be updated in place (`UserErrorBMSUpdatePolicyNotSupported`).
 
-**Solution**: Delete the policy (and the storage account's backup instance first, if it uses it), with Lab 1.3's lock lifted as in Issue 3, steps 2 and 5: `Remove-AzDataProtectionBackupPolicy -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv -Name SkyCraft-Blob-Policy`. Then run `.\scripts\New-LabBlobBackup.ps1 -PolicyOnly` (Step 5.2.5 a).
+**Solution**: Delete the policy (and the storage account's backup instance first, if it uses it), with Lab 1.3's lock lifted, if you kept it, as in Issue 3, step 2: `Remove-AzDataProtectionBackupPolicy -ResourceGroupName platform-skycraft-swc-rg -VaultName platform-skycraft-swc-bv -Name SkyCraft-Blob-Policy`. Then run `.\scripts\New-LabBlobBackup.ps1 -PolicyOnly` (Step 5.2.5 a).
 
 ### Issue 6: A script reports `MicrosoftGraphEndpointResourceId`
 

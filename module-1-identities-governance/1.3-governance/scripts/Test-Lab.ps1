@@ -10,7 +10,9 @@
        the Modify assignment of step 1.3.8 (issue #350), passes only with tagName Project and a
        system-assigned managed identity. Its identity's role is not checked: a request-time
        Modify needs none, and only a remediation task uses it.
-    3. Resource Locks (the guide's lock, by name and CanNotDelete level, on the group itself)
+    3. Resource Locks: none on the group is the state the lab ends in (Step 1.3.14 removes the
+       two locks, issue #501); a lock on the group under another name or level than the guide's
+       fails, because the cleanup would not remove it
     4. Budgets (manual check)
 
     Every check in sections 1-3 prints [OK] or [FAIL] and is counted. The summary states how many
@@ -162,10 +164,11 @@ foreach ($spec in Get-LabPolicyAssignmentSpec) {
 }
 
 # 3. Validate Locks
-# One check per resource group: it passes only when the group itself carries the lock the guide
-# creates - this name, with level CanNotDelete (Lock type "Delete" in the portal). These are the
-# names Remove-LabResource.ps1 removes, so a lock under any other name or level would pass here
-# and then outlive the cleanup (issue #258). Get-AzResourceLock -ResourceGroupName also returns
+# One check per resource group. The lab ends without a delete lock (Step 1.3.14, issue #501), so a
+# group with no lock of its own passes. It fails when the group carries a lock under another name
+# or with another level than the guide's - this name, with level CanNotDelete (Lock type "Delete"
+# in the portal). These are the names Remove-LabResource.ps1 removes, so a lock under any other
+# name or level would pass here and then outlive the cleanup (issue #258). Get-AzResourceLock -ResourceGroupName also returns
 # locks on resources inside the group and on the subscription above it; neither is the lock the
 # guide asks for, so only a lock applied at the group's own scope counts. The lock notes are not
 # checked: the Bicep path sets them itself (lab-guide-1.3.md, step 1.3.11).
@@ -218,14 +221,14 @@ foreach ($target in $lockTargets) {
         Write-Host " [FAIL] No lock named $($target.Lock); the group carries: $lockList. $expected" -ForegroundColor Red
         $failCount++
     }
-    elseif ($foundLocks.Count -gt 0) {
-        $lockList = ($foundLocks | ForEach-Object { "$($_.Name) ($($_.Level)) at $($_.Scope)" }) -join ', '
-        Write-Host " [FAIL] Not found on the group itself; locks elsewhere do not count: $lockList. $expected" -ForegroundColor Red
-        $failCount++
-    }
     else {
-        Write-Host " [FAIL] Not found. $expected" -ForegroundColor Red
-        $failCount++
+        # No lock on the group itself is the state Step 1.3.14 leaves, and the state of a lab that
+        # never applied the locks (#501); locks on resources inside or above the group are not
+        # the lab's and do not change that.
+        $elsewhere = if ($foundLocks.Count -gt 0) { '; locks elsewhere do not count' } else { '' }
+        Write-Host " : no delete lock on the group (Step 1.3.14 removes it, so Labs 2.1 to 5.3 run without one$elsewhere)" -NoNewline
+        Write-Host " [OK]" -ForegroundColor Green
+        $passCount++
     }
 }
 
