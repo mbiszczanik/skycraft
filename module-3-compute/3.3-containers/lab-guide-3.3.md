@@ -124,7 +124,7 @@ For SkyCraft, we need a secure place to store our proprietary game server images
 
 **Expected Result**:
 
-- Validation passes and deployment succeeds. Without the tags, the Portal refuses validation once Lab 1.3's `Enforce-Project-Tag` is assigned.
+- Validation passes and deployment succeeds. With Lab 1.3's `Inherit-Project-Tag` assigned, a resource left without tags in `dev-skycraft-swc-rg` still validates and gets `Project`; `Enforce-Project-Tag` refuses it only where the group has no `Project` tag or `Inherit-Project-Tag` is not assigned yet.
 - The registry `devskycraftswcacr01` is listed in `dev-skycraft-swc-rg`.
 
 ![Create Container Registry](./images/step-3.3.1.png)
@@ -596,7 +596,7 @@ Remove-AzResourceGroup -Name 'DefaultResourceGroup-EUS' -Force
 ### Issue 4: A create is refused by policy
 
 **Symptom**: Validation fails or the notification bell shows `RequestDisallowedByPolicy` with "All resources must be tagged with Project=SkyCraft" or "Resources must be deployed to Sweden Central or North Europe regions only".
-**Solution**: Lab 1.3's policies are in effect. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region; in Step 3.3.6, check that **Resource group** and **Region** are not the wizard's pre-filled values. The activity log may also show that Azure tried to create `DefaultResourceGroup-SEC` and was refused by `Require-Environment-Tag-RG`. The agent Portal pass of 2026-10-15 saw that refusal without recording which step caused it; none of the lab's resources is in that group, and `scripts/Test-Lab.ps1` still passed. If a create step itself fails with this refusal, check that **Enable container instance logs** is unchecked in Step 3.3.4 and that **Logs destination** is **Azure Monitor** in Step 3.3.6.
+**Solution**: Lab 1.3's policies are in effect. A missing tag still refuses a create only where the group has no `Project` tag (a group such as `NetworkWatcherRG`), in the minutes after `Inherit-Project-Tag` is assigned, or where that policy is not assigned at all; a region outside Sweden Central and North Europe is refused whatever the tags. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region; in Step 3.3.6, check that **Resource group** and **Region** are not the wizard's pre-filled values. The activity log may also show that Azure tried to create `DefaultResourceGroup-SEC` and was refused by `Require-Environment-Tag-RG`. The agent Portal pass of 2026-10-15 saw that refusal without recording which step caused it; none of the lab's resources is in that group, and `scripts/Test-Lab.ps1` still passed. If a create step itself fails with this refusal, check that **Enable container instance logs** is unchecked in Step 3.3.4 and that **Logs destination** is **Azure Monitor** in Step 3.3.6.
 
 ### Issue 5: `az acr build` is not available
 
