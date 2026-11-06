@@ -297,14 +297,16 @@ function Get-AzResource {
         # What the rule collects and how it is tagged, as SKYCRAFT_STUB_DCRDETAIL says (#480): '' (default)
         # audit and auth at Warning and above with the four tags; 'allfacilities' lists all 25 facility
         # names, 'star' uses '*'; 'nosyslog' has no Syslog source; 'notag' lacks CostCenter, 'emptytag'
-        # holds an empty Owner, 'twosources' adds the all-facilities source beside the good one.
-        $allFacilities = @('alert', 'audit', 'auth', 'authpriv', 'clock', 'cron', 'daemon', 'ftp', 'kern', 'lpr', 'mail', 'mark', 'news', 'nopri', 'ntp', 'syslog', 'user', 'uucp', 'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7')
+        # holds an empty Owner, 'twosources' adds the all-facilities source beside the good one,
+        # 'split' is what the wizard stores when the ticks were cleared: audit and auth at Warning, the other 23 at Debug.
+        $allFacilities = @('alert', 'audit', 'auth', 'authpriv', 'clock', 'cron', 'daemon', 'ftp', 'kern', 'lpr', 'mail', 'news', 'nopri', 'ntp', 'syslog', 'user', 'uucp', 'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7')
         $goodSource = [pscustomobject]@{ name = 'VMInsightsSyslog'; streams = @('Microsoft-Syslog'); facilityNames = @('audit', 'auth'); logLevels = @('Warning', 'Error', 'Critical', 'Alert', 'Emergency') }
         $syslog = switch ($env:SKYCRAFT_STUB_DCRDETAIL) {
             'allfacilities' { @([pscustomobject]@{ name = 'sysAll'; streams = @('Microsoft-Syslog'); facilityNames = $allFacilities; logLevels = @('Debug') }) }
             'star'          { @([pscustomobject]@{ name = 'sysStar'; streams = @('Microsoft-Syslog'); facilityNames = @('*'); logLevels = @('*') }) }
             'nosyslog'      { @() }
             'twosources'    { @($goodSource, [pscustomobject]@{ name = 'sysAll'; streams = @('Microsoft-Syslog'); facilityNames = $allFacilities; logLevels = @('Debug') }) }
+            'split'         { @($goodSource, [pscustomobject]@{ name = 'sysRest'; streams = @('Microsoft-Syslog'); facilityNames = @($allFacilities | Where-Object { $_ -notin 'audit', 'auth' }); logLevels = @('Debug') }) }
             default         { @($goodSource) }
         }
         $tags = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = 'Tester' }
@@ -528,7 +530,7 @@ function Get-AzDiagnosticSetting {
             [string]$Install = 'none',
             [ValidateSet('old', 'recent', 'unreadable', 'nocreated')]
             [string]$VmCreated = 'old',
-            [ValidateSet('', 'allfacilities', 'star', 'nosyslog', 'notag', 'emptytag', 'twosources')]
+            [ValidateSet('', 'allfacilities', 'star', 'nosyslog', 'notag', 'emptytag', 'twosources', 'split')]
             [string]$RuleDetail = '',
             [int]$InstallWaitMinutes = 45,
             [ValidateSet('ok', 'rulefailed')]
@@ -600,6 +602,7 @@ function Get-AzDiagnosticSetting {
     $script:SyslogAll        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'allfacilities'
     $script:SyslogStar       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'star'
     $script:SyslogTwo        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'twosources'
+    $script:SyslogSplit      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'split'
     $script:SyslogNone       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'nosyslog'
     $script:TagMissing       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'notag'
     $script:TagEmpty         = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'emptytag'
@@ -1019,6 +1022,13 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound
         $script:SyslogTwo.ExitCode | Should -Not -Be 0
         $script:SyslogTwo.Output | Should -Match "\('sysAll' collects every facility"
         $script:SyslogTwo.Output | Should -Not -Match "'VMInsightsSyslog' collects every facility"
+    }
+
+    It 'fails two Syslog sources that together collect all 25 facilities, as the wizard stores cleared ticks (#480)' {
+        $run = $script:SyslogSplit
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "the sources 'VMInsightsSyslog', 'sysRest' together collect all 25 facilities"
+        $run.Output | Should -Match 're-tick the facilities you want on the Data source tab before Save'
     }
 
     It 'passes the Syslog facility check for the chosen facilities and for a rule with no Syslog source (#480)' {

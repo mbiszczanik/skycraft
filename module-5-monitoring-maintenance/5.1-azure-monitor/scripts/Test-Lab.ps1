@@ -406,7 +406,9 @@ Invoke-Test "DCR sends Syslog to the workspace" {
 }
 
 # What the rule collects, not only where it sends it (#480). A Syslog source with every facility is
-# the cost case the guide's Syslog note warns about: the workspace bills each GB it ingests.
+# the cost case the guide's Syslog note warns about: the workspace bills each GB it ingests. The
+# facilities of all sources count together: a wizard whose ticks were cleared before Save stores the
+# ticked ones at their level and every other facility as a second source at Debug (seen 2026-11-06).
 Invoke-Test "DCR Syslog sources collect chosen facilities, not all 25" {
     if (-not $dcrResource) { return $false }
     $sources = @($dcrResource.Properties.dataSources.syslog | Where-Object { $_ })
@@ -416,6 +418,11 @@ Invoke-Test "DCR Syslog sources collect chosen facilities, not all 25" {
     })
     if ($everything.Count -gt 0) {
         Write-Host " ($(($everything | ForEach-Object { "'$($_.name)'" }) -join ', ') collects every facility, and the workspace bills every GB it ingests: keep only the facilities you want, one or two at Warning - Step 5.1.2)" -NoNewline -ForegroundColor Gray
+        return $false
+    }
+    $together = @($sources | ForEach-Object { @($_.facilityNames) } | ForEach-Object { "$_" } | Select-Object -Unique)
+    if ($together.Count -ge 25) {
+        Write-Host " (the sources $(($sources | ForEach-Object { "'$($_.name)'" }) -join ', ') together collect all $($together.Count) facilities, and the workspace bills every GB it ingests: re-tick the facilities you want on the Data source tab before Save, so no second source holds the others - Step 5.1.2)" -NoNewline -ForegroundColor Gray
         return $false
     }
     return $true
