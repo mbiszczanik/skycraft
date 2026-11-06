@@ -39,7 +39,7 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          ./tools/Install-GalleryModule.ps1 -Name PSScriptAnalyzer
           $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
           $results | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize | Out-String -Width 200 | Write-Host
           $errors = @($results | Where-Object Severity -eq 'Error')
@@ -75,7 +75,7 @@ jobs:
       - name: Run Pester tests
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.5 -MaximumVersion 5.99 -Force -Scope CurrentUser
+          ./tools/Install-GalleryModule.ps1 -Name Pester -MinimumVersion 5.5 -MaximumVersion 5.99
 
           # Lab-local suites (module-*/**/tests/*.Tests.ps1) run alongside the repo-wide ones
           # in tests/. They only ever ran when someone invoked them by hand, which is how the
