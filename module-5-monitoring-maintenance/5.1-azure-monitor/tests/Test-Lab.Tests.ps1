@@ -294,14 +294,32 @@ function Get-AzResource {
         $rule = $rules[$ResourceId]
         $destinations = if ($rule.Destinations) { $rule.Destinations } else { @(@{ name = 'la-dest'; workspaceResourceId = $rule.Workspace }) }
         $flows = if ($rule.Flows) { $rule.Flows } else { @(@{ streams = $rule.Streams; destinations = @('la-dest') }) }
+        # What the rule collects and how it is tagged, as SKYCRAFT_STUB_DCRDETAIL says (#480): '' (default)
+        # audit and auth at Warning and above with the four tags; 'allfacilities' lists all 25 facility
+        # names, 'star' uses '*'; 'nosyslog' has no Syslog source; 'notag' lacks CostCenter, 'emptytag'
+        # holds an empty Owner, 'twosources' adds the all-facilities source beside the good one.
+        $allFacilities = @('alert', 'audit', 'auth', 'authpriv', 'clock', 'cron', 'daemon', 'ftp', 'kern', 'lpr', 'mail', 'mark', 'news', 'nopri', 'ntp', 'syslog', 'user', 'uucp', 'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7')
+        $goodSource = [pscustomobject]@{ name = 'VMInsightsSyslog'; streams = @('Microsoft-Syslog'); facilityNames = @('audit', 'auth'); logLevels = @('Warning', 'Error', 'Critical', 'Alert', 'Emergency') }
+        $syslog = switch ($env:SKYCRAFT_STUB_DCRDETAIL) {
+            'allfacilities' { @([pscustomobject]@{ name = 'sysAll'; streams = @('Microsoft-Syslog'); facilityNames = $allFacilities; logLevels = @('Debug') }) }
+            'star'          { @([pscustomobject]@{ name = 'sysStar'; streams = @('Microsoft-Syslog'); facilityNames = @('*'); logLevels = @('*') }) }
+            'nosyslog'      { @() }
+            'twosources'    { @($goodSource, [pscustomobject]@{ name = 'sysAll'; streams = @('Microsoft-Syslog'); facilityNames = $allFacilities; logLevels = @('Debug') }) }
+            default         { @($goodSource) }
+        }
+        $tags = @{ Project = 'SkyCraft'; Environment = 'Platform'; CostCenter = 'MSDN'; Owner = 'Tester' }
+        if ($env:SKYCRAFT_STUB_DCRDETAIL -eq 'notag') { $tags.Remove('CostCenter') }
+        if ($env:SKYCRAFT_STUB_DCRDETAIL -eq 'emptytag') { $tags['Owner'] = '' }
         return [pscustomobject]@{
             Name              = $rule.Name
             ResourceGroupName = $rule.Group
             ResourceId        = $ResourceId
+            Tags              = $tags
             Properties        = [pscustomobject]@{
                 provisioningState = if ($env:SKYCRAFT_STUB_DCRSTATE -eq 'rulefailed') { 'Failed' } else { 'Succeeded' }
                 destinations = [pscustomobject]@{ logAnalytics = @($destinations | ForEach-Object { [pscustomobject]$_ }) }
                 dataFlows    = @($flows | ForEach-Object { [pscustomobject]$_ })
+                dataSources  = [pscustomobject]@{ syslog = @($syslog) }
             }
         }
     }
@@ -510,6 +528,8 @@ function Get-AzDiagnosticSetting {
             [string]$Install = 'none',
             [ValidateSet('old', 'recent', 'unreadable', 'nocreated')]
             [string]$VmCreated = 'old',
+            [ValidateSet('', 'allfacilities', 'star', 'nosyslog', 'notag', 'emptytag', 'twosources')]
+            [string]$RuleDetail = '',
             [int]$InstallWaitMinutes = 45,
             [ValidateSet('ok', 'rulefailed')]
             [string]$State = 'ok'
@@ -521,6 +541,7 @@ function Get-AzDiagnosticSetting {
             SKYCRAFT_STUB_ACTLOG    = $readLog
             SKYCRAFT_STUB_INSTALL   = $Install
             SKYCRAFT_STUB_VMCREATED = $VmCreated
+            SKYCRAFT_STUB_DCRDETAIL = $RuleDetail
             SKYCRAFT_STUB_DCR       = $Dcr
             SKYCRAFT_STUB_ALERT     = $Alert
             SKYCRAFT_STUB_AGENT     = $Agent
@@ -575,6 +596,13 @@ function Get-AzDiagnosticSetting {
     $script:InstallLogFails  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'throws'
     $script:InstallLogEmpty  = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'none'
     # #513: the log holds only the install of an earlier build of the VM (27 hours ago); this build is 10 minutes old.
+    # #480: what the rule collects and how it is tagged.
+    $script:SyslogAll        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'allfacilities'
+    $script:SyslogStar       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'star'
+    $script:SyslogTwo        = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'twosources'
+    $script:SyslogNone       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'nosyslog'
+    $script:TagMissing       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'notag'
+    $script:TagEmpty         = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -RuleDetail 'emptytag'
     $script:StaleNoRow       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'stale' -VmCreated 'recent'
     $script:StaleThenRow     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'late' -WaitMinutes 5 -Install 'stale' -VmCreated 'recent'
     $script:VmCreatedFails   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'none' -WaitMinutes 2 -Install 'recent' -VmCreated 'unreadable'
@@ -683,10 +711,10 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run = $script:NoRule
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match 'Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs; dev-skycraft-swc-auth-vm, dev-skycraft-swc-world-vm, prod-skycraft-swc-auth-vm, prod-skycraft-swc-world-vm carries the agent but no association - Step 5\.1\.2\) FAIL'
-        # Found, destination, Perf and Syslog read the rule; the agent and Heartbeat its VMs.
+        # Found, destination, Perf, Syslog, the Syslog facilities and the tags read the rule; the agent and Heartbeat its VMs.
         $run.Output | Should -Match "Azure Monitor Agent Succeeded on the rule's VMs\.\.\. \(no VM carries the lab's rule; dev-skycraft-swc-auth-vm, .* carries the agent but no association - Step 5\.1\.2\) FAIL"
         $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\. \(no VM carries the lab's rule; dev-skycraft-swc-auth-vm, .* carries the agent but no association - Step 5\.1\.2\) FAIL"
-        $run.Output | Should -Match 'Failed: 6\b'
+        $run.Output | Should -Match 'Failed: 8\b'
     }
 
     It 'leaves the VM names out when no VM carries the agent either' {
@@ -705,14 +733,14 @@ Describe 'Lab 5.1 Test-Lab.ps1 - finds the data collection rule through the VM i
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. FAIL \(could not read associations of 'dev-skycraft-swc-auth-vm': stub lookup failure: Invoke-AzRestMethod dataCollectionRuleAssociations"
         $run.Output | Should -Match 'Test Results Summary'
-        $run.Output | Should -Match 'Failed: 6\b'
+        $run.Output | Should -Match 'Failed: 8\b'
     }
 
     It 'says no rule is associated, and names the group it could not read, when the readable VMs carry none' {
         $run = $script:NoRulePartial
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Data collection rule associated with a VM in dev-skycraft-swc-rg or prod-skycraft-swc-rg\.\.\. \(no rule is associated with these VMs; dev-skycraft-swc-auth-vm, dev-skycraft-swc-world-vm carries the agent but no association - Step 5\.1\.2; could not read VMs in 'prod-skycraft-swc-rg': stub lookup failure: Resource group 'prod-skycraft-swc-rg' could not be read\.\) FAIL"
-        $run.Output | Should -Match 'Failed: 6\b'
+        $run.Output | Should -Match 'Failed: 8\b'
     }
 }
 
@@ -974,6 +1002,43 @@ Describe 'Lab 5.1 Test-Lab.ps1 - waits for the first Heartbeat row up to a bound
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         ([regex]::Matches($run.Output, 'stub-sleep 60')).Count | Should -Be 2
         $run.Output | Should -Match 'install time unknown: the activity log has no successful install of the extension in the last 14 days; waited 2 minutes'
+    }
+
+    It 'fails a Syslog source of all 25 facilities and names the cost (#480)' {
+        $run = $script:SyslogAll
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "DCR Syslog sources collect chosen facilities, not all 25\.\.\. \('sysAll' collects every facility, and the workspace bills every GB it ingests"
+    }
+
+    It 'fails a Syslog source that uses the * facility (#480)' {
+        $script:SyslogStar.ExitCode | Should -Not -Be 0
+        $script:SyslogStar.Output | Should -Match "'sysStar' collects every facility"
+    }
+
+    It 'fails when one of two Syslog sources collects every facility (#480)' {
+        $script:SyslogTwo.ExitCode | Should -Not -Be 0
+        $script:SyslogTwo.Output | Should -Match "\('sysAll' collects every facility"
+        $script:SyslogTwo.Output | Should -Not -Match "'VMInsightsSyslog' collects every facility"
+    }
+
+    It 'passes the Syslog facility check for the chosen facilities and for a rule with no Syslog source (#480)' {
+        $script:BicepMade.Output | Should -Match 'DCR Syslog sources collect chosen facilities, not all 25\.\.\.\s*PASS'
+        $script:SyslogNone.Output | Should -Match 'DCR Syslog sources collect chosen facilities, not all 25\.\.\.\s*PASS'
+    }
+
+    It 'fails a rule without the CostCenter tag and names it (#480)' {
+        $run = $script:TagMissing
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "no value for the tag CostCenter on 'skycraft-vm-dcr'"
+    }
+
+    It 'fails a rule whose Owner tag is empty and names it (#480)' {
+        $script:TagEmpty.ExitCode | Should -Not -Be 0
+        $script:TagEmpty.Output | Should -Match "no value for the tag Owner on 'skycraft-vm-dcr'"
+    }
+
+    It 'passes the tag check for a rule with the four tags (#480)' {
+        $script:BicepMade.Output | Should -Match 'DCR carries the four SkyCraft tags with a value\.\.\.\s*PASS'
     }
 
     It 'ignores install events from before the VM was created and waits as for an unknown install time (#513)' {
