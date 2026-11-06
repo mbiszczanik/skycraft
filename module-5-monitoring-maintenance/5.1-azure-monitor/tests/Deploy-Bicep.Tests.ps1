@@ -114,13 +114,23 @@ function Get-AzDeploymentOperation {
     }
     [pscustomobject]@{ StatusMessage = $text }
 }
+# The associations the VM already carries, as SKYCRAFT_STUB_ASSOC says (#406): '' (default) none,
+# 'portal' the rule under the Portal wizard's association name, 'bicep' under the script's own name,
+# 'otherrule' another rule only.
 function Get-AzDataCollectionRuleAssociation {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments)]$Rest)
+    $rule = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft.Insights/dataCollectionRules/skycraft-vm-dcr'
+    switch ($env:SKYCRAFT_STUB_ASSOC) {
+        'portal'    { [pscustomobject]@{ Name = 'skycraft-vm-dcr-association'; DataCollectionRuleId = $rule } }
+        'bicep'     { [pscustomobject]@{ Name = 'skycraft-vminsights-dcr-assoc'; DataCollectionRuleId = $rule } }
+        'otherrule' { [pscustomobject]@{ Name = 'security-assoc'; DataCollectionRuleId = $rule -replace 'skycraft-vm-dcr$', 'security-events-dcr' } }
+    }
 }
 function New-AzDataCollectionRuleAssociation {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments)]$Rest)
+    if ($env:SKYCRAFT_STUB_STATE) { Add-Content -LiteralPath $env:SKYCRAFT_STUB_STATE -Value 'new-association' }
 }
 '@
 
@@ -128,13 +138,17 @@ function New-AzDataCollectionRuleAssociation {
         -Body $script:StubBody -RequiredModule $script:RequiredModules
 
     function Invoke-DeployScript {
-        param([ValidateSet('thrown-then-ok', 'failed-then-ok', 'failed-nested-then-ok', 'failed-other', 'failed-always')][string]$Deploy)
-        $state = Join-Path $script:Stub.Directory "state-$Deploy.log"
+        param(
+            [ValidateSet('thrown-then-ok', 'failed-then-ok', 'failed-nested-then-ok', 'failed-other', 'failed-always')][string]$Deploy,
+            [ValidateSet('', 'portal', 'bicep', 'otherrule')][string]$Association = ''
+        )
+        $state = Join-Path $script:Stub.Directory "state-$Deploy-$Association.log"
         Remove-Item -LiteralPath $state -Force -ErrorAction SilentlyContinue
         $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath `
             -ArgumentList '-OpsEmail', 'ops@example.invalid', '-Force' -Environment @{
             SKYCRAFT_STUB_DEPLOY = $Deploy
             SKYCRAFT_STUB_STATE  = $state
+            SKYCRAFT_STUB_ASSOC  = $Association
         }
         $log = if (Test-Path -LiteralPath $state) { @(Get-Content -LiteralPath $state) } else { @() }
         [pscustomobject]@{
@@ -143,6 +157,7 @@ function New-AzDataCollectionRuleAssociation {
             Output   = $run.Output
             Deploys  = @($log | Where-Object { $_ -eq 'deploy' }).Count
             Sleeps   = @($log | Where-Object { $_ -like 'sleep *' })
+            NewAssociations = @($log | Where-Object { $_ -eq 'new-association' }).Count
         }
     }
 
@@ -151,6 +166,11 @@ function New-AzDataCollectionRuleAssociation {
     $script:Nested      = Invoke-DeployScript -Deploy 'failed-nested-then-ok'
     $script:Other       = Invoke-DeployScript -Deploy 'failed-other'
     $script:Always      = Invoke-DeployScript -Deploy 'failed-always'
+    # #406: what the VM already carries when the association step runs.
+    $script:AssocNone      = Invoke-DeployScript -Deploy 'thrown-then-ok'
+    $script:AssocPortal    = Invoke-DeployScript -Deploy 'thrown-then-ok' -Association 'portal'
+    $script:AssocBicep     = Invoke-DeployScript -Deploy 'thrown-then-ok' -Association 'bicep'
+    $script:AssocOtherRule = Invoke-DeployScript -Deploy 'thrown-then-ok' -Association 'otherrule'
 }
 
 AfterAll {
@@ -170,6 +190,31 @@ Describe 'Lab 5.1 Deploy-Bicep.ps1 retry - script text' {
 
     It 'still reports a Failed state that is not a table-not-ready error' {
         $script:Text | Should -Match "Deployment finished with state: \`$\(\`$deployment.ProvisioningState\)"
+    }
+}
+
+Describe 'Lab 5.1 Deploy-Bicep.ps1 - the association step looks for the rule, not the name (#406)' {
+
+    It 'creates the association when the VM has none' {
+        $script:AssocNone.ExitCode | Should -Be 0 -Because "output was:`n$($script:AssocNone.Output)"
+        $script:AssocNone.NewAssociations | Should -Be 1
+        $script:AssocNone.Output | Should -Match 'DCR association created: skycraft-vminsights-dcr-assoc'
+    }
+
+    It 'keeps the association the Portal wizard made under its own name and creates no second' {
+        $script:AssocPortal.ExitCode | Should -Be 0 -Because "output was:`n$($script:AssocPortal.Output)"
+        $script:AssocPortal.NewAssociations | Should -Be 0
+        $script:AssocPortal.Output | Should -Match '\[KEEP\] DCR association already ties skycraft-vm-dcr to the VM: skycraft-vm-dcr-association'
+    }
+
+    It 'keeps the association an earlier run of the script made' {
+        $script:AssocBicep.NewAssociations | Should -Be 0
+        $script:AssocBicep.Output | Should -Match '\[KEEP\] DCR association already ties skycraft-vm-dcr to the VM: skycraft-vminsights-dcr-assoc'
+    }
+
+    It 'still creates its association when the VM carries only another rule' {
+        $script:AssocOtherRule.NewAssociations | Should -Be 1
+        $script:AssocOtherRule.Output | Should -Match 'DCR association created: skycraft-vminsights-dcr-assoc'
     }
 }
 

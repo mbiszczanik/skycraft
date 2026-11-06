@@ -230,13 +230,16 @@ $dcrAssocName = 'skycraft-vminsights-dcr-assoc'
 $ruleId = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$platformRg/providers/Microsoft.Insights/dataCollectionRules/$dcrName"
 
 if (-not $WhatIf) {
-    $existingAssociation = Get-AzDataCollectionRuleAssociation -ResourceUri $devVmId -AssociationName $dcrAssocName -ErrorAction SilentlyContinue
+    # The rule is looked for, not the name: the Portal wizard ties the rule to the VM under its own
+    # association name, and a second association of the same rule would be left behind (#406).
+    $vmAssociations = @(Get-AzDataCollectionRuleAssociation -ResourceUri $devVmId -ErrorAction SilentlyContinue | Where-Object { $_ })
+    $ruleAssociation = @($vmAssociations | Where-Object { "$($_.DataCollectionRuleId)" -eq $ruleId }) | Select-Object -First 1
 
-    if (-not $existingAssociation) {
+    if (-not $ruleAssociation) {
         New-AzDataCollectionRuleAssociation -ResourceUri $devVmId -AssociationName $dcrAssocName -DataCollectionRuleId $ruleId | Out-Null
         Write-Host "  ✓ DCR association created: $dcrAssocName" -ForegroundColor Green
     } else {
-        Write-Host "  ✓ DCR association already exists: $dcrAssocName" -ForegroundColor Green
+        Write-Host "  [KEEP] DCR association already ties $dcrName to the VM: $($ruleAssociation.Name)" -ForegroundColor Green
     }
 } else {
     Write-Host "  What-if mode: DCR association creation skipped." -ForegroundColor Gray
