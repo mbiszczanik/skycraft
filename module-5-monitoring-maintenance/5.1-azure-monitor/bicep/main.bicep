@@ -138,8 +138,10 @@ module modDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
           {
             name: 'VMInsightsSyslog'
             streams: ['Microsoft-Syslog']
-            facilityNames: ['*']
-            logLevels: ['*']
+            // The guide's Syslog note: one or two facilities at Warning. '*' collects all 25 facilities
+            // at every level, and the workspace bills each GB it ingests (#480).
+            facilityNames: ['audit', 'auth']
+            logLevels: ['Warning', 'Error', 'Critical', 'Alert', 'Emergency']
           }
         ]
       }
