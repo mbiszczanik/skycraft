@@ -13,6 +13,9 @@ targetScope = 'subscription'
 *    Parameters    *
 *******************/
 
+@description('Apply the two CanNotDelete locks of Steps 1.3.11 and 1.3.13. Off by default: the guide removes both locks in Step 1.3.14, so Labs 2.1 to 5.3 run without a delete lock (#501, option B).')
+param parApplyLocks bool = false
+
 @description('Deployment region; the location of the policy assignments and of the managed identity of Inherit-Project-Tag')
 @allowed([
   'swedencentral'
@@ -112,16 +115,17 @@ module modTagsDev 'modules/tags.bicep' = {
 //    former modules/locks.bicep. Tags must be passed too - an RG PUT without tags
 //    would wipe the ones applied in Lab 1.2.
 //    Lock notes are fixed by the module ('Cannot delete resource or child resources.').
+//    The locks are applied only with parApplyLocks (default false): the lab ends without them (#501).
 module modRgProd 'br/public:avm/res/resources/resource-group:0.4.4' = {
   name: 'deploy-rg-prod-governance'
   params: {
     name: varRgProd
     location: resRgProd.location
     tags: varTagsProd
-    lock: {
+    lock: parApplyLocks ? {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-prod'
-    }
+    } : null
   }
 }
 
@@ -131,10 +135,10 @@ module modRgPlatform 'br/public:avm/res/resources/resource-group:0.4.4' = {
     name: varRgPlatform
     location: resRgPlatform.location
     tags: varTagsPlatform
-    lock: {
+    lock: parApplyLocks ? {
       kind: 'CanNotDelete'
       name: 'lock-no-delete-platform'
-    }
+    } : null
   }
 }
 
