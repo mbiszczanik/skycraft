@@ -661,6 +661,9 @@ if ($failedChecks.Count -gt 0) {
 
 Write-Host ''
 Write-Host 'Dry run passed. CI still runs markdownlint and gitleaks on top of this.' -ForegroundColor Green
+# An in-process suite that ended with $Host.SetShouldExit(n) pins the host code to n and swallows a
+# later plain `exit 0` (#472); the failure exit above sets it the same way (#128).
+$Host.SetShouldExit(0)
 exit 0
 
 #endregion Summary
