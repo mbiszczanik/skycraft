@@ -45,7 +45,7 @@ BeforeAll {
         ResourceGroupName = '{0}-skycraft-swc-rg'
         AcrName           = '{0}skycraftswcacr01'
         AciName           = '{0}-skycraft-swc-aci-auth'
-        CaeName           = '{0}-skycraft-swc-cae-02'
+        CaeName           = '{0}-skycraft-swc-cae'
         AcaName           = '{0}-skycraft-swc-aca-world'
     }
 

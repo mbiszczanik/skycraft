@@ -73,7 +73,7 @@ The end state on every path:
 
 - `devskycraftswcacr01`: Standard, admin user enabled, image `skycraft-auth:v1`.
 - `dev-skycraft-swc-aci-auth`: Linux, SKU Standard, restart policy Always, 1 CPU core and 1 GiB memory, a public IP with port 80 and the DNS name label `dev-skycraft-swc-aci-auth-[suffix]` in the **Any reuse (unsecure)** scope, no container instance logs.
-- `dev-skycraft-swc-cae-02`: a Workload profiles environment with the Consumption profile, logs sent to **Azure Monitor** (no Log Analytics workspace).
+- `dev-skycraft-swc-cae`: a Workload profiles environment with the Consumption profile, logs sent to **Azure Monitor** (no Log Analytics workspace).
 - `dev-skycraft-swc-aca-world`: container `worldserver` (0.25 CPU cores, 0.5 Gi memory) pulling with the registry's admin credentials, external HTTP ingress on port 80 without insecure connections, 1-3 replicas with the HTTP rule `http-load` at 10 concurrent requests.
 - The four SkyCraft tags on all four resources.
 
@@ -356,7 +356,7 @@ We will deploy the "WorldServer" component here to take advantage of scaling cap
 
 | Field                  | Value                     |
 | ---------------------- | ------------------------- |
-| **Environment name**   | `dev-skycraft-swc-cae-02` |
+| **Environment name**   | `dev-skycraft-swc-cae` |
 | **Zone redundancy**    | **Disabled**              |
 
 Leave the **Workload profiles** tab as it is: the environment gets the **Consumption** profile, which charges only while an app runs in it.
@@ -375,12 +375,12 @@ Leave the **Workload profiles** tab as it is: the environment gets the **Consump
 
 **Expected Result**:
 
-- The page closes, and the app wizard shows `dev-skycraft-swc-cae-02` (new) under **Container Apps environment**. Nothing is created yet: the environment is created together with the app in Step 3.3.8.
+- The page closes, and the app wizard shows `dev-skycraft-swc-cae` (new) under **Container Apps environment**. Nothing is created yet: the environment is created together with the app in Step 3.3.8.
 
 ![Create Container Apps Environment](./images/step-3.3.6.png)
 
 > [!NOTE]
-> The environment's name ends in `-02`, and `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae-02`: use that name. The app carries no suffix: `platform-skycraft-swc-aca-world-02` would exceed the 32 characters a Container App allows. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae-02` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
+> `bicep/main.bicep`, `scripts/Test-Lab.ps1` and `scripts/Remove-LabResource.ps1` all use `dev-skycraft-swc-cae`: use that name. Earlier versions of this guide named the environment `dev-skycraft-swc-cae-02`; if you built it under that name, `scripts/Remove-LabResource.ps1 -CaeName dev-skycraft-swc-cae-02` removes it. A name with the environment as its prefix and `-aca-world-02` would exceed the 32 characters a Container App allows, so the app has no suffix. Every name in this lab takes the environment as its prefix - `Deploy-Bicep.ps1 -Environment prod` deploys `prodskycraftswcacr01`, `prod-skycraft-swc-aci-auth`, `prod-skycraft-swc-cae` and `prod-skycraft-swc-aca-world` into `prod-skycraft-swc-rg`.
 
 This environment has no virtual network of its own, so Azure creates no infrastructure resource group (`ME_...`) for it: on 2026-10-26 neither the Portal path nor the Bicep path left one, and the environment's `infrastructureResourceGroup` stayed empty. Should one appear in your subscription, Azure manages it and deletes it with the environment: do not create, tag or change it.
 
@@ -446,7 +446,7 @@ The **Review + create** page can still list a **Log Analytics workspace (New)** 
 **Expected Result**:
 
 - Deployment succeeds after a few minutes (the environment takes most of the time).
-- `dev-skycraft-swc-rg` lists the Container Apps environment `dev-skycraft-swc-cae-02` and the container app `dev-skycraft-swc-aca-world`, and no new Log Analytics workspace.
+- `dev-skycraft-swc-rg` lists the Container Apps environment `dev-skycraft-swc-cae` and the container app `dev-skycraft-swc-aca-world`, and no new Log Analytics workspace.
 - On the app's **Overview** page, **Application Url** opens the same "Welcome to Azure Container Instances!" page over HTTPS.
 
 ![Configure Ingress](./images/step-3.3.8.png)
@@ -463,7 +463,7 @@ $cred = Get-AzContainerRegistryCredential -Registry $acr
 Register-AzResourceProvider -ProviderNamespace 'Microsoft.App' | Out-Null
 
 # Step 3.3.6: the environment - the Consumption workload profile, logs to Azure Monitor (no workspace).
-$environment = New-AzContainerAppManagedEnv -ResourceGroupName $rg -Name 'dev-skycraft-swc-cae-02' `
+$environment = New-AzContainerAppManagedEnv -ResourceGroupName $rg -Name 'dev-skycraft-swc-cae' `
     -Location 'swedencentral' -AppLogConfigurationDestination 'azure-monitor' `
     -WorkloadProfile @(New-AzContainerAppWorkloadProfileObject -Name 'Consumption' -Type 'Consumption') `
     -Tag $tags
@@ -527,7 +527,7 @@ Quick verification:
 
 - [ ] **ACR** `devskycraftswcacr01` created and contains `skycraft-auth:v1`
 - [ ] **ACI** `dev-skycraft-swc-aci-auth` is running and accessible via FQDN
-- [ ] **ACA** `dev-skycraft-swc-aca-world` is deployed in environment `dev-skycraft-swc-cae-02`
+- [ ] **ACA** `dev-skycraft-swc-aca-world` is deployed in environment `dev-skycraft-swc-cae`
 - [ ] Scaling rules configured for ACA
 - [ ] No new Log Analytics workspace in `dev-skycraft-swc-rg`
 
@@ -551,7 +551,7 @@ No later lab needs an object this lab creates: `tools/lab-cycle-manifest.psd1` l
 | --- | --- | --- | --- |
 | `devskycraftswcacr01` (Standard) | `dev-skycraft-swc-rg` | about 0.60 EUR | Nothing; Lab 3.4 does not use it |
 | `dev-skycraft-swc-aci-auth` (1 CPU core, 1 GiB, running) | `dev-skycraft-swc-rg` | about 1.20 EUR | Nothing |
-| `dev-skycraft-swc-cae-02` (Consumption profile) | `dev-skycraft-swc-rg` | 0 on its own | Nothing |
+| `dev-skycraft-swc-cae` (Consumption profile) | `dev-skycraft-swc-rg` | 0 on its own | Nothing |
 | `dev-skycraft-swc-aca-world` (1 replica always ready) | `dev-skycraft-swc-rg` | up to about 0.20 EUR, less while the monthly free grant lasts | Nothing |
 | The Log Analytics workspace the environment sends its logs to (the Portal's `workspacedevskycraftswcrg...`), **only** if you kept **Azure Log Analytics** in Step 3.3.6 | `dev-skycraft-swc-rg`, or the group you picked | per GB of logs stored | Nothing; Module 5 wizards would offer it as their default workspace |
 | `DefaultWorkspace-<subscription id>-EUS`, **only** if you left **Enable container instance logs** checked in Step 3.3.4 and Lab 1.3's policies did not refuse it | `DefaultResourceGroup-EUS` (East US) | per GB of logs stored | Nothing; Module 5 wizards may offer it as a default |

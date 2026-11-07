@@ -24,8 +24,10 @@
        a minute to replicate, so the grant is retried while Azure reports the principal unknown.
        The role assignments are read and created through the Azure Resource Manager API, so the
        script needs no Microsoft Graph sign-in (issue #397).
-    3. Creating Resource Locks (New-AzResourceLock). A lock that already exists under the guide's
-       name but with another level is set to CanNotDelete, and the script says so (issue #258).
+    3. Creating Resource Locks (New-AzResourceLock), only with -ApplyLocks: the guide removes
+       both locks in Step 1.3.14, so Labs 2.1 to 5.3 run without a delete lock (issue #501).
+       A lock that already exists under the guide's name but with another level is set to
+       CanNotDelete, and the script says so (issue #258).
 
     Every [ERROR] is counted, and the script exits 1 when there was one; a resource group it
     cannot tag is a [WARN] and does not count. Granting the role needs Owner (or User Access
@@ -41,6 +43,10 @@
 .PARAMETER Location
     Location of the managed identity of Inherit-Project-Tag (the guide's "System assigned
     identity location"). Default: swedencentral.
+
+.PARAMETER ApplyLocks
+    Also apply the CanNotDelete locks of Steps 1.3.11 and 1.3.13 (lock-no-delete-prod,
+    lock-no-delete-platform). Without it the lab ends with no lock, as Step 1.3.14 leaves it.
 
 .EXAMPLE
     .\Invoke-LabGovernance.ps1
@@ -65,6 +71,8 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('swedencentral', 'northeurope')]
     [string]$Location = 'swedencentral',
+
+    [switch]$ApplyLocks,
 
     [switch]$WhatIf
 )
@@ -285,53 +293,58 @@ foreach ($policy in Get-LabPolicyAssignmentSpec) {
 
 # 4. Apply Locks
 Write-Header "`n=== 3. Applying Locks (New-AzResourceLock) ==="
+if (-not $ApplyLocks) {
+    Write-Host "  -> [INFO] Locks skipped: the lab ends without them (Step 1.3.14). Pass -ApplyLocks to apply the two locks of Steps 1.3.11 and 1.3.13." -ForegroundColor Gray
+}
+else {
 
-$locks = @(
-    @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Cannot delete resource or child resources." },
-    @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Cannot delete resource or child resources." }
-)
+    $locks = @(
+        @{ RG = "prod-skycraft-swc-rg"; Name = "lock-no-delete-prod"; Notes = "Cannot delete resource or child resources." },
+        @{ RG = "platform-skycraft-swc-rg"; Name = "lock-no-delete-platform"; Notes = "Cannot delete resource or child resources." }
+    )
 
-foreach ($lock in $locks) {
-    if ($WhatIf) {
-        Write-Host "WHATIF: Would lock $($lock.RG)" -ForegroundColor Yellow
-    }
-    else {
-        try {
-            if (Get-AzResourceGroup -Name $lock.RG -ErrorAction SilentlyContinue) {
-                # A lock under this name but with another level (say ReadOnly, made by hand) is not
-                # the lock the guide creates, and Test-Lab.ps1 fails it (issue #258). Rather than
-                # report it as present, overwrite it in place - New-AzResourceLock -Force on an
-                # existing name updates that lock - and say which level it had.
-                $existing = @(Get-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -ErrorAction SilentlyContinue | Where-Object { $_ })
-                $existingLevels = @($existing | ForEach-Object { $_.Properties.level })
-                if ($existingLevels -contains 'CanNotDelete') {
-                    Write-Success "Lock $($lock.Name) already exists."
-                }
-                else {
-                    if ($existing.Count -gt 0) {
-                        Write-Host "  -> [WARN] Lock $($lock.Name) exists with level $($existingLevels -join ', '); setting it to CanNotDelete." -ForegroundColor Yellow
-                    }
-                    New-AzResourceLock `
-                        -ResourceGroupName $lock.RG `
-                        -LockName $lock.Name `
-                        -LockLevel CanNotDelete `
-                        -LockNotes $lock.Notes `
-                        -Force `
-                        -ErrorAction Stop | Out-Null
-                    if ($existing.Count -gt 0) {
-                        Write-Success "Set $($lock.Name) on $($lock.RG) to CanNotDelete"
+    foreach ($lock in $locks) {
+        if ($WhatIf) {
+            Write-Host "WHATIF: Would lock $($lock.RG)" -ForegroundColor Yellow
+        }
+        else {
+            try {
+                if (Get-AzResourceGroup -Name $lock.RG -ErrorAction SilentlyContinue) {
+                    # A lock under this name but with another level (say ReadOnly, made by hand) is not
+                    # the lock the guide creates, and Test-Lab.ps1 fails it (issue #258). Rather than
+                    # report it as present, overwrite it in place - New-AzResourceLock -Force on an
+                    # existing name updates that lock - and say which level it had.
+                    $existing = @(Get-AzResourceLock -ResourceGroupName $lock.RG -LockName $lock.Name -ErrorAction SilentlyContinue | Where-Object { $_ })
+                    $existingLevels = @($existing | ForEach-Object { $_.Properties.level })
+                    if ($existingLevels -contains 'CanNotDelete') {
+                        Write-Success "Lock $($lock.Name) already exists."
                     }
                     else {
-                        Write-Success "Locked $($lock.RG)"
+                        if ($existing.Count -gt 0) {
+                            Write-Host "  -> [WARN] Lock $($lock.Name) exists with level $($existingLevels -join ', '); setting it to CanNotDelete." -ForegroundColor Yellow
+                        }
+                        New-AzResourceLock `
+                            -ResourceGroupName $lock.RG `
+                            -LockName $lock.Name `
+                            -LockLevel CanNotDelete `
+                            -LockNotes $lock.Notes `
+                            -Force `
+                            -ErrorAction Stop | Out-Null
+                        if ($existing.Count -gt 0) {
+                            Write-Success "Set $($lock.Name) on $($lock.RG) to CanNotDelete"
+                        }
+                        else {
+                            Write-Success "Locked $($lock.RG)"
+                        }
                     }
                 }
+                else {
+                    Write-Host "  -> [WARN] RG $($lock.RG) not found, skipping lock." -ForegroundColor Yellow
+                }
             }
-            else {
-                Write-Host "  -> [WARN] RG $($lock.RG) not found, skipping lock." -ForegroundColor Yellow
+            catch {
+                Write-Error-Custom "Failed to lock $($lock.RG): $_"
             }
-        }
-        catch {
-            Write-Error-Custom "Failed to lock $($lock.RG): $_"
         }
     }
 }

@@ -399,12 +399,12 @@ Describe 'Lab 1.3 Test-Lab.ps1 - failures are counted and set the exit code (#25
         $run.Output | Should -Not -Match 'validation passed'
     }
 
-    It 'exits 1 and reports 1 failed when a resource group carries no lock' {
+    It 'passes a resource group that carries no lock, the state Step 1.3.14 leaves (#501)' {
         $run = $script:LockMissing
-        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found'
-        $run.FailLines | Should -Be 1
-        $run.Output | Should -Match 'Failed: 1\b'
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg : no delete lock on the group \(Step 1\.3\.14 removes it, so Labs 2\.1 to 5\.3 run without one\) \[OK\]'
+        $run.FailLines | Should -Be 0
+        $run.Output | Should -Match 'Failed: 0\b'
     }
 
     It 'exits 1 and reports 1 failed when a resource group has the wrong Project tag' {
@@ -545,27 +545,25 @@ Describe 'Lab 1.3 Test-Lab.ps1 - a lock check passes only for the guide''s lock 
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
-    It 'does not count a lock on a resource inside the group, and says where it found it' {
+    It 'does not count a lock on a resource inside the group as the group''s lock, and says so (#501)' {
         # Get-AzResourceLock -ResourceGroupName returns locks on child resources too; such a lock
-        # does not stop anyone deleting the group.
+        # does not stop anyone deleting the group, so the group has none of its own.
         $run = $script:LockOnChild
-        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-platform \(CanNotDelete\) at /subscriptions/[^ ]+/resourceGroups/platform-skycraft-swc-rg/providers/Microsoft\.Storage/storageAccounts/stubstorage\.'
-        $run.Output | Should -Match 'step 1\.3\.13\.'
-        $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 8
-        $run.Output | Should -Match 'Failed: 1\b'
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on platform-skycraft-swc-rg : no delete lock on the group \(Step 1\.3\.14 removes it, so Labs 2\.1 to 5\.3 run without one; locks elsewhere do not count\) \[OK\]'
+        $run.FailLines | Should -Be 0
+        $run.OkLines | Should -Be 9
+        $run.Output | Should -Match 'Failed: 0\b'
     }
 
-    It 'does not count a lock on the subscription above the group' {
-        # In a shared subscription this is the likeliest false pass: Get-AzResourceLock
-        # -ResourceGroupName also returns locks inherited from the subscription.
+    It 'does not count a lock on the subscription above the group as the group''s lock, and says so (#501)' {
+        # Get-AzResourceLock -ResourceGroupName also returns locks inherited from the subscription.
         $run = $script:LockOnSub
-        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg \[FAIL\] Not found on the group itself; locks elsewhere do not count: lock-no-delete-prod \(CanNotDelete\) at /subscriptions/<id>\. Expected'
-        $run.FailLines | Should -Be 1
-        $run.OkLines | Should -Be 8
-        $run.Output | Should -Match 'Failed: 1\b'
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'Lock on prod-skycraft-swc-rg : no delete lock on the group \(Step 1\.3\.14 removes it, so Labs 2\.1 to 5\.3 run without one; locks elsewhere do not count\) \[OK\]'
+        $run.FailLines | Should -Be 0
+        $run.OkLines | Should -Be 9
+        $run.Output | Should -Match 'Failed: 0\b'
     }
 
     It 'counts a lock lookup that fails as a failed check, not as a missing lock' {

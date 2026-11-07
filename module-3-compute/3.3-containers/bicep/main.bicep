@@ -42,12 +42,13 @@ param parAcrName string = '${parEnvironment}skycraftswcacr01'
 @maxLength(63)
 param parAciName string = '${parEnvironment}-skycraft-swc-aci-auth'
 
-// The guide, Test-Lab and Remove-LabResource use this -02 name. No ME_ infrastructure group is
-// created for it (no infrastructure subnet, seen 2026-10-26); #433 decides whether -02 stays.
+// The guide, Test-Lab and Remove-LabResource use this name. The earlier -02 suffix was justified by
+// the ME_ infrastructure group, which an environment without an infrastructure subnet does not get
+// (seen 2026-10-26); #433 dropped it.
 @description('Name of the Container Apps Environment')
 @minLength(1)
 @maxLength(60)
-param parCaeName string = '${parEnvironment}-skycraft-swc-cae-02'
+param parCaeName string = '${parEnvironment}-skycraft-swc-cae'
 
 // No -02 on the app: nothing immutable hangs off its name, and with it the platform name
 // would run to 34 characters against the 32 a Container App allows.

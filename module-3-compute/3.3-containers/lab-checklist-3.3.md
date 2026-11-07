@@ -37,7 +37,7 @@
 ## ✅ Azure Container Apps (ACA) Verification
 
 ### Environment
-- [ ] Environment name: `dev-skycraft-swc-cae-02`
+- [ ] Environment name: `dev-skycraft-swc-cae`
 - [ ] Region: **Sweden Central**
 - [ ] Workload profile: **Consumption**
 - [ ] Logs destination: **Azure Monitor** (no Log Analytics workspace)
@@ -117,7 +117,7 @@ Get-AzContainerApp -ResourceGroupName dev-skycraft-swc-rg -Name dev-skycraft-swc
 
 # Check the environment's logs destination
 (Get-AzResource -ResourceGroupName dev-skycraft-swc-rg -ResourceType 'Microsoft.App/managedEnvironments' `
-    -Name dev-skycraft-swc-cae-02 -ApiVersion 2024-03-01 -ExpandProperties).Properties.appLogsConfiguration.destination
+    -Name dev-skycraft-swc-cae -ApiVersion 2024-03-01 -ExpandProperties).Properties.appLogsConfiguration.destination
 
 # Expected output:
 # azure-monitor
@@ -140,7 +140,7 @@ Get-AzResource -ResourceGroupName dev-skycraft-swc-rg -ResourceType 'Microsoft.O
 |-----------|------|------|-------|--------|
 | **Registry** | `devskycraftswcacr01` | ACR | N/A | ✅ |
 | **Auth Service** | `dev-skycraft-swc-aci-auth` | ACI | `skycraft-auth:v1` | ✅ |
-| **Apps Environment** | `dev-skycraft-swc-cae-02` | Container Apps environment | N/A | ✅ |
+| **Apps Environment** | `dev-skycraft-swc-cae` | Container Apps environment | N/A | ✅ |
 | **World Service** | `dev-skycraft-swc-aca-world` | ACA | `skycraft-auth:v1` | ✅ |
 
 ---

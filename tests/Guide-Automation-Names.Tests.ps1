@@ -15,7 +15,7 @@
     binds to a *Name variable, e.g.
 
         $flowLogName = 'prod-skycraft-swc-vnet-flowlog'
-        $caeName     = "dev-skycraft-swc-cae-02"
+        $caeName     = "dev-skycraft-swc-cae"
 
     and every literal passed to a -Name parameter, e.g.
 

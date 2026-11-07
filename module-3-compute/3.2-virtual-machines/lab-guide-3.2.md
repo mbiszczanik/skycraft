@@ -289,7 +289,7 @@ The region is read-only: the Portal takes it from the resource group.
 ![Download the private key when creating the SSH key](images/step-3.2.1c.png)
 
 > [!IMPORTANT]
-> The `.pem` file is offered for download **only once**. If you lose it, delete the key resource and create a new one. Lab 1.3 puts `lock-no-delete-platform` on `platform-skycraft-swc-rg`, so remove that lock first and put it back afterwards (Lab 1.3, Troubleshooting Issue 3). With the lock in place, the key's **Delete** box asks only **Yes** or **No**: it shows no lock warning and offers no lock override, and the lock makes the delete fail. On a shared computer, move the file to your own storage and delete it from the Downloads folder.
+> The `.pem` file is offered for download **only once**. If you lose it, delete the key resource and create a new one. If you kept Lab 1.3's `lock-no-delete-platform` on `platform-skycraft-swc-rg` (you skipped the removal in Lab 1.3, Step 1.3.14), remove it first (Lab 1.3, Troubleshooting Issue 3): the lock makes the delete fail, and the key's **Delete** box asks only **Yes** or **No**, with no lock warning and no lock override. On a shared computer, move the file to your own storage and delete it from the Downloads folder.
 
 **To use the Bicep solution with option B**, export the stored public key to its own file and point `Deploy-Bicep.ps1` at it with `-SshKeyPath`. A separate file name keeps an option A `skycraft-dev.pub`, if you have one, intact:
 
@@ -1261,7 +1261,7 @@ Resource groups organise resources; a VM can move to another group, or another s
 
 - **The Portal path**: on the VM's **Overview**, **Move** → **Move to another resource group**. Azure lists the related resources (network interface, disks) to move with it and validates the move before it starts.
 - **What moves together**: a VM moves with its disks and network interface. Resources it depends on that stay behind (the VNet, the load balancer) keep working across groups in the same subscription.
-- **What changes**: the resource IDs. Scripts, RBAC assignments scoped to the old group, and policies of the old group no longer apply; the new group's policies and locks do (Lab 1.3).
+- **What changes**: the resource IDs. Scripts, RBAC assignments scoped to the old group, and policies of the old group no longer apply; the new group's policies do (Lab 1.3).
 - **What does not change**: the VM keeps running, its private IP and its zone stay the same.
 
 Read more in [Move a VM to another resource group or subscription](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/move-resource-group-and-subscription).
@@ -1291,7 +1291,7 @@ Read more in [Move a VM to another resource group or subscription](https://learn
 
 ### Step 3.2.29: Create a Virtual Machine Scale Set
 
-The scale set goes into **`dev-skycraft-swc-rg`**. Lab 1.3 puts a `CanNotDelete` lock on `prod-skycraft-swc-rg`, so a scale set there could not be deleted in Step 3.2.33 (`ScopeLocked`); the dev group has no lock.
+The scale set goes into **`dev-skycraft-swc-rg`**. A scale set in `prod-skycraft-swc-rg` could not be deleted in Step 3.2.33 (`ScopeLocked`) if you kept Lab 1.3's `CanNotDelete` lock on that group; the dev group never had one.
 
 1. In Azure Portal, search for **Virtual machine scale sets** and click **+ Create**
 
@@ -2001,9 +2001,9 @@ Pass `$publicKey` to `az vm create --ssh-key-values`, to `Add-AzVMSshPublicKey -
 
 **Symptom**: Step 3.2.33 fails with `ScopeLocked`
 
-**Cause**: The scale set is in `prod-skycraft-swc-rg`, as an earlier version of this guide said, and Lab 1.3's `CanNotDelete` lock protects that group.
+**Cause**: The scale set is in `prod-skycraft-swc-rg`, as an earlier version of this guide said, and Lab 1.3's `CanNotDelete` lock still protects that group (Lab 1.3, Step 1.3.14 removes it).
 
-**Solution**: This guide creates the scale set in `dev-skycraft-swc-rg`, which has no lock. To delete one already in prod, remove the lock `lock-no-delete-prod` (**prod-skycraft-swc-rg** → **Settings** (expand it if it is collapsed) → **Locks**), delete the scale set, and create the lock again as Lab 1.3 describes; or run `scripts/Remove-LabResource.ps1 -Environment prod` with the lock removed.
+**Solution**: This guide creates the scale set in `dev-skycraft-swc-rg`, which has no lock. To delete one already in prod, remove the lock `lock-no-delete-prod` (**prod-skycraft-swc-rg** → **Settings** (expand it if it is collapsed) → **Locks**), delete the scale set, and leave the lock off (Lab 1.3, Step 1.3.14 removes it for the rest of the course); or run `scripts/Remove-LabResource.ps1 -Environment prod` with the lock removed.
 
 ---
 
