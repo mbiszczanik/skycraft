@@ -407,6 +407,7 @@ function Invoke-AzOperationalInsightsQuery {
     if ($Query -notmatch '^Heartbeat\b' -or $Query -notmatch 'ago\(15m\)') { throw "stub: unexpected query $Query" }
     switch ($env:SKYCRAFT_STUB_HEARTBEAT) {
         'fail'  { throw 'stub lookup failure: workspace query' }
+        'forbidden' { throw "Operation returned an invalid status code 'Forbidden'" }
         'error' { return [pscustomobject]@{ Results = @(); Error = [pscustomobject]@{ Message = 'stub query error: PartialError' } } }
         'notable' { throw "Operation returned an invalid status code 'BadRequest'" }
         'tablelate' { if ($script:QueryCount -le 2) { throw "Operation returned an invalid status code 'BadRequest'" } }
@@ -519,7 +520,7 @@ function Get-AzDiagnosticSetting {
             [string]$Alert = 'platform',
             [ValidateSet('succeeded', 'missing', 'failed', 'unreadable')]
             [string]$Agent = 'succeeded',
-            [ValidateSet('rows', 'late', 'none', 'fail', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone', 'slow')]
+            [ValidateSet('rows', 'late', 'none', 'fail', 'forbidden', 'error', 'notable', 'tablelate', 'tableerror', 'tablegone', 'slow')]
             [string]$Heartbeat = 'rows',
             [ValidateSet('vm', 'workspace', 'none', 'disabled', 'wrongop', 'noaction', 'listfails')]
             [string]$LogAlert = 'vm',
@@ -583,6 +584,7 @@ function Get-AzDiagnosticSetting {
     $script:HeartbeatLate    = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'late' -WaitMinutes 1
     $script:QueryThrows      = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'fail'
     $script:QueryError       = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'error'
+    $script:QueryForbidden   = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'forbidden'
     $script:NoTableNoWait    = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'notable'
     $script:NoTableNever     = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Heartbeat 'notable' -TableWaitMinutes 3
     $script:NoTableAgentFail = Invoke-ValidatorScript -Stub $script:Stub -Dcr 'bicep' -Agent 'failed' -Heartbeat 'notable' -TableWaitMinutes 3
@@ -630,7 +632,7 @@ function Get-AzDiagnosticSetting {
         $script:VmThrows, $script:Dangling, $script:AlertInVmGroup, $script:AlertRecommended,
         $script:AlertListFails, $script:AlertListFailsPlatform, $script:AgentMissing, $script:AgentFailed,
         $script:AgentUnreadable, $script:AgentFailedNoRow, $script:NoHeartbeat, $script:HeartbeatLate,
-        $script:QueryThrows, $script:QueryError, $script:NoTableNoWait, $script:NoTableNever,
+        $script:QueryThrows, $script:QueryError, $script:QueryForbidden, $script:NoTableNoWait, $script:NoTableNever,
         $script:NoTableAgentFail, $script:TableLate, $script:TableErrorLate, $script:TableGone,
         $script:SlowAfterInstall, $script:SlowFlatOnly, $script:BoundReached, $script:OldNoRow,
         $script:OldWithRow, $script:InstallLogFails, $script:InstallLogEmpty, $script:InstallZeroWait,
@@ -875,6 +877,14 @@ Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbea
         $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
         $run.Output | Should -Match "Heartbeat from the rule's VMs in the last 15 minutes\.\.\.\[stub-query 1\] FAIL \(stub lookup failure: workspace query\)"
         $run.Output | Should -Match 'Test Results Summary'
+        $run.Output | Should -Match 'Failed: 1\b'
+    }
+
+    It 'names the missing Log Analytics token when the workspace query is Forbidden, and still fails (#530)' {
+        $run = $script:QueryForbidden
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match "\[stub-query 1\] FAIL \(Operation returned an invalid status code 'Forbidden' \(the session may lack a Log Analytics token"
+        $run.Output | Should -Not -Match 'stub-query 2'
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
