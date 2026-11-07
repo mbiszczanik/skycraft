@@ -578,12 +578,24 @@ if ($WhatIf) {
                         # and the vault transfer after it takes far longer (#366).
                         $deadline = (Get-Date).AddMinutes($snapshotWatchMinutes)
                         $jobId = $job.JobId
+                        $jobListedAfter = if ($job.StartTime) { ([datetime]$job.StartTime).ToUniversalTime().AddMinutes(-5) } else { (Get-Date).ToUniversalTime().AddMinutes(-30) }
                         $snapshotStatus = ''
                         $detail = $null
+                        $jobReadError = $null
                         Write-Host "  Watching the Take Snapshot phase of job $jobId (up to $snapshotWatchMinutes minutes)..." -ForegroundColor Gray
                         $lostSince = $null
                         while ($true) {
-                            $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue -ErrorVariable jobReadError
+                            if (-not $job) {
+                                # The read by id returned nothing for the second VM's job in two runs (#535) while
+                                # the vault listed it (az backup job list): look in the vault's job list as well.
+                                $listedJobs = @(Get-AzRecoveryServicesBackupJob -VaultId $vault.ID -BackupManagementType AzureVM -Operation Backup -ErrorAction SilentlyContinue |
+                                    Where-Object { $_.JobId -eq $jobId -or ($_.WorkloadName -eq $vmName -and ([datetime]$_.StartTime).ToUniversalTime() -ge $jobListedAfter) })
+                                if ($listedJobs.Count -gt 0) {
+                                    $job = @($listedJobs | Sort-Object -Property StartTime -Descending)[0]
+                                    $jobId = $job.JobId
+                                }
+                            }
                             if (-not $job) {
                                 if (-not $lostSince) { $lostSince = Get-Date }
                                 if (((Get-Date) - $lostSince).TotalSeconds -ge $jobLookupGraceSeconds) { break }
@@ -593,6 +605,7 @@ if ($WhatIf) {
                             }
                             $lostSince = $null
                             $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
+                            if (-not $detail) { $detail = Get-AzRecoveryServicesBackupJobDetail -Job $job -VaultId $vault.ID -ErrorAction SilentlyContinue }
                             $snapshotStatus = "$((@($detail.SubTasks) | Where-Object { $_.Name -eq 'Take Snapshot' } | Select-Object -First 1).Status)"
                             if (-not $job -or $job.Status -ne 'InProgress' -or $snapshotStatus -in @('Completed', 'Failed')) { break }
                             if ((Get-Date) -ge $deadline) { break }
@@ -603,6 +616,10 @@ if ($WhatIf) {
                         if (-not $job) {
                             $script:deployFailures++
                             Write-Host "  [ERROR] Get-AzRecoveryServicesBackupJob returned nothing for job $jobId for $jobLookupGraceSeconds seconds - check Backup jobs in the vault" -ForegroundColor Red
+                            $lastJobReadError = @($jobReadError)[-1]
+                            if ($lastJobReadError) { Write-Host "    Last error of the read: $lastJobReadError" -ForegroundColor Gray }
+                            $azContextNow = Get-AzContext
+                            Write-Host "    Az context: account $($azContextNow.Account.Id), subscription $($azContextNow.Subscription.Name); the vault's own job list did not show the job either." -ForegroundColor Gray
                         } elseif ($job.Status -eq 'Failed' -or $snapshotStatus -eq 'Failed') {
                             $script:deployFailures++
                             Write-Host "  [ERROR] Backup job for $vmName failed (Take Snapshot: $snapshotLabel):" -ForegroundColor Red
