@@ -36,7 +36,7 @@ BeforeAll {
 
     # Stubs of the Az commands the two functions call, so Mock has something to replace on a
     # machine without Az (the CI runner).
-    function Get-AzAccessToken { param([string]$ResourceUrl) $null = $ResourceUrl }
+    function Get-AzAccessToken { param([string]$ResourceUrl, [string]$ResourceTypeName) $null = $ResourceUrl; $null = $ResourceTypeName }
     function Get-LabArmRoleAssignment { param([string]$Scope, [string]$PrincipalId) $null = $Scope, $PrincipalId }
 
     # The script's own $dataRoleName and its functions, as the script defines them.
@@ -72,7 +72,7 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - the signed-in object id comes from the ARM 
         $jwt = Get-TestJwt -Claims $claims
         Mock Get-AzAccessToken { [pscustomobject]@{ Token = $jwt } }
         Get-LabSignedInObjectId | Should -Be $script:Oid
-        Should -Invoke Get-AzAccessToken -Times 1 -ParameterFilter { $ResourceUrl -eq 'https://management.azure.com/' }
+        Should -Invoke Get-AzAccessToken -Times 1 -ParameterFilter { $ResourceTypeName -eq 'Arm' -and -not $ResourceUrl }
     }
 
     It 'reads the oid claim of a token given as a SecureString (Az.Accounts 5 and later)' {
