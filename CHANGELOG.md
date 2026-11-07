@@ -9,6 +9,36 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0](https://github.com/mbiszczanik/skycraft/compare/v0.19.3...v0.20.0) (2026-11-07)
+
+
+### Features
+
+* **lab-1.3:** remove the two delete locks in Step 1.3.14 so Labs 2.1 to 5.3 run without them (Refs [#501](https://github.com/mbiszczanik/skycraft/issues/501)) ([#519](https://github.com/mbiszczanik/skycraft/issues/519)) ([efe4bcd](https://github.com/mbiszczanik/skycraft/commit/efe4bcd208f0eb340ba1405bfee081fb66b8beba))
+* **tools:** redact the subscription id and Azure's signed-in user in lab script output ([#511](https://github.com/mbiszczanik/skycraft/issues/511)) ([9d10b62](https://github.com/mbiszczanik/skycraft/commit/9d10b62890d334f67ae8f30aa5e16b15397d6503))
+
+
+### Bug Fixes
+
+* **ci:** install PSScriptAnalyzer and Pester through a retrying script (Closes [#440](https://github.com/mbiszczanik/skycraft/issues/440)) ([#517](https://github.com/mbiszczanik/skycraft/issues/517)) ([8a5ad89](https://github.com/mbiszczanik/skycraft/commit/8a5ad897548d18af76cc5fe07128913804b1e5ae))
+* **lab-3.3:** drop the -02 suffix of the Container Apps environment name (Refs [#433](https://github.com/mbiszczanik/skycraft/issues/433)) ([#520](https://github.com/mbiszczanik/skycraft/issues/520)) ([4bbd89d](https://github.com/mbiszczanik/skycraft/commit/4bbd89d0056a6ff5b2d077b1d9b8094f20daa31f))
+* **lab-4.4:** ask for the ARM token by resource type name so a token-only Az session can read its identity (Refs [#397](https://github.com/mbiszczanik/skycraft/issues/397)) ([#529](https://github.com/mbiszczanik/skycraft/issues/529)) ([d8e298c](https://github.com/mbiszczanik/skycraft/commit/d8e298ccf18ddffec46583206fddeed1e9de5097))
+* **lab-5.1:** check the rule's Syslog facilities and tags, and deploy the guide's facilities (Refs [#480](https://github.com/mbiszczanik/skycraft/issues/480)) ([#516](https://github.com/mbiszczanik/skycraft/issues/516)) ([ccc5dcc](https://github.com/mbiszczanik/skycraft/commit/ccc5dcc1d4a78ffbe18e97e90382f42ee34275e8))
+* **lab-5.1:** ignore agent install events from before the VM was created (Closes [#513](https://github.com/mbiszczanik/skycraft/issues/513)) ([#514](https://github.com/mbiszczanik/skycraft/issues/514)) ([e57d9dd](https://github.com/mbiszczanik/skycraft/commit/e57d9dd7168639260e80da660d6a4b0b063dd802))
+* **lab-5.1:** keep a rule's existing VM association instead of creating a second one (Closes [#406](https://github.com/mbiszczanik/skycraft/issues/406)) ([#521](https://github.com/mbiszczanik/skycraft/issues/521)) ([669cc32](https://github.com/mbiszczanik/skycraft/commit/669cc3253d9225874587f6d551470aced48c482b))
+* **lab-5.1:** name the returned-Failed retry path and test the retry loop ([#509](https://github.com/mbiszczanik/skycraft/issues/509)) ([bd1c5e6](https://github.com/mbiszczanik/skycraft/commit/bd1c5e6cd9d92af5810bb5facaca89db7f6e289e))
+* **labs:** burndown block 1, offline fixes for five bugs ([#507](https://github.com/mbiszczanik/skycraft/issues/507)) ([a6745c0](https://github.com/mbiszczanik/skycraft/commit/a6745c0148d398933959b093f8f1c587c22ceb83))
+* **labs:** redact the subscription id in the target text of -WhatIf lines (Refs [#393](https://github.com/mbiszczanik/skycraft/issues/393)) ([#532](https://github.com/mbiszczanik/skycraft/issues/532)) ([610801a](https://github.com/mbiszczanik/skycraft/commit/610801a2f7955f04c001108d52398dab490e801f))
+* **module-3:** pin api-versions in Modules 2-3 and name collapsed menu groups ([#508](https://github.com/mbiszczanik/skycraft/issues/508)) ([7664005](https://github.com/mbiszczanik/skycraft/commit/7664005af6c210a7a4bdb218728cd70696f60cc9))
+* **tools:** redact the what-if tables the lab Deploy-Bicep scripts print (Refs [#393](https://github.com/mbiszczanik/skycraft/issues/393)) ([#512](https://github.com/mbiszczanik/skycraft/issues/512)) ([741dcb9](https://github.com/mbiszczanik/skycraft/commit/741dcb9bb2f0a0d28a0357593187d0eb50a99537))
+* **tools:** return 0 from a passing dry run whatever exit code a child left (Closes [#472](https://github.com/mbiszczanik/skycraft/issues/472)) ([#515](https://github.com/mbiszczanik/skycraft/issues/515)) ([fc9b5ae](https://github.com/mbiszczanik/skycraft/commit/fc9b5ae7d4b28c684b5eabc6baaa1c3cc2943741))
+
+
+### Documentation
+
+* **lab-3.1:** step 3.1.8 decompile output and a cleanup that compiles ([#502](https://github.com/mbiszczanik/skycraft/issues/502)) ([#503](https://github.com/mbiszczanik/skycraft/issues/503)) ([89e5b02](https://github.com/mbiszczanik/skycraft/commit/89e5b02a56fbefa6c2e0280c9c2e0c54e31db5f2))
+* **standards:** say Lab 1.3 locks exist only when created or applied with -ApplyLocks (Refs [#501](https://github.com/mbiszczanik/skycraft/issues/501)) ([#533](https://github.com/mbiszczanik/skycraft/issues/533)) ([bad880e](https://github.com/mbiszczanik/skycraft/commit/bad880e92c5037c52859614be5f08357967fe9e8))
+
 ## [0.19.3](https://github.com/mbiszczanik/skycraft/compare/v0.19.2...v0.19.3) (2026-11-03)
 
 
