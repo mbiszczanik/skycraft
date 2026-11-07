@@ -1530,7 +1530,7 @@ Test your understanding with these questions:
 
 **Solution**:
 
-- Lab 1.3's policies are in effect. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region (the DNS zone forms take the location of their resource group)
+- Lab 1.3's policies are in effect. A missing tag still refuses a create only where the group has no `Project` tag (a group such as `NetworkWatcherRG`), in the minutes after `Inherit-Project-Tag` is assigned, or where that policy is not assigned at all; a region outside Sweden Central and North Europe is refused whatever the tags. Fill in the **Tags** tab with the four tags of the step and choose **Sweden Central** as the region (the DNS zone forms take the location of their resource group)
 - Check that **Resource group** is the one the step names and not the group the wizard pre-filled (Steps 2.3.1 and 2.3.5); a pre-filled group without SkyCraft tags, such as `NetworkWatcherRG`, is refused
 - The **Add Virtual Network Link** page has no **Tags** field, and a link made there carries no tags; use the Az PowerShell block of Step 2.3.6 if your subscription refuses it
 

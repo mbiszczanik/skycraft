@@ -1259,7 +1259,7 @@ In the Portal, delete in this order:
 
 **Solution**:
 
-- Lab 1.3's policies are in effect. Type the four tags of the step on the **Tags** tab and choose **Sweden Central** as the **Region**
+- Lab 1.3's policies are in effect. A missing tag still refuses a create only where the group has no `Project` tag (a group such as `NetworkWatcherRG`), in the minutes after `Inherit-Project-Tag` is assigned, or where that policy is not assigned at all; a region outside Sweden Central and North Europe is refused whatever the tags. Type the four tags of the step on the **Tags** tab and choose **Sweden Central** as the **Region**
 - If the Bastion deployment is refused because of its public IP address, which the form gives no **Tags** box of its own, create the address first under **Public IP addresses** (name `platform-skycraft-swc-bas-pip`, **Sweden Central**, SKU **Standard**, **Static**, zone-redundant, the four tags with Environment Platform) and pick it under **Public IP address** in the Bastion form
 
 ---
