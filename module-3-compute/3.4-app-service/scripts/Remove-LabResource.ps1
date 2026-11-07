@@ -266,7 +266,7 @@ try {
         foreach ($slot in $slotLookup.Value) { $targets += $slot.Id }
 
         foreach ($id in $targets) {
-            if ($PSCmdlet.ShouldProcess($id, 'Remove VNet integration')) {
+            if ($PSCmdlet.ShouldProcess((Protect-LabText $id), 'Remove VNet integration')) {
                 Write-Host "Detaching VNet integration: $id" -ForegroundColor Yellow
                 # A DELETE that did not go through is not polled: the integration is still there,
                 # and three minutes of polling would only confirm it.

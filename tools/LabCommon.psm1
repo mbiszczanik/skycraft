@@ -601,7 +601,7 @@ function New-LabArmRoleAssignment {
 
     $name = [guid]::NewGuid().ToString()
     $path = "$scopePath/providers/Microsoft.Authorization/roleAssignments/$($name)?api-version=$script:LabRoleAssignmentApiVersion"
-    if (-not $PSCmdlet.ShouldProcess("$PrincipalId on $scopePath", "Assign role $definition")) { return }
+    if (-not $PSCmdlet.ShouldProcess((Protect-LabText "$PrincipalId on $scopePath"), "Assign role $definition")) { return }
     $body = Invoke-LabArmRequest -Method PUT -Path $path -Payload $payload
     if ($body -and $body.properties) { ConvertTo-LabArmRoleAssignment -Item $body }
 }
@@ -635,7 +635,7 @@ function Remove-LabArmRoleAssignment {
         [string]$Id
     )
 
-    if (-not $PSCmdlet.ShouldProcess($Id, 'Remove role assignment')) { return }
+    if (-not $PSCmdlet.ShouldProcess((Protect-LabText $Id), 'Remove role assignment')) { return }
     Invoke-LabArmRequest -Method DELETE -Path "$($Id)?api-version=$script:LabRoleAssignmentApiVersion" | Out-Null
 }
 
@@ -745,7 +745,7 @@ function Remove-LabArmBudget {
     )
 
     $scopePath = $Scope.TrimEnd('/')
-    if (-not $PSCmdlet.ShouldProcess("$Name on $scopePath", 'Remove budget')) { return }
+    if (-not $PSCmdlet.ShouldProcess((Protect-LabText "$Name on $scopePath"), 'Remove budget')) { return }
     Invoke-LabArmRequest -Method DELETE -Path "$scopePath/providers/Microsoft.Consumption/budgets/$($Name)?api-version=$script:LabBudgetApiVersion" | Out-Null
 }
 
@@ -1258,7 +1258,7 @@ function Remove-LabDnsLink {
         [Parameter()] [int]$PollSeconds = 10
     )
 
-    if (-not $PSCmdlet.ShouldProcess($Id, 'Delete private DNS zone virtual network link')) { return }
+    if (-not $PSCmdlet.ShouldProcess((Protect-LabText $Id), 'Delete private DNS zone virtual network link')) { return }
     try {
         Invoke-LabArmRequest -Method DELETE -Path "$($Id)?api-version=2024-06-01" | Out-Null
     }
