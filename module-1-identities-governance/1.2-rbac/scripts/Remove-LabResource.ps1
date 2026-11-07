@@ -241,7 +241,7 @@ if ($malfurionId) {
         if (-not $malfurion) {
             Write-Host "  -> [INFO] Assignment not found." -ForegroundColor Gray
         }
-        elseif ($PSCmdlet.ShouldProcess($subscriptionScope, "Remove Owner role assignment for Malfurion")) {
+        elseif ($PSCmdlet.ShouldProcess((Protect-LabText $subscriptionScope), "Remove Owner role assignment for Malfurion")) {
             try {
                 Remove-LabArmRoleAssignment -Id $malfurion.RoleAssignmentId
                 Write-Host "  -> [SUCCESS] Removed Owner role for Malfurion." -ForegroundColor Green

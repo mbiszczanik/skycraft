@@ -281,7 +281,7 @@ if (-not $policyLookup.Failed) {
             foreach ($roleAssignment in @(Select-LabPolicyIdentityRoleAssignment -RoleAssignment $roleLookup.Value -PrincipalId $identity.PrincipalId -SubscriptionId $subId)) {
                 $roleName = if ($roleAssignment.RoleDefinitionName) { $roleAssignment.RoleDefinitionName } else { "role $($roleAssignment.RoleDefinitionId)" }
                 $roleLabel = "$roleName at $($roleAssignment.Scope) for the identity of $($spec.Name)"
-                if (-not $PSCmdlet.ShouldProcess($roleLabel, 'Remove role assignment')) { continue }
+                if (-not $PSCmdlet.ShouldProcess((Protect-LabText $roleLabel), 'Remove role assignment')) { continue }
                 try {
                     Remove-LabArmRoleAssignment -Id $roleAssignment.RoleAssignmentId
                     Write-Host "  -> [SUCCESS] Removed role assignment: $roleLabel" -ForegroundColor Green
@@ -298,7 +298,7 @@ if (-not $policyLookup.Failed) {
             }
         }
 
-        if ($PSCmdlet.ShouldProcess("$label on $subscriptionScope", 'Remove policy assignment')) {
+        if ($PSCmdlet.ShouldProcess((Protect-LabText "$label on $subscriptionScope"), 'Remove policy assignment')) {
             try {
                 Remove-AzPolicyAssignment -Id (Get-LabPolicyAssignmentId -Assignment $assignment) -ErrorAction Stop | Out-Null
                 Write-Host "  -> [SUCCESS] Removed policy: $label" -ForegroundColor Green
@@ -334,7 +334,7 @@ foreach ($budget in $budgets) {
         Write-Host "  -> [INFO] Budget $($budget.Name) not found." -ForegroundColor Gray
         continue
     }
-    if ($PSCmdlet.ShouldProcess("$($budget.Name) on $($budget.Scope)", 'Remove budget')) {
+    if ($PSCmdlet.ShouldProcess((Protect-LabText "$($budget.Name) on $($budget.Scope)"), 'Remove budget')) {
         try {
             Remove-LabArmBudget -Scope $budgetScope -Name $budget.Name
             Write-Host "  -> [SUCCESS] Removed budget: $($budget.Name)" -ForegroundColor Green
