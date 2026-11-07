@@ -548,9 +548,9 @@ Lab 1.3's delete lock on the platform resource group refuses a manual delete of 
 
 ### Issue 2: Create fails with "disallowed by policy"
 
-**Symptom**: **Review + create** ends in *Validation failed* (`RequestDisallowedByPolicy`), or the notification bell shows *Resource ... was disallowed by policy*, naming *Enforce Project Tag Value* or *Resources must be deployed to Sweden Central or North Europe regions only*.
+**Symptom**: **Review + create** ends in *Validation failed* (`RequestDisallowedByPolicy`), or the notification bell shows *Resource ... was disallowed by policy*, naming *Enforce-Project-Tag* or *Resources must be deployed to Sweden Central or North Europe regions only*.
 
-**Root Cause**: Lab 1.3's `Enforce-Project-Tag` refuses a resource without `Project` = `SkyCraft`, and `Restrict-Azure-Regions` refuses one outside Sweden Central and North Europe. The workspace and alert wizards start with no tags, and the action group's **Region** starts at **(US) East US**.
+**Root Cause**: Lab 1.3's `Enforce-Project-Tag` refuses a resource without `Project` = `SkyCraft` where the group has no `Project` tag or `Inherit-Project-Tag` is not assigned (it copies `Project` from the group otherwise), and `Restrict-Azure-Regions` refuses one outside Sweden Central and North Europe. The workspace and alert wizards start with no tags, and the action group's **Region** starts at **(US) East US**.
 
 **Solution**:
 
