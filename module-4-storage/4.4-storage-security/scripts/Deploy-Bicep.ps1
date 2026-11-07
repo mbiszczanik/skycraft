@@ -104,7 +104,9 @@ function Get-LabSignedInObjectId {
     param()
 
     try {
-        $accessToken = Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -ErrorAction Stop -WarningAction SilentlyContinue
+        # -ResourceTypeName, not -ResourceUrl 'https://management.azure.com/': a session started with
+        # Connect-AzAccount -AccessToken answers only the former (the URL with its closing slash is not matched).
+        $accessToken = Get-AzAccessToken -ResourceTypeName Arm -ErrorAction Stop -WarningAction SilentlyContinue
         $token = $accessToken.Token
         if ($token -is [securestring]) { $token = ConvertFrom-SecureString -SecureString $token -AsPlainText }
         $parts = "$token".Split('.')
