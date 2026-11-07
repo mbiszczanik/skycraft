@@ -560,6 +560,10 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         }
         catch {
             # Only a missing table is waited for; any other failure is a failure.
+            if ($_.Exception.Message -match "\b(Forbidden|Unauthorized)\b") {
+                # A session started from an access token holds no Log Analytics token (#530).
+                throw "$($_.Exception.Message) (the session may lack a Log Analytics token: sign in with Connect-AzAccount, not -AccessToken)"
+            }
             if ($_.Exception.Message -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw }
             $tableError = $_.Exception.Message
         }
