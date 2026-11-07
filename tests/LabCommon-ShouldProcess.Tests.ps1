@@ -21,6 +21,7 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     Import-Module (Join-Path $script:RepoRoot 'tools' 'LabCommon.psm1') -Force -Verbose:$false
+    Import-Module (Join-Path $PSScriptRoot 'Support' 'RepoFiles.psm1') -Force -Verbose:$false
     $script:SubId = '11111111-2222-3333-4444-555555555555'
 }
 
@@ -41,7 +42,7 @@ Describe 'ShouldProcess targets in lab scripts (#393)' {
 
     It 'wraps a target that names a scope or a full resource id in Protect-LabText' {
         $risky = '\$subscriptionScope|\$scopePath|\$\(\$budget\.Scope\)|\$roleLabel|^\s*\$id\s*$|^\s*\$Id\s*$'
-        $files = @(Get-ChildItem (Join-Path $script:RepoRoot 'module-*') -Recurse -Filter '*.ps1' | Where-Object { $_.FullName -match '[\\/]scripts[\\/]' }) +
+        $files = @(Get-RepoFile -Root $script:RepoRoot -Filter '*.ps1' | Where-Object { $_.FullName -match '[\\/]module-[^\\/]+[\\/][^\\/]+[\\/]scripts[\\/]' }) +
             @(Get-Item (Join-Path $script:RepoRoot 'tools' 'LabCommon.psm1'))
         $offenders = foreach ($file in $files) {
             $lineNo = 0
