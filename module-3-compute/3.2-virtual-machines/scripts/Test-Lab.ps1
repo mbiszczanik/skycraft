@@ -11,7 +11,9 @@
     - each VM's NIC is in its role pool and in the egress pool <lb>-be-outbound, the only pool the
       load balancer's outbound rule gives internet access (the subnets are private)
     - the key vault exists, the Auth VM is encrypted with Azure Disk Encryption and the World VM
-      is not: Lab 5.2 runs file-level recovery and Site Recovery on it (#368)
+      is not: Lab 5.2 runs file-level recovery and Site Recovery on it (#368). The encryption is
+      optional (-SkipEncryption): an Auth VM that is plainly not encrypted is reported with [INFO]
+      and not counted; a partly applied encryption or an unreadable status still fails (#534)
     - a scale set left over from Step 3.2.33 is reported as a warning, not counted
 
     NICs and disks are found through their VMs (NetworkProfile, StorageProfile), never by name:
@@ -203,14 +205,28 @@ foreach ($role in $roles) {
 Write-Host ""
 Write-Host "[Disk Encryption]" -ForegroundColor Yellow
 
-Invoke-Test "Key vault $kvName enabled for disk encryption" {
-    $kv = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction Stop
-    $kv -and $kv.EnabledForDiskEncryption
+# Azure Disk Encryption is optional: the encryption takes about 2 hours, so Deploy-Bicep.ps1 has
+# -SkipEncryption (and -EncryptionStrategy). An Auth VM that is plainly 'NotEncrypted' is reported,
+# not failed; a partly applied encryption (in progress, restart pending) or a status that cannot
+# be read still runs the checks below and fails them (#534).
+$authAdeStatus = $null
+try { $authAdeStatus = Get-AzVMDiskEncryptionStatus -ResourceGroupName $rgName -VMName $auth.Vm -ErrorAction Stop } catch { $authAdeStatus = $null }
+if ($authAdeStatus -and "$($authAdeStatus.OsVolumeEncrypted)" -eq 'NotEncrypted') {
+    $kvPresent = $null
+    try { $kvPresent = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction Stop } catch { $kvPresent = $null }
+    $kvText = if ($kvPresent) { 'present' } else { 'not present' }
+    Write-Host "  [INFO] Azure Disk Encryption: not applied to the Auth VM (deployed without it); key vault $kvName $kvText. Reported, not counted (optional, #534)." -ForegroundColor Cyan
 }
+else {
+    Invoke-Test "Key vault $kvName enabled for disk encryption" {
+        $kv = Get-AzKeyVault -VaultName $kvName -ResourceGroupName $rgName -ErrorAction Stop
+        $kv -and $kv.EnabledForDiskEncryption
+    }
 
-Invoke-Test "Auth VM OS disk encrypted with Azure Disk Encryption" {
-    $status = Get-AzVMDiskEncryptionStatus -ResourceGroupName $rgName -VMName $auth.Vm -ErrorAction Stop
-    "$($status.OsVolumeEncrypted)" -eq 'Encrypted'
+    Invoke-Test "Auth VM OS disk encrypted with Azure Disk Encryption" {
+        $status = Get-AzVMDiskEncryptionStatus -ResourceGroupName $rgName -VMName $auth.Vm -ErrorAction Stop
+        "$($status.OsVolumeEncrypted)" -eq 'Encrypted'
+    }
 }
 
 # Lab 5.2 restores files from and replicates the World VM; file recovery is not available for an ADE VM.
