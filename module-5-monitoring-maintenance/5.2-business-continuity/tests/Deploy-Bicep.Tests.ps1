@@ -244,8 +244,16 @@ function Get-AzRecoveryServicesBackupJob {
     if ($JobId) {
         # The first SKYCRAFT_STUB_JOBNULL reads by id find nothing: a job not readable yet (#468).
         $script:JobReads++
+        # SKYCRAFT_STUB_JOBLIST set: the read by id never returns the job (#535).
+        if ($env:SKYCRAFT_STUB_JOBLIST) { return }
         if ($script:JobReads -le [int]$env:SKYCRAFT_STUB_JOBNULL) { return }
         [pscustomobject]@{ JobId = $JobId; Status = 'Completed'; WorkloadName = 'stub' }
+    }
+    elseif ($env:SKYCRAFT_STUB_JOBLIST -eq 'listed' -and -not $Status) {
+        # The vault's job list shows each VM's backup job although the read by id does not (#535).
+        foreach ($listedVm in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
+            [pscustomobject]@{ JobId = "listed-$listedVm"; Status = 'Completed'; WorkloadName = $listedVm; StartTime = (Get-Date) }
+        }
     }
 }
 
@@ -267,13 +275,14 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
 '@
 
         function Invoke-DeployScript {
-            param([int]$ListAfter, [string[]]$ArgumentList, [int]$JobNull = 0)
+            param([int]$ListAfter, [string[]]$ArgumentList, [int]$JobNull = 0, [string]$JobList = '')
             $log = Join-Path $script:Stub.Directory ('calls-' + [guid]::NewGuid().ToString('N') + '.log')
             New-Item -ItemType File -Path $log | Out-Null
             $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
                 SKYCRAFT_STUB_LOG       = $log
                 SKYCRAFT_STUB_LISTAFTER = $ListAfter
                 SKYCRAFT_STUB_JOBNULL   = $JobNull
+                SKYCRAFT_STUB_JOBLIST   = $JobList
             }
             [pscustomobject]@{ ExitCode = $run.ExitCode; Refused = $run.Refused; Output = $run.Output; Calls = @(Get-Content -LiteralPath $log) }
         }
@@ -285,6 +294,7 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $script:ListedLate  = Invoke-DeployScript -ListAfter 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
         $script:JobLate     = Invoke-DeployScript -ListAfter 1 -JobNull 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
         $script:NeverListed = Invoke-DeployScript -ListAfter 999 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '0'
+        $script:JobListed   = Invoke-DeployScript -ListAfter 1 -JobList 'listed' -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
     }
 
     AfterAll {
@@ -329,6 +339,22 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $run.Output | Should -Match 'does not return job backup-dev-skycraft-swc-auth-vm yet; retrying'
         $run.Output | Should -Not -Match 'returned nothing for job'
         $run.Calls | Should -Contain 'Sleep:10'
+    }
+
+    It 'finds the job in the vault job list when the read by id returns nothing, and exits 0 (#535)' {
+        $run = $script:JobListed
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Not -Match 'returned nothing for job'
+        $run.Output | Should -Match 'Take Snapshot completed for dev-skycraft-swc-auth-vm'
+        $run.Output | Should -Match 'Take Snapshot completed for dev-skycraft-swc-world-vm'
+    }
+
+    It 'keeps the error of the read by id and prints the Az context when neither it nor the job list shows the job (#535)' {
+        # A run cannot show this: the stubbed Start-Sleep does not move the clock the 120 second wait is counted on.
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text | Should -Match '-ErrorAction SilentlyContinue -ErrorVariable jobReadError'
+        $text | Should -Match 'Last error of the read: \$lastJobReadError'
+        $text | Should -Match 'Az context: account \$\(\$azContextNow\.Account\.Id\)'
     }
 
     It 'names the failing call and the wait when the vault never returns the job (#468)' {
