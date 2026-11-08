@@ -55,7 +55,7 @@
 
 ### Key Vault Access for Encrypted VM Backup
 
-- [x] Microsoft Entra app **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
+- [x] Only if the auth VM is ADE-encrypted (Lab 3.2's encryption is optional): Microsoft Entra app **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
 - [x] Granted before *Enable backup* of the ADE-encrypted `dev-skycraft-swc-auth-vm`
 
 ### VM Backup

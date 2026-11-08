@@ -155,6 +155,7 @@ function Get-AzVmss {
             [switch]$WorldNotInEgress,
             [switch]$NoDataDisk,
             [switch]$AuthUnencrypted,
+            [switch]$AuthAdeInProgress,
             [switch]$WorldEncrypted,
             [switch]$NoKeyVault,
             [switch]$NoWorldVm,
@@ -173,7 +174,7 @@ function Get-AzVmss {
         $vms = [ordered]@{
             'dev-skycraft-swc-auth-vm' = @{
                 power = 'running'; zones = @('1'); nicIds = @($authNic); dataDisks = @()
-                ade = @{ os = $(if ($AuthUnencrypted) { 'NotEncrypted' } else { 'Encrypted' }); data = 'NotMounted' }
+                ade = @{ os = $(if ($AuthUnencrypted) { 'NotEncrypted' } elseif ($AuthAdeInProgress) { 'EncryptionInProgress' } else { 'Encrypted' }); data = 'NotMounted' }
             }
         }
         if (-not $NoWorldVm) {
@@ -220,6 +221,8 @@ function Get-AzVmss {
     $script:NoEgress        = Invoke-Validator (Get-StubEstate -WorldNotInEgress)
     $script:NoDataDisk      = Invoke-Validator (Get-StubEstate -NoDataDisk)
     $script:AuthUnencrypted = Invoke-Validator (Get-StubEstate -AuthUnencrypted)
+    $script:AuthNoVault     = Invoke-Validator (Get-StubEstate -AuthUnencrypted -NoKeyVault)
+    $script:AuthAdeProgress = Invoke-Validator (Get-StubEstate -AuthAdeInProgress)
     $script:WorldEncrypted  = Invoke-Validator (Get-StubEstate -WorldEncrypted)
     $script:NoKeyVault      = Invoke-Validator (Get-StubEstate -NoKeyVault)
     $script:NoWorldVm       = Invoke-Validator (Get-StubEstate -NoWorldVm)
@@ -230,7 +233,7 @@ function Get-AzVmss {
 
     $script:AllRuns = @(
         $script:Portal, $script:BicepBuilt, $script:NoAuthAsg, $script:NoEgress, $script:NoDataDisk,
-        $script:AuthUnencrypted, $script:WorldEncrypted, $script:NoKeyVault, $script:NoWorldVm, $script:LeftoverVmss,
+        $script:AuthUnencrypted, $script:AuthNoVault, $script:AuthAdeProgress, $script:WorldEncrypted, $script:NoKeyVault, $script:NoWorldVm, $script:LeftoverVmss,
         $script:WorldVmFailed, $script:OwnVault
     )
 }
@@ -270,12 +273,30 @@ Describe 'Lab 3.2 Test-Lab.ps1 - passes whichever path built the lab (#355, #362
     }
 }
 
+Describe 'Lab 3.2 Test-Lab.ps1 - Azure Disk Encryption is optional (#534)' {
+    It 'reports, not fails, an auth VM that is plainly not encrypted, with the key vault present or not' {
+        foreach ($run in $script:AuthUnencrypted, $script:AuthNoVault) {
+            $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+            $run.Output   | Should -Match '\[INFO\] Azure Disk Encryption: not applied to the Auth VM'
+            $run.Output   | Should -Not -Match 'Auth VM OS disk encrypted'
+            $run.Output   | Should -Not -Match 'enabled for disk encryption'
+        }
+        $script:AuthUnencrypted.Output | Should -Match 'key vault dev-skycraft-swc-kv present'
+        $script:AuthNoVault.Output     | Should -Match 'key vault dev-skycraft-swc-kv not present'
+    }
+
+    It 'still checks the world VM when the auth VM is not encrypted' {
+        $script:AuthUnencrypted.Output | Should -Match 'World VM not encrypted with Azure Disk Encryption[^
+]*PASS'
+    }
+}
+
 Describe 'Lab 3.2 Test-Lab.ps1 - fails on a broken lab' {
     It 'fails <name> with a [FAIL] line that names it' -ForEach @(
         @{ name = 'an auth NIC outside its application security group'; run = 'NoAuthAsg'; pattern = 'Auth NIC in application security group dev-skycraft-swc-asg-auth[^\r\n]*FAIL' }
         @{ name = 'a world NIC outside the egress pool'; run = 'NoEgress'; pattern = 'World VM NIC in egress pool[^\r\n]*FAIL' }
         @{ name = 'a world VM without its data disk'; run = 'NoDataDisk'; pattern = 'data disk at LUN 0[^\r\n]*FAIL' }
-        @{ name = 'an auth VM that is not encrypted'; run = 'AuthUnencrypted'; pattern = 'Auth VM OS disk encrypted[^\r\n]*FAIL' }
+        @{ name = 'an auth VM whose encryption is only in progress (#534)'; run = 'AuthAdeProgress'; pattern = 'Auth VM OS disk encrypted[^\r\n]*FAIL' }
         @{ name = 'a world VM that is encrypted (#368)'; run = 'WorldEncrypted'; pattern = 'World VM not encrypted[^\r\n]*FAIL' }
         @{ name = 'a VM left in provisioning state Failed (#371)'; run = 'WorldVmFailed'; pattern = 'World VM provisioning state is Succeeded[^\r\n]*FAIL' }
         @{ name = 'a missing key vault'; run = 'NoKeyVault'; pattern = 'Key vault dev-skycraft-swc-kv[^\r\n]*FAIL' }

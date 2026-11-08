@@ -35,7 +35,7 @@
 - [ ] OS disk type: Standard SSD (locally-redundant storage)
 - [ ] OS disk size: 30 GiB
 - [ ] Delete with VM: Enabled
-- [ ] Azure Disk Encryption: OS volume `Encrypted`, data volume `NotMounted` (no data disk)
+- [ ] Azure Disk Encryption (optional, about 2 hours; skipped with `-SkipEncryption`): OS volume `Encrypted`, data volume `NotMounted` (no data disk). Without it the validator prints `[INFO]` and does not count it
 - [ ] Size back at `Standard_B2ls_v2` after the encryption
 
 ### Tags

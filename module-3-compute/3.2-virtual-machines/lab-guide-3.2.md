@@ -5,7 +5,7 @@
 By completing this lab, you will:
 
 - Create Azure Virtual Machines (Ubuntu Linux) for SkyCraft game servers
-- Configure Azure Disk Encryption on the Authserver VM, and compare it with encryption at host
+- Configure Azure Disk Encryption on the Authserver VM (optional: about 2 hours of encryption time), and compare it with encryption at host
 - Manage virtual machine sizes and resize VMs based on workload requirements
 - Add and configure managed data disks for database storage
 - Deploy VMs to availability zones for high availability
@@ -58,7 +58,7 @@ You'll deploy this VM infrastructure for SkyCraft game servers:
 - **Section 2**: Create Authserver Virtual Machine (45 min)
 - **Section 3**: Create Worldserver Virtual Machine (30 min)
 - **Section 4**: Configure managed data disks (30 min)
-- **Section 5**: Configure Azure Disk Encryption (35 min of work; the encryption itself then runs for about 2 hours while you continue with Sections 6-8)
+- **Section 5**: Configure Azure Disk Encryption (optional; 35 min of work, then the encryption itself runs for about 2 hours while you continue with Sections 6-8)
 - **Section 6**: Deploy VMs to availability zones (25 min)
 - **Section 7**: Manage VM sizes (25 min)
 - **Section 8**: Create a Virtual Machine Scale Set (30 min)
@@ -274,7 +274,7 @@ The region is read-only: the Portal takes it from the resource group.
 
 ![Create an SSH key in Azure Portal](images/step-3.2.1b.png)
 
-3. Click **Next: Tags** and add the platform tags. Lab 1.3's `Enforce-Project-Tag` policy denies any resource without `Project` = `SkyCraft`, and the key is a resource. Without the tags, **Review + create** stops at "Validation failed" with `RequestDisallowedByPolicy`, naming the assignment by its display name: `Enforce-Project-Tag` if you made it in the Portal in Lab 1.3, `Enforce Project Tag Value` if Lab 1.3 was deployed with Bicep or its scripts:
+3. Click **Next: Tags** and add the platform tags. With Lab 1.3 in place, `Inherit-Project-Tag` copies `Project` from the resource group to a resource created without it, so the key is accepted either way; type all four tags so that `Environment`, `CostCenter` and `Owner` are set as well. Only where the group has no `Project` tag, or `Inherit-Project-Tag` is not assigned yet, does `Enforce-Project-Tag` stop **Review + create** at "Validation failed" with `RequestDisallowedByPolicy`:
 
 | Name        | Value       |
 | ----------- | ----------- |
@@ -857,6 +857,9 @@ exit
 
 > [!WARNING]
 > **Retirement**: Azure Disk Encryption retires on **September 15, 2028**, and Microsoft recommends **encryption at host** for new deployments. AZ-104 (skills measured as of April 17, 2026) lists *Configure encryption at host for Azure virtual machines*, not ADE. This lab still uses ADE on one VM because Lab 5.2 teaches the key vault permission Azure Backup needs for an encrypted VM; Step 3.2.21 shows encryption at host.
+
+> [!NOTE]
+> **Optional because of the time it takes.** The encryption runs for about 2 hours, which is long for what the exercise adds. You can skip this section: the scripted path has the switch `Deploy-Bicep.ps1 -SkipEncryption` (it still deploys the key vault; `-EncryptionStrategy None` or `EncryptionAtHost` deploys without it), and `Test-Lab.ps1` then prints an `[INFO]` line that Azure Disk Encryption is not applied and does not count it as a failure. A VM whose encryption is only partly applied still fails the check. Lab 5.2 Step 5.2.3a needs the key vault grant only for an encrypted VM.
 
 > **SkyCraft Choice**: Encrypt the **Authserver VM only**. The Worldserver stays unencrypted on purpose: Lab 5.2 restores single files from its backup and replicates it with Site Recovery, and file-level recovery is not available for a VM encrypted with ADE. Lab 5.2 backs up the encrypted Authserver, after giving Azure Backup a role on the key vault.
 

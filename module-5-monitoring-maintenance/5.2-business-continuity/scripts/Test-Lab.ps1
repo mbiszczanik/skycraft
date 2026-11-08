@@ -12,7 +12,9 @@
       (each skipped if the VM is absent), and each one's latest backup job did not fail - configuration alone stayed green while every
       backup was refused by policy (issue #184)
     - The Backup Management Service app holds Key Vault Administrator on dev-skycraft-swc-kv,
-      the key vault of the VM's Azure Disk Encryption (issue #368; checked with the VM).
+      the key vault of the VM's Azure Disk Encryption (issue #368; checked with the VM). Only when
+      the VM is encrypted: a VM that is plainly not encrypted (Lab 3.2 -SkipEncryption) is reported
+      with [INFO] and not counted (#534).
       Finding the app's service principal needs Microsoft Graph; a lookup that fails is a FAIL
       that names the sign-in
     - Backup Vault (platform-skycraft-swc-bv): exists, LRS, system-assigned identity, soft delete
@@ -438,6 +440,16 @@ foreach ($vmName in $backupVmNames) {
     }
 
     if ($vmName -ne $encryptedVmName) { continue }
+
+    # Azure Disk Encryption is optional in Lab 3.2 (-SkipEncryption): a VM that is plainly 'NotEncrypted'
+    # needs no key vault grant, so the check is reported, not failed. A partly applied encryption or a
+    # status that cannot be read still runs the check below (#534).
+    $authAdeStatus = $null
+    try { $authAdeStatus = Get-AzVMDiskEncryptionStatus -ResourceGroupName $vmRg -VMName $vmName -ErrorAction Stop } catch { $authAdeStatus = $null }
+    if ($authAdeStatus -and "$($authAdeStatus.OsVolumeEncrypted)" -eq 'NotEncrypted') {
+        Write-Host "  [INFO] '$vmName' is not encrypted with Azure Disk Encryption (Lab 3.2 deployed without it): the Key Vault Administrator grant of Backup Management Service on '$keyVaultName' is not needed. Reported, not counted (optional, #534)." -ForegroundColor Cyan
+        continue
+    }
 
     # Lab 3.2 encrypts this VM with Azure Disk Encryption; Azure Backup reads its keys as the
     # Backup Management Service app (#368). Without the role Enable backup fails with 400198.

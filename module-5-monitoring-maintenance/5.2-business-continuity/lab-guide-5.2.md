@@ -191,6 +191,9 @@ The Bicep path does the same: `bicep/main.bicep` creates the tagged group throug
 
 Two VMs from Lab 3.2 get backed up here. `dev-skycraft-swc-auth-vm` is encrypted with Azure Disk Encryption (ADE), and its keys sit in `dev-skycraft-swc-kv`. `dev-skycraft-swc-world-vm` is not encrypted.
 
+> [!NOTE]
+> **Only for an encrypted VM.** Lab 3.2's Azure Disk Encryption is optional (it takes about 2 hours). If you skipped it, `dev-skycraft-swc-auth-vm` is not encrypted, Azure Backup needs no key vault grant for it, and you go straight to **b. Enable backup**: the VM is backed up like the Worldserver. `Test-Lab.ps1` then prints an `[INFO]` line instead of checking the role.
+
 **a. Let Azure Backup read the key vault**
 
 Azure Backup reads an encrypted VM's keys as the Microsoft Entra app **Backup Management Service**, not as the vault's own identity. `dev-skycraft-swc-kv` uses the Azure RBAC permission model, so the app needs the **Key Vault Administrator** role there. Without it, *Enable backup* for the auth VM fails with `400198 UserErrorKeyVaultPermissionsNotConfigured`.
