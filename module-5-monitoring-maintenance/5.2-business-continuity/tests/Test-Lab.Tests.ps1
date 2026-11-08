@@ -71,6 +71,7 @@ BeforeAll {
         'Get-AzResourceGroup'
         'Get-AzResourceLock'
         'Get-AzVM'
+        'Get-AzVMDiskEncryptionStatus'
         'Get-AzDataProtectionBackupVault'
         'Get-AzDataProtectionBackupPolicy'
         'Get-AzDataProtectionBackupInstance'
@@ -166,6 +167,19 @@ function Get-AzVM {
     param([string]$Name, [Parameter(ValueFromRemainingArguments)]$Rest)
     if ($Name -eq 'dev-skycraft-swc-world-vm' -and $env:SKYCRAFT_STUB_ASR -eq 'novm') { return }
     [pscustomobject]@{ Name = $Name }
+}
+
+# The auth VM's disk encryption: SKYCRAFT_STUB_ADE 'encrypted' (default), 'none' (plainly not encrypted),
+# 'progress' (EncryptionInProgress) or 'unreadable' (the lookup throws).
+function Get-AzVMDiskEncryptionStatus {
+    [CmdletBinding()]
+    param([string]$ResourceGroupName, [string]$VMName)
+    switch ($env:SKYCRAFT_STUB_ADE) {
+        'none'       { [pscustomobject]@{ OsVolumeEncrypted = 'NotEncrypted'; DataVolumesEncrypted = 'NotMounted' } }
+        'progress'   { [pscustomobject]@{ OsVolumeEncrypted = 'EncryptionInProgress'; DataVolumesEncrypted = 'NotMounted' } }
+        'unreadable' { throw 'stub lookup failure: disk encryption status' }
+        default      { [pscustomobject]@{ OsVolumeEncrypted = 'Encrypted'; DataVolumesEncrypted = 'NotMounted' } }
+    }
 }
 
 function Get-AzADServicePrincipal {
@@ -321,7 +335,9 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             [string]$AlertRule = 'apply',
             [string]$KeyVaultName,
             [ValidateSet('protected', 'initial', 'unhealthy', 'untagged', 'nogroup', 'lookupfail', 'novm')]
-            [string]$Asr = 'protected'
+            [string]$Asr = 'protected',
+            [ValidateSet('encrypted', 'none', 'progress', 'unreadable')]
+            [string]$Ade = 'encrypted'
         )
         $arguments = @($ArgumentList) + $(if ($KeyVaultName) { '-KeyVaultName', $KeyVaultName })
         $run = Invoke-LabScriptWithStub -Stub $Stub -ScriptPath $script:ScriptPath -ArgumentList $arguments -Environment @{
@@ -333,6 +349,7 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
             SKYCRAFT_STUB_BLOBPOLICY   = $BlobPolicy
             SKYCRAFT_STUB_APR          = $AlertRule
             SKYCRAFT_STUB_ASR          = $Asr
+            SKYCRAFT_STUB_ADE          = $Ade
         }
         return [pscustomobject]@{
             ExitCode = $run.ExitCode
@@ -359,6 +376,9 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:PortalVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'AlwaysOn' -KeyVaultRole 'missing' -BlobPolicy 'vaulted' -AlertRule 'suppress' -Asr 'untagged'
     $script:OnVault       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'On' -KeyVaultRole 'graphfail' -BlobPolicy 'none' -AlertRule 'none' -Asr 'nogroup'
     $script:UniqueVault   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultName 'dev-skycraft-swc-kv-ab'
+    $script:NoAde         = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultRole 'missing' -Ade 'none'
+    $script:AdeProgress   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultRole 'missing' -Ade 'progress'
+    $script:AdeUnreadable = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -KeyVaultRole 'missing' -Ade 'unreadable'
     $script:Denied        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Arm 'denied'
     $script:BlobOk        = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'ok'
     $script:BlobProtErr   = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -BlobInstance 'protectionerror'
@@ -531,6 +551,20 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Key Vault role of Backup Management Service (#3
         $line = Get-CheckLine -Run $script:PortalVault -Label 'Backup Management Service holds Key Vault Administrator'
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:PortalVault.Output)"
         $line | Should -Match 'grant it before Enable backup - Step 5\.2\.3'
+    }
+
+    It 'reports, not fails, the missing grant when the auth VM is plainly not ADE-encrypted (optional encryption, #534)' {
+        $run = $script:NoAde
+        Get-CheckLine -Run $run -Label 'Backup Management Service holds Key Vault Administrator' | Should -BeNullOrEmpty -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[INFO\] ''dev-skycraft-swc-auth-vm'' is not encrypted with Azure Disk Encryption'
+        $run.Output | Should -Match 'Reported, not counted'
+    }
+
+    It 'still fails the grant check when the encryption is only partly applied or its status cannot be read (#534)' {
+        foreach ($run in $script:AdeProgress, $script:AdeUnreadable) {
+            Get-CheckLine -Run $run -Label 'Backup Management Service holds Key Vault Administrator' | Should -Match 'FAIL' -Because "output was:`n$($run.Output)"
+            $run.Output | Should -Not -Match 'is not encrypted with Azure Disk Encryption'
+        }
     }
 
     It 'fails, not passes, when the app cannot be looked up in Microsoft Graph, and names the sign-in' {
