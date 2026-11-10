@@ -697,6 +697,107 @@ Describe 'Manifest - teardown covers what the cycle deploys' {
     }
 }
 
+Describe 'Manifest - long steps the cycle does not need are skipped, and limits cover the validators (#543)' {
+    BeforeAll {
+        # Static read of a script's param defaults, no Azure: parameter name -> default as text.
+        function Get-ScriptParameterDefault {
+            param([string]$Path)
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+            $defaults = @{}
+            if ($ast.ParamBlock) {
+                foreach ($p in $ast.ParamBlock.Parameters) {
+                    if ($p.DefaultValue) { $defaults[$p.Name.VariablePath.UserPath] = $p.DefaultValue.Extent.Text }
+                }
+            }
+            $defaults
+        }
+    }
+
+    It 'passes -SkipEncryption to Lab 3.2, which the cycle does not need encrypted (about 2 hours)' {
+        $phase = $script:LivePhases | Where-Object { $_.Id -eq '3.2' }
+        $phase.Deploy.SkipEncryption | Should -BeTrue
+        $phase.TimeoutMs | Should -BeLessThan 14400000 -Because 'the 4 hour limit was for the encryption'
+        $phase.TimeoutMs | Should -BeGreaterThan (10 * 60 * 1000)
+    }
+
+    It 'passes -SkipSiteRecovery to both the deploy and the validator of Lab 5.2' {
+        $phase = $script:LivePhases | Where-Object { $_.Id -eq '5.2' }
+        $phase.Deploy.SkipSiteRecovery | Should -BeTrue
+        $phase.Test.SkipSiteRecovery | Should -BeTrue -Because 'without it the validator fails the three replication checks'
+        $phase.TimeoutMs | Should -BeLessThan 5400000 -Because 'the 90 minute limit was for the replication wait'
+    }
+
+    It 'declares -SkipSiteRecovery on the Lab 5.2 validator and prints the skipped checks as [SKIP]' {
+        $path = Join-Path $script:RepoRoot 'module-5-monitoring-maintenance/5.2-business-continuity/scripts/Test-Lab.ps1'
+        (Get-ScriptParameterName -Path $path) | Should -Contain 'SkipSiteRecovery'
+        (Get-Content -Raw -LiteralPath $path) | Should -Match '\[SKIP\]'
+    }
+
+    It 'gives every phase a limit at least as long as the longest wait its validator defaults to' {
+        $bad = foreach ($phase in $script:LivePhases) {
+            $path = Join-Path (Join-Path (Join-Path $script:RepoRoot $phase.Lab) 'scripts') 'Test-Lab.ps1'
+            $waits = foreach ($entry in (Get-ScriptParameterDefault -Path $path).GetEnumerator()) {
+                if ($entry.Key -like '*Minutes' -and $entry.Value -match '^\d+$') { [int]$entry.Value }
+            }
+            $longest = if ($waits) { ($waits | Measure-Object -Maximum).Maximum } else { 0 }
+            if ($phase.TimeoutMs -lt $longest * 60 * 1000) { "$($phase.Id): TimeoutMs $($phase.TimeoutMs) < $longest minutes" }
+        }
+        @($bad) | Should -BeNullOrEmpty
+    }
+
+    It 'gives Lab 5.1 room for the 90 minute agent wait plus its deploy' {
+        $phase = $script:LivePhases | Where-Object { $_.Id -eq '5.1' }
+        $phase.TimeoutMs | Should -BeGreaterThan ((90 + 15) * 60 * 1000)
+    }
+
+    It 'lists the checks the cycle does not run in the manifest' {
+        $names = @($script:Manifest.NotRun | ForEach-Object { $_.Name })
+        ($names -match 'Lab 1\.1').Count | Should -BeGreaterThan 0
+        ($names -match 'role assignment').Count | Should -BeGreaterThan 0
+        @($script:Manifest.NotRun | Where-Object { -not $_.Reason }) | Should -BeNullOrEmpty
+    }
+
+    It 'prints a Not run section in the report, and says None when nothing was skipped' {
+        $file = Join-Path $script:Scratch "notrun-$([guid]::NewGuid().ToString('N')).md"
+        Write-LabCycleReport -Path $file -SubscriptionId 'fixture' -NotRun @(@{ Name = 'Lab 1.1 identities'; Reason = 'not a phase' })
+        $text = Get-Content -Raw -LiteralPath $file
+        $text | Should -Match '## Not run'
+        $text | Should -Match 'Lab 1\.1 identities - not a phase'
+
+        Write-LabCycleReport -Path $file -SubscriptionId 'fixture'
+        (Get-Content -Raw -LiteralPath $file) | Should -Match '(?s)## Not run\s+None\.'
+    }
+
+    It 'carries the manifest''s Not run list into the cycle report' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'a'; Lab = 'module-1-identities-governance/1.2-rbac'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    NotRun = @(
+        @{ Name = 'fixture check'; Reason = 'fixture reason' }
+        @{ Name = 'bound check'; Reason = 'bound reason'; Phase = 'a' }
+        @{ Name = 'other phase check'; Reason = 'other reason'; Phase = 'zzz' }
+    )
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{ BackupResourceGroupPrefix = 'AzureBackupRG_'; AssertAbsent = @(); ResourceGroups = @('fixture-rg') }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+            -PhaseRunner { 0 } -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -Yes -SkipCleanup @paths | Out-Null
+        $text = Get-Content -Raw -LiteralPath $paths.ReportPath
+        $text | Should -Match 'fixture check - fixture reason'
+        $text | Should -Match 'bound check - bound reason'
+        $text | Should -Not -Match 'other phase check'
+    }
+}
+
 Describe 'Manifest - the soft-delete guards name resources the labs really create' {
     It 'finds each guard''s needle somewhere in the lab it is attributed to' {
         foreach ($guard in @($script:Manifest.SoftDeleteGuards)) {

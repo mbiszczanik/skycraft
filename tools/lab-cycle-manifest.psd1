@@ -29,6 +29,11 @@
       5.1  -OpsEmail     mandatory on that script, and the only argument the orchestrator takes
                          from its caller. -Force answers the confirmation prompt.
       3.2, 5.2, 5.3      -Force, for the same reason.
+      3.2  -SkipEncryption
+                         on Deploy only: skips the 2 hour disk encryption the cycle does not need.
+      5.2  -SkipSiteRecovery
+                         on Deploy and Test-Lab: skips the 45 minute replication wait and its checks.
+      Every skipped check is listed under NotRun below and in the report (#543).
 
     HOW A PHASE ANSWERS A PROMPT IT CANNOT BE GIVEN A SWITCH FOR. Lab 2.2's Deploy-Bicep.ps1 asks
     'Do you want to deploy Azure Bastion? (y/N)' through Read-Host and declares no -Force. It is
@@ -214,17 +219,21 @@
             # the VMs were silently never created - which is the failure this whole orchestrator
             # exists to make impossible.
             #
-            # -EncryptionStrategy is left at its default, AzureDiskEncryption, the guide's end
-            # state (#362, #368): the deploy creates the Key Vault (7-day soft delete, no purge
-            # protection) and then runs Enable-Encryption.ps1 -Force on the auth VM only. The OS
-            # encryption took about 2 hours on Standard_B2s_v2 (2026-10-15), and the script waits
-            # up to 180 minutes, so the limit is 4 hours; the 2.2-minute measurement below predates
-            # the encryption. The teardown passes -IncludeKeyVault, so the vault is purged.
-            Deploy       = @{ Force = $true }
+            # -EncryptionStrategy is left at its default, AzureDiskEncryption, so the deploy still
+            # creates the Key Vault (7-day soft delete, no purge protection), but -SkipEncryption
+            # leaves Enable-Encryption.ps1 unrun (#537, #543): the OS encryption of the auth VM
+            # took about 2 hours on Standard_B2s_v2 (2026-10-15) and no later lab needs it (5.2
+            # reports an unencrypted auth VM with [INFO], #534). Test-Lab.ps1 reports the missing
+            # encryption with [INFO] and does not count it (#534). The teardown passes
+            # -IncludeKeyVault, so the vault is purged. To exercise the guide's end state, run
+            # Deploy-Bicep.ps1 without -SkipEncryption (about 2 hours; the script waits up to 180
+            # minutes) and give the phase a 4 hour limit.
+            # 30 minutes: the 2.2-minute measurement below is this unencrypted path.
+            Deploy       = @{ Force = $true; SkipEncryption = $true }
             PostDeploy   = $null
             Test         = @{}
             DependsOn    = @('2.2', '2.3')
-            TimeoutMs    = 14400000
+            TimeoutMs    = 1800000
             StdinAnswers = $null
             Excluded     = $null
             # Preflight checks the public key only when a selected phase sets this (#415).
@@ -337,9 +346,10 @@
             PostDeploy = $null
             Test       = @{}
             DependsOn  = @('3.2', '4.1')
-            # 60 min: Test-Lab waits up to 45 for a new workspace's Heartbeat table, then up to 10 for a row
-            # where the agent's install time is unreadable; 45 after the install otherwise (#369).
-            TimeoutMs  = 3600000
+            # 150 min: Test-Lab waits up to 90 minutes from the agent install (AgentInstallWaitMinutes), or
+            # 45 for a new workspace's Heartbeat table plus 10 for a row where the install time is unreadable
+            # (55 in all, #369), on top of the deploy. A manifest test pins the limit above the validator's defaults.
+            TimeoutMs  = 9000000
             StdinAnswers = $null
             Excluded   = $null
             # gate: verified - exits 1 on a missing platform resource group, on finding no lab-3.2
@@ -350,16 +360,22 @@
             Id           = '5.2'
             Lab          = 'module-5-monitoring-maintenance/5.2-business-continuity'
             ParamFile    = 'bicep/parameters/main.bicepparam'
-            Deploy       = @{ Force = $true }
+            # -SkipSiteRecovery on the deploy and the validator (#543): the deploy would otherwise
+            # wait for Site Recovery's initial replication of the world VM (about 45 minutes live on
+            # 2026-10-17, #366), and no later lab needs it. The validator prints its three
+            # replication checks as [SKIP] and does not count them; the cycle report lists them
+            # under Not run.
+            Deploy       = @{ Force = $true; SkipSiteRecovery = $true }
             # Its validator asserts a blob backup instance that the Bicep does not create, so the
             # phase runs New-LabBlobBackup.ps1 between deploy and validate. Without it the lab
             # deploys correctly and then fails its own check.
             PostDeploy   = @{ Script = 'New-LabBlobBackup.ps1'; Arguments = @{} }
-            Test         = @{}
+            Test         = @{ SkipSiteRecovery = $true }
             DependsOn    = @('4.1', '5.1')
-            # 90 minutes: the deploy waits for Site Recovery's initial replication of the world VM
-            # (about 45 minutes live on 2026-10-17, #366) on top of the 12.5 minutes it took before.
-            TimeoutMs    = 5400000
+            # 45 minutes: 12.5 minutes measured without the replication wait, with the same
+            # headroom as the other limits. Drop -SkipSiteRecovery and give it 90 minutes to
+            # exercise Step 5.2.6.
+            TimeoutMs    = 2700000
             StdinAnswers = $null
             Excluded     = $null
             # gate: verified - exits 1 on a missing platform resource group, a missing 5.1
@@ -367,11 +383,14 @@
             # New-LabBlobBackup.ps1 creates SkyCraft-Blob-Policy and exits 1 on a missing 4.1
             # prodskycraftswcsa (needs 4.1 -All). Its VM and key vault checks only warn.
             #
-            # The deploy also runs Enable-SiteRecovery.ps1 for the unencrypted world VM (replication
-            # to North Europe, Test-Lab checks it Protected), and the teardown disables it.
+            # Without -SkipSiteRecovery the deploy also runs Enable-SiteRecovery.ps1 for the
+            # unencrypted world VM (replication to North Europe, Test-Lab checks it Protected); the
+            # teardown disables replication when there is one and handles none.
             #
-            # Lab 3.2 leaves the auth VM ADE-encrypted; the deploy grants Backup Management
-            # Service Key Vault Administrator on the 3.2 vault before it enables backup (#368).
+            # With Lab 3.2 run -SkipEncryption the auth VM is plain: the deploy still finds the 3.2
+            # vault (the Bicep creates it either way) and grants Backup Management Service Key Vault
+            # Administrator on it before it enables backup (#368), and Test-Lab reports the missing
+            # encryption with [INFO] (#534).
             # Finding that app needs a Microsoft Graph token in the Az sign-in (#397).
             #
             # This is the lab that creates the Recovery Services Vault. See Remove-LabCycle.ps1 and
@@ -411,6 +430,17 @@
         }
     )
 
+    # -- Checks this cycle does not run ---------------------------------------------------------
+    # Listed in the report's Not run section and the final console summary (#543), so a green
+    # cycle is not read as covering them. A 'Phase' ties an entry to a phase: it is listed only
+    # when that phase ran. An entry without one is always listed.
+    NotRun = @(
+        @{ Name = 'Lab 1.1 (Entra users and groups)'; Reason = 'not a phase: the cycle starts at lab 1.2 and never creates or validates lab 1.1 objects' }
+        @{ Name = 'Lab 1.2 role assignment checks'; Phase = '1.2'; Reason = 'Test-Lab.ps1 runs with -SkipRoleAssignments: the phase deploys no role assignments' }
+        @{ Name = 'Lab 3.2 Azure Disk Encryption of the auth VM'; Phase = '3.2'; Reason = 'deployed with -SkipEncryption (about 2 hours); Test-Lab.ps1 reports it as [INFO]' }
+        @{ Name = 'Lab 5.2 Site Recovery replication checks (item present, Protected, health Normal)'; Phase = '5.2'; Reason = 'deployed and validated with -SkipSiteRecovery (about 45 minutes of replication)' }
+    )
+
     # -- Soft-delete guards ---------------------------------------------------------------------
     # Names this run needs that a PREVIOUS run can still be holding. Key Vaults, Log Analytics
     # workspaces and Recovery Services Vaults are not deleted immediately - the name stays
@@ -425,10 +455,10 @@
     # "$Environment-skycraft-swc-kv", so the whole name appears nowhere in the source.
     #
     # ON LAB 3.2's KEY VAULT: the 3.2 phase deploys with -EncryptionStrategy at its default,
-    # AzureDiskEncryption, so this cycle creates the vault, and its teardown passes
-    # -IncludeKeyVault, which deletes and purges it. A teardown that could not purge it (or kept it
-    # because the encrypted auth VM is still there) leaves the name taken, which is what this
-    # guard catches.
+    # AzureDiskEncryption, and -SkipEncryption, so this cycle still creates the vault (the disk
+    # encryption is what is skipped), and its teardown passes -IncludeKeyVault, which deletes and
+    # purges it. A teardown that could not purge it (or kept it because an encrypted auth VM is
+    # still there) leaves the name taken, which is what this guard catches.
     SoftDeleteGuards = @(
         @{ Kind = 'KeyVault';              Name = 'dev-skycraft-swc-kv';       Needle = 'skycraft-swc-kv';  ResourceGroup = 'dev-skycraft-swc-rg';      Lab = 'module-3-compute/3.2-virtual-machines' }
         @{ Kind = 'KeyVault';              Name = 'prod-skycraft-swc-kv';      Needle = 'skycraft-swc-kv';  ResourceGroup = 'prod-skycraft-swc-rg';     Lab = 'module-3-compute/3.2-virtual-machines' }

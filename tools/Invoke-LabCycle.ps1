@@ -864,11 +864,19 @@ Write-Host ''
 $validationOnlyText = if ($validationOnlyCount -gt 0) { " ($validationOnlyCount in validation only)" } else { '' }
 Write-Host "  Succeeded $($succeeded.Count)  Failed $failedCount$validationOnlyText  Skipped $skippedCount  Excluded $($excluded.Count)" -ForegroundColor Cyan
 Write-Host "  Coverage: $($coverage.Live) deployed and validated, $($coverage.DeployedNotValidated) deployed but not validated, $($coverage.Failed) failed, $($coverage.NotRun) never ran, $($coverage.CompileOnly) compile-only, $($coverage.Uncovered) unaccounted for" -ForegroundColor Cyan
+
+# Checks skipped by design (#543). An entry bound to a Phase counts only when that phase ran.
+$ranPhaseIds = @($results | Where-Object { $_.Status -like 'Succeeded*' -or $_.Status -like 'Failed*' } | ForEach-Object { $_.Id })
+$notRun = @($manifest.NotRun | Where-Object { $_ -and (-not $_.Phase -or $_.Phase -in $ranPhaseIds) })
+if ($notRun.Count -gt 0) {
+    Write-Host "  Not run (a green cycle does not cover these): $($notRun.Count)" -ForegroundColor Yellow
+    foreach ($item in $notRun) { Write-Host "    - $($item.Name) - $($item.Reason)" -ForegroundColor Yellow }
+}
 Write-Host ''
 
 Write-LabCycleReport -Path $ReportPath -SubscriptionId $SubscriptionId -ManifestPath $ManifestPath `
     -Phases $results -Teardowns $teardownResults -Assertions $teardownAssertions `
-    -LeftBehind $leftBehind -Coverage $coverage `
+    -LeftBehind $leftBehind -NotRun $notRun -Coverage $coverage `
     -LivePhases $live -LogDirectory $LogDirectory -DryRun:$DryRun
 Write-Host "  Report:  $ReportPath" -ForegroundColor Gray
 if (-not $DryRun) { Write-Host "  Results: $ResultsPath" -ForegroundColor Gray }
