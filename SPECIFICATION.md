@@ -99,7 +99,7 @@ All resources must have the following tags:
 - `Project`: `SkyCraft`
 - `Environment`: `Platform`, `Development`, or `Production`
 - `CostCenter`: `MSDN`
-- `Owner`: the owner handle (Bicep parameter `parOwner`; default `mbiszczanik`)
+- `Owner`: the owner handle (Bicep parameter `parOwner`)
 
 ### 5.2 Naming Convention
 
