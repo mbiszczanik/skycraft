@@ -262,7 +262,7 @@
             Id           = '3.4'
             Lab          = 'module-3-compute/3.4-app-service'
             ParamFile    = 'bicep/parameters/main.bicepparam'
-            Deploy       = @{}
+            Deploy       = @{ PlanSku = 'P0v3' }
             PostDeploy   = $null
             Test         = @{}
             DependsOn    = @('2.1')
@@ -271,6 +271,10 @@
             Excluded     = $null
             # Its validator takes resource names rather than an environment, and every default
             # already names the dev resources this phase deploys.
+            #
+            # -PlanSku P0v3: the test subscription is a Free Trial with no quota for the default
+            # P0v4 (SubscriptionIsOverQuotaForSku, #439); the guide and the script name P0v3 as
+            # the fallback and Test-Lab.ps1 accepts it. Lab 3.4 passed with it on 2026-11-10.
         }
 
         # -- Module 4 ------------------------------------------------------------------------
