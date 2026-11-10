@@ -1767,9 +1767,9 @@ If you want to test redeployment:
 > deletion removes the VNet peerings, Lab 2.2's NSGs and Bastion, and Lab 2.3's DNS zones and
 > prod load balancer, and the redeploy recreates only this lab's resources.
 >
-> While Lab 1.3's `CanNotDelete` locks are on `platform-skycraft-swc-rg` and
-> `prod-skycraft-swc-rg`, deleting those groups fails with `ScopeLocked`: remove the locks first
-> (Lab 1.3's cleanup). The script does not handle the locks itself yet (issue #372).
+> Lab 1.3's `CanNotDelete` locks are optional (`-ApplyLocks`; Step 1.3.14 removes them). If they
+> are on `platform-skycraft-swc-rg` and `prod-skycraft-swc-rg`, the script lifts them for the
+> delete and restores them afterwards (issue #372).
 
 ---
 
