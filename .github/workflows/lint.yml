@@ -113,6 +113,17 @@ jobs:
               exit 1
           }
 
+          # A floor on the discovered test count (#544): a discovery regression that drops most
+          # suites would otherwise stay green. tests/.pester-min-count holds one integer, about
+          # 90 percent of the count when it was set; raise it when the suite grows.
+          $minCount = [int](Get-Content -LiteralPath ./tests/.pester-min-count -Raw).Trim()
+          Write-Host "Tests discovered: $($result.TotalCount), minimum: $minCount"
+          if ($result.TotalCount -lt $minCount) {
+              Write-Host "::error::Pester discovered $($result.TotalCount) test(s), below the minimum $minCount in tests/.pester-min-count - suites were lost from discovery."
+              $Host.SetShouldExit(1)
+              exit 1
+          }
+
           # Success is stated just as explicitly. GitHub appends `exit $LASTEXITCODE` to a pwsh
           # step, and suites that run a script in a child pwsh leave that child's exit code in
           # $LASTEXITCODE (Remove-LabCycle.ps1's 5 for "every check failed"), which would fail a
