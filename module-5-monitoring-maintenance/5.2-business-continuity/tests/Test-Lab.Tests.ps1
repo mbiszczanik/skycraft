@@ -398,10 +398,13 @@ function Get-AzDiagnosticSetting { [CmdletBinding()] param([Parameter(ValueFromR
     $script:AsrUnhealthy  = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'unhealthy'
     $script:AsrLookupFail = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'lookupfail'
     $script:AsrNoVm       = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'novm'
+    # Replication still running, and the run was told not to wait for it (#543).
+    $script:AsrSkipped    = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'initial' -ArgumentList @('-SkipSiteRecovery')
+    $script:AsrSkippedNoGroup = Invoke-ValidatorScript -Stub $script:Stub -SoftDelete 'Off' -Asr 'nogroup' -ArgumentList @('-SkipSiteRecovery')
     $script:AllRuns       = @($script:ScriptedVault, $script:PortalVault, $script:OnVault, $script:UniqueVault, $script:Denied, $script:BlobOk,
         $script:BlobProtErr, $script:BlobProvFail, $script:BlobNoState, $script:BlobNone,
         $script:BlobConfiguring, $script:BlobCreating, $script:BlobStuck, $script:BlobFailedWhileConfiguring, $script:BlobFailedAtOnce,
-        $script:AsrInitial, $script:AsrUnhealthy, $script:AsrLookupFail, $script:AsrNoVm)
+        $script:AsrInitial, $script:AsrUnhealthy, $script:AsrLookupFail, $script:AsrNoVm, $script:AsrSkipped, $script:AsrSkippedNoGroup)
 }
 
 AfterAll {
@@ -662,6 +665,25 @@ Describe 'Lab 5.2 Test-Lab.ps1 - Azure Site Recovery (#366)' {
         $line = Get-CheckLine -Run $script:AsrLookupFail -Label "'dev-skycraft-swc-world-vm' has a replication item"
         $line | Should -Match 'FAIL$' -Because "output was:`n$($script:AsrLookupFail.Output)"
         $line | Should -Match 'lookup failed: The server returned a throttling error'
+    }
+
+    It 'with -SkipSiteRecovery prints the three replication checks as [SKIP], not as FAIL or PASS, and does not count them' {
+        foreach ($run in @($script:AsrSkipped, $script:AsrSkippedNoGroup)) {
+            foreach ($label in @("'dev-skycraft-swc-world-vm' has a replication item in the vault", "Replication of 'dev-skycraft-swc-world-vm' is Protected", "Replication health of 'dev-skycraft-swc-world-vm' is Normal")) {
+                $hit = @($run.Lines | Where-Object { $_ -match '\[SKIP\]' -and $_ -like "*$label*" })
+                $hit.Count | Should -Be 1 -Because "'$label' must be printed as skipped, output was:`n$($run.Output)"
+                Get-CheckLine -Run $run -Label $label | Should -BeNullOrEmpty -Because 'a skipped check is not run through Invoke-Test'
+            }
+        }
+    }
+
+    It 'with -SkipSiteRecovery still checks the target group and the vault' {
+        Get-CheckLine -Run $script:AsrSkipped -Label "Target group 'platform-skycraft-neu-asr-rg' exists" | Should -Match 'PASS$'
+        Get-CheckLine -Run $script:AsrSkippedNoGroup -Label "Target group 'platform-skycraft-neu-asr-rg' exists" | Should -Match 'FAIL$'
+    }
+
+    It 'without -SkipSiteRecovery still fails a replication that is not Protected' {
+        Get-CheckLine -Run $script:AsrInitial -Label "Replication of 'dev-skycraft-swc-world-vm' is Protected" | Should -Match 'FAIL$'
     }
 
     It 'still checks the group and the vault when the world VM is not deployed, and skips only the replication checks' {
