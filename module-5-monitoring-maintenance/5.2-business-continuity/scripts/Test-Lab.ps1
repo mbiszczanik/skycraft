@@ -56,6 +56,11 @@
 .PARAMETER ProtectionPollSeconds
     Seconds between polls of the instance while it is configuring. Default 15.
 
+.PARAMETER SkipSiteRecovery
+    Pass it when the deploy ran with -SkipSiteRecovery. The three replication checks (replication
+    item present, Protected, health Normal) are printed as [SKIP] and not counted; the target
+    group, its tags and its vault are still checked (#543).
+
 .EXAMPLE
     .\Test-Lab.ps1
 
@@ -87,7 +92,10 @@ param(
 
     [Parameter()]
     [ValidateRange(0, 300)]
-    [int]$ProtectionPollSeconds = 15
+    [int]$ProtectionPollSeconds = 15,
+
+    [Parameter()]
+    [switch]$SkipSiteRecovery
 )
 
 $ErrorActionPreference = 'Stop'
@@ -753,8 +761,12 @@ Invoke-Test "Target group holds a Recovery Services vault" {
     return ($asrVaults.Count -gt 0)
 }
 
-# A VM never deployed (Lab 3.2 skipped) has nothing to replicate: a WARN and a skip, as for its backup.
-if (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
+# -SkipSiteRecovery: the deploy did not enable replication, so its checks are named and skipped, not hidden (#543).
+if ($SkipSiteRecovery) {
+    foreach ($skipped in @("'$asrVm' has a replication item in the vault", "Replication of '$asrVm' is Protected", "Replication health of '$asrVm' is Normal")) {
+        Write-Host "  [SKIP] $skipped (-SkipSiteRecovery, not counted)" -ForegroundColor Gray
+    }
+} elseif (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
     Write-Host "  [WARNING] VM '$asrVm' not found in '$vmRg' - skipping its replication checks (not counted as failures)." -ForegroundColor Yellow
 } else {
     Invoke-Test "'$asrVm' has a replication item in the vault" {
