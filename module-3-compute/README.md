@@ -1,4 +1,4 @@
-# Module 3: Deploy and Manage Azure Compute Resources (10 hours)
+# Module 3: Deploy and Manage Azure Compute Resources (11 hours)
 
 ## 📚 Module Overview
 
@@ -28,9 +28,9 @@ By completing this module, you will be able to:
 | 3.1 | 3 hours  | Automate Deployment Using Bicep (IaC)  | ~6-8%       |
 | 3.2 | 4 hours  | Create and Configure Virtual Machines  | ~8-10%      |
 | 3.3 | 2 hours  | Provision and Manage Containers        | ~3-4%       |
-| 3.4 | 1 hour   | Create and Configure Azure App Service | ~3-4%       |
+| 3.4 | 2 hours  | Create and Configure Azure App Service | ~3-4%       |
 
-**Total Module Time**: 10 hours
+**Total Module Time**: 11 hours
 
 ---
 
@@ -117,12 +117,12 @@ This module covers **20-25%** of the AZ-104 exam. Key exam topics include:
 
 ## ⏱️ Time Management
 
-- **Total module time**: 10 hours
-- **Recommended pace**: 2.5 hours per day for 4 days
+- **Total module time**: 11 hours
+- **Recommended pace**: 3 hours per day for 4 days
 - **Lab 3.1**: 3 hours (Bicep fundamentals and template creation)
 - **Lab 3.2**: 4 hours (most complex — VM deployment and configuration)
 - **Lab 3.3**: 2 hours (containers — optional/advanced)
-- **Lab 3.4**: 1 hour (App Service deployment)
+- **Lab 3.4**: 2 hours (App Service deployment)
 
 ---
 
