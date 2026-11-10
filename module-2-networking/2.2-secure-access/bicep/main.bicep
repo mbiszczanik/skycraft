@@ -54,7 +54,7 @@ param parVnetNameProd string = 'prod-skycraft-swc-vnet'
 @maxLength(64)
 param parVnetNamePlatform string = 'platform-skycraft-swc-vnet'
 
-@description('Deploy Azure Bastion (Basic SKU, incurs ~$140/month cost)')
+@description('Deploy Azure Bastion (Basic SKU, incurs about EUR 125/month with its public IP)')
 param parDeployBastion bool = false
 
 // Whether each spoke exists (Lab 2.1 deployed it). Deploy-Bicep.ps1 looks the VNets up and passes

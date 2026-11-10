@@ -143,14 +143,14 @@ Write-Host "`nDeploying Lab 2.2 resources..." -ForegroundColor Cyan
 
 # Ask user about Bastion deployment. A what-if run answers the prompt for the caller:
 # it changes nothing, so blocking a preview on stdin would only break non-interactive
-# callers, and 'no' is the answer that keeps the ~$140/month meter off.
+# callers, and 'no' is the answer that keeps the ~EUR 125/month meter off.
 if ($WhatIf) {
     Write-Host "`n[OPTIONAL] Azure Bastion prompt skipped in what-if mode - previewing with Bastion off." -ForegroundColor Gray
     $shouldDeployBastion = $false
 }
 else {
     Write-Host "`n[OPTIONAL] Azure Bastion provides secure RDP/SSH access without public IPs." -ForegroundColor Yellow
-    Write-Host "Cost: ~$140/month | Deployment time: ~15 minutes" -ForegroundColor Gray
+    Write-Host "Cost: ~EUR 125/month | Deployment time: ~15 minutes" -ForegroundColor Gray
     $deployBastion = Read-Host "Do you want to deploy Azure Bastion? (y/N)"
 
     $shouldDeployBastion = ($deployBastion -eq 'y' -or $deployBastion -eq 'Y')
