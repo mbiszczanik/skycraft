@@ -65,12 +65,14 @@ If PSScriptAnalyzer, the Bicep CLI or Pester is missing, the affected check **fa
 ```text
 === Dry-run summary ===
 Check        Status   Items  Problems   Duration  Note
-Parse        PASS        77         0       3.0s
-Analyzer     PASS        77         0     202.4s  14 warning(s)
-Bicep        PASS        18         0     174.2s
-BicepParams  PASS        17         0     169.6s
-Pester       PASS        24         0      89.6s  1862 passed, 0 failed
+Parse        PASS       <n>         0       3.0s
+Analyzer     PASS       <n>         0     202.4s  <n> warning(s)
+Bicep        PASS       <n>         0     174.2s
+BicepParams  PASS       <n>         0     169.6s
+Pester       PASS       <n>         0      89.6s  <n> passed, 0 failed
 ```
+
+Item counts and durations are illustrative: they change with the tracked files and the machine.
 
 ---
 
