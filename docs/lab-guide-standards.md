@@ -121,21 +121,9 @@ Always use `<picture>` so the diagram follows the reader's theme. A bare
 GitHub serves these SVGs byte-for-byte, keeps the `<style>` block, and loads the
 embedded `@font-face`, so the render matches local output exactly.
 
-### 3.5 Mermaid (legacy, being phased out)
+### 3.5 Mermaid (retired)
 
-Lab guides not yet converted still carry a Mermaid block. Do not add new ones.
-When touching an existing Mermaid diagram, convert it rather than patching it —
-and check for missing containment edges, which are a known defect in several of
-the originals (subnets declared but never connected to their VNet).
-
-Colour scheme for the diagrams still on Mermaid:
-
-| Element       | Fill                                                               | Stroke    | Width |
-| ------------- | ------------------------------------------------------------------ | --------- | ----- |
-| Platform/Hub  | `#e1f5ff`                                                          | `#0078d4` | 3px   |
-| Development   | `#fff4e1`                                                          | `#f39c12` | 2px   |
-| Production    | `#ffe1e1`                                                          | `#e74c3c` | 2px   |
-| Key resources | Accent colors: green `#4CAF50`, purple `#9C27B0`, orange `#FF9800` | —         | —     |
+No lab guide carries a Mermaid block: ADR-0004 replaced all of them with Excalidraw SVGs, and `tests/Module-Readme-L004.Tests.ps1` fails a module README that has one. Do not add new ones.
 
 ---
 

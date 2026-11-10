@@ -86,7 +86,7 @@ lab; this section is the architect's view in one place.
 
 - **Lab:** Every resource carries `Project`, `Environment`
   (`Platform` / `Development` / `Production`), `CostCenter`
-  (`MSDN` / `Student-Funded`), `Owner`. Defined in
+  (`MSDN`), `Owner` (the maintainer handle, parameter `parOwner`). Defined in
   [SPECIFICATION.md](SPECIFICATION.md) and [docs/bicep-standards.md](docs/bicep-standards.md).
 - **Production gap:** Tags are *applied* in Bicep but only a subset
   (`Project`, `Environment`) is *enforced* by Azure Policy in Lab 1.3.
@@ -115,8 +115,10 @@ lab; this section is the architect's view in one place.
   - **Platform / Hub:** shared services, GRS storage, optional Bastion.
   - **Development:** LRS storage, public-blob containers permitted for demos,
     no locks, no enforced policies.
-  - **Production:** GRS storage, fully-private blob containers, `CanNotDelete`
-    locks (Lab 1.3), lifecycle policies (Lab 4.2), backups (Lab 5.2).
+  - **Production:** GRS storage, fully-private blob containers, optional
+    `CanNotDelete` locks (Lab 1.3: applied only with `-ApplyLocks` or
+    `parApplyLocks`, removed again in Step 1.3.14), lifecycle policies
+    (Lab 4.2), backups (Lab 5.2).
 - **Production gap:** No staging / pre-prod between Dev and Prod; no separate
   subscription per environment (a real enterprise pattern); no test data
   isolation.
@@ -150,7 +152,7 @@ lab; this section is the architect's view in one place.
 
 - **Lab:** NSG per subnet (not flat), ASGs defined per workload tier
   (Auth / World / DB), Bastion **optional** (`parDeployBastion=false` default
-  to save ~€140/mo). Game ports (3724, 8085) and DB port (3306) restricted to
+  to save ~€125/mo). Game ports (3724, 8085) and DB port (3306) restricted to
   caller subnets.
 - **Production gap:** No Azure Firewall, no egress restrictions (only ingress
   is constrained), NSG flow logs not enabled until Lab 5.3, no Defender for
@@ -160,8 +162,9 @@ lab; this section is the architect's view in one place.
 
 ### 10. Encryption — optional and lab-friendly
 
-- **Lab:** Lab 3.2 encrypts one VM, the Auth VM, with Azure Disk Encryption
-  on every path; the World VM stays unencrypted so Lab 5.2 can restore files
+- **Lab:** Lab 3.2 can encrypt one VM, the Auth VM, with Azure Disk Encryption
+  (optional, about 2 hours of encryption time; `-SkipEncryption` skips it, #537);
+  the World VM stays unencrypted so Lab 5.2 can restore files
   from it and replicate it (#368). `EncryptionAtHost` and `None` remain
   template options. Storage infrastructure encryption is a creation-only flag,
   default off. Customer-managed keys never used.

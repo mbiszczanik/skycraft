@@ -6,7 +6,7 @@ SkyCraft is an **Azure project** that combines real-world infrastructure deploym
 
 ## 🎯 Project Overview
 
-Transform abstract cloud concepts into **tangible hands-on experience** by building production-ready infrastructure for a multi-tier game server platform. Over **40 hours**, you'll master every Azure 104 exam domain while managing real infrastructure.
+Transform abstract cloud concepts into **tangible hands-on experience** by building production-ready infrastructure for a multi-tier game server platform. Over **42 hours**, you'll master every Azure 104 exam domain while managing real infrastructure.
 
 ### What You'll Build
 
@@ -25,16 +25,17 @@ Transform abstract cloud concepts into **tangible hands-on experience** by build
 
 ---
 
-## 📚 Course Structure (40 Hours)
+## 📚 Course Structure (42 Hours)
 
 | Module       | Topic                                     | Hours | Exam Weight |
 | ------------ | ----------------------------------------- | ----- | ----------- |
 | **1**        | Manage Azure Identities and Governance    | 9     | 20-25%      |
-| **2**        | Implement and Manage Virtual Networking   | 7     | 15-20%      |
-| **3**        | Deploy and Manage Azure Compute Resources | 10    | 20-25%      |
-| **4**        | Implement and Manage Storage              | 7     | 15-20%      |
-| **5**        | Monitor and Maintain Azure Resources      | 5     | 10-15%      |
-| **Capstone** | Full AzerothCore Deployment + Exam Prep   | 2     | All domains |
+| **2**        | Implement and Manage Virtual Networking   | 8     | 15-20%      |
+| **3**        | Deploy and Manage Azure Compute Resources | 11    | 20-25%      |
+| **4**        | Implement and Manage Storage              | 8     | 15-20%      |
+| **5**        | Monitor and Maintain Azure Resources      | 6     | 10-15%      |
+
+Exam preparation is integrated throughout the modules; there is no separate capstone lab.
 
 ---
 

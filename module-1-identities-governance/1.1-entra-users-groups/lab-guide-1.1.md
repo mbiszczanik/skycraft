@@ -263,6 +263,8 @@ The blade only lists licenses: assignments are added and removed in the Microsof
 
 **Expected Result**: All users can now reset their own passwords using SSPR.
 
+> **Microsoft Entra ID Free**: the switch has three positions (None, Selected, All), but **Save** stays unavailable, because users resetting their own passwords needs a paid license such as Microsoft Entra ID P1 (checked on a Free tenant on 2026-11-10). On a Free tenant, read the setting, note why Save is unavailable and continue with Step 1.1.13: this step does not block any later step.
+
 ![Configure SSPR](./images/Step-1.1.12.png)
 
 ---

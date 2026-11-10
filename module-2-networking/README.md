@@ -1,4 +1,4 @@
-# Module 2: Implement and Manage Virtual Networking (7 hours)
+# Module 2: Implement and Manage Virtual Networking (8 hours)
 
 ## 📚 Module Overview
 
@@ -28,9 +28,9 @@ By completing this module, you will be able to:
 | --- | --------- | -------------------------------------------- | ----------- |
 | 2.1 | 3 hours   | Configure and Manage Virtual Networks        | ~6-8%       |
 | 2.2 | 2.5 hours | Configure Secure Access to Virtual Networks  | ~5-7%       |
-| 2.3 | 1.5 hours | Configure Name Resolution and Load Balancing | ~4-6%       |
+| 2.3 | 2.5 hours | Configure Name Resolution and Load Balancing | ~4-6%       |
 
-**Total Module Time**: 7 hours
+**Total Module Time**: 8 hours
 
 ---
 
@@ -110,11 +110,11 @@ This module covers **15-20%** of the AZ-104 exam. Key exam topics include:
 
 ## ⏱️ Time Management
 
-- **Total module time**: 7 hours
-- **Recommended pace**: 2.5 hours per day for 3 days
+- **Total module time**: 8 hours
+- **Recommended pace**: 3 hours per day for 3 days
 - **Lab 2.1**: 3 hours (most complex - hub-spoke setup)
 - **Lab 2.2**: 2.5 hours (security implementation)
-- **Lab 2.3**: 1.5 hours (DNS and load balancing)
+- **Lab 2.3**: 2.5 hours (DNS and load balancing)
 
 ---
 

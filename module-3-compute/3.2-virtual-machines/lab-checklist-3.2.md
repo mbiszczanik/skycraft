@@ -151,7 +151,7 @@
 
 ### VMSS Configuration
 
-- [ ] Resource group: `dev-skycraft-swc-rg` (prod carries Lab 1.3's delete lock)
+- [ ] Resource group: `dev-skycraft-swc-rg` (prod carries Lab 1.3's delete lock only if you applied the optional locks and did not remove them in Step 1.3.14)
 - [ ] VMSS name: `dev-skycraft-swc-world-vmss`
 - [ ] Orchestration mode: Uniform; security type: Standard
 - [ ] Image: Ubuntu Server 24.04 LTS - x64 Gen2 (the wizard's default)

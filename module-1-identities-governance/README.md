@@ -149,7 +149,7 @@ This module covers **20-25%** of the AZ-104 exam. Key exam topics include:
 - **Recommended pace**: 3 hours per day for 3 days (or 1.5 hours × 6 days)
 - **Lab 1.1**: 3 hours (most time-intensive)
 - **Lab 1.2**: 2 hours (moderate complexity)
-- **Lab 1.3**: 3 hours (combines multiple concepts)
+- **Lab 1.3**: 4 hours (combines multiple concepts)
 - **Assessment**: 1 hour
 
 ---

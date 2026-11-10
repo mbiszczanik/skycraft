@@ -11,7 +11,7 @@
 - Manage licenses in Microsoft Entra ID (assign appropriate Azure licenses)
 - Manage external users (add guest contributors for collaborative deployment)
 - Configure self-service password reset (SSPR) for the team
-  **Practical Task**: Create an organizational structure with 3 groups: SkyCraft-Admins, SkyCraft-Developers, SkyCraft-Viewers
+  **Practical Task**: Create an organizational structure with 3 groups: SkyCraft-Admins, SkyCraft-Developers, SkyCraft-Testers
 
 ---
 
@@ -42,7 +42,7 @@
 
 ---
 
-## **Module 2: Implement and Manage Virtual Networking (7 hours)**
+## **Module 2: Implement and Manage Virtual Networking (8 hours)**
 
 **Exam Weight**: 15-20%[](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104)​
 
@@ -61,7 +61,7 @@
 
 ## **Section 2.2: Configure Secure Access to Virtual Networks (2.5 hours)**
 
-**Hours 13-14**: Network Security
+**Hours 13-15**: Network Security
 
 - Create and configure network security groups (NSGs) and application security groups
 - Evaluate effective security rules in NSGs (troubleshoot access issues)
@@ -72,9 +72,9 @@
 
 ---
 
-## **Section 2.3: Configure Name Resolution and Load Balancing (1.5 hours)**
+## **Section 2.3: Configure Name Resolution and Load Balancing (2.5 hours)**
 
-**Hours 15-16**: DNS and Load Distribution
+**Hours 15-17**: DNS and Load Distribution
 
 - Configure Azure DNS (create DNS zone for yourgameserver.com)
 - Configure an internal or public load balancer (distribute player connections across multiple Worldservers)
@@ -84,13 +84,13 @@
 
 ---
 
-## **Module 3: Deploy and Manage Azure Compute Resources (10 hours)**
+## **Module 3: Deploy and Manage Azure Compute Resources (11 hours)**
 
 **Exam Weight**: 20-25%[](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104)​
 
 ## **Section 3.1: Automate Deployment Using ARM/Bicep (3 hours)**
 
-**Hours 17-19**: Infrastructure as Code
+**Hours 18-20**: Infrastructure as Code
 
 - Interpret an Azure Resource Manager template or a Bicep file
 - Modify an existing Azure Resource Manager template (customize for SkyCraft)
@@ -104,10 +104,10 @@
 
 ## **Section 3.2: Create and Configure Virtual Machines (4 hours)**
 
-**Hours 20-23**: VM Infrastructure for SkyCraft Servers
+**Hours 21-24**: VM Infrastructure for SkyCraft Servers
 
 - Create a virtual machine (Ubuntu Linux for Authserver and Worldserver)
-- Configure Azure Disk Encryption (encrypt the Authserver VM; the Worldserver stays unencrypted for Lab 5.2) and compare it with encryption at host
+- Configure Azure Disk Encryption (optional, about 2 hours; encrypt the Authserver VM; the Worldserver stays unencrypted for Lab 5.2) and compare it with encryption at host
 - Move a virtual machine to another resource group, subscription, or region
 - Manage virtual machine sizes (resize VMs based on player load)
 - Manage virtual machine disks (add data disks for database storage)
@@ -120,7 +120,7 @@
 
 ## **Section 3.3: Provision and Manage Containers (2 hours)**
 
-**Hours 24-25**: Containerization Options
+**Hours 25-26**: Containerization Options
 
 - Create and manage an Azure container registry (store custom SkyCraft container images)
 - Provision a container by using Azure Container Instances (deploy isolated game services)
@@ -130,9 +130,9 @@
 
 ---
 
-## **Section 3.4: Create and Configure Azure App Service (1 hour)**
+## **Section 3.4: Create and Configure Azure App Service (2 hours)**
 
-**Hour 26**: App Service for Web Management Tools
+**Hours 27-28**: App Service for Web Management Tools
 
 - Provision an App Service plan
 - Configure scaling for an App Service plan
@@ -154,7 +154,7 @@
 
 ## **Section 4.1: Configure and Manage Storage Accounts (2 hours)**
 
-**Hours 27-28**: Storage Account Foundation for SkyCraft
+**Hours 29-30**: Storage Account Foundation for SkyCraft
 
 - Create and configure storage accounts (Standard GPv2 across 3 environments)
 - Configure Azure Storage redundancy (LRS for dev, GRS for production)
@@ -168,7 +168,7 @@
 
 ## **Section 4.2: Configure Azure Blob Storage (2 hours)**
 
-**Hours 29-30**: Blob Storage for Game Assets
+**Hours 31-32**: Blob Storage for Game Assets
 
 - Create and configure containers with access levels (Private, Blob, Container)
 - Configure storage tiers (Hot, Cool, Archive for different data types)
@@ -182,7 +182,7 @@
 
 ## **Section 4.3: Configure Azure Files (1.5 hours)**
 
-**Hours 31-32**: Shared File Storage for Game Servers
+**Hours 33-34**: Shared File Storage for Game Servers
 
 - Create and configure file shares in Azure Storage (shared configs for SkyCraft servers)
 - Configure quotas and access tiers for file shares
@@ -196,7 +196,7 @@
 
 ## **Section 4.4: Implement Storage Security (2.5 hours)**
 
-**Hours 33-34**: Defense-in-Depth for Storage
+**Hours 34-36**: Defense-in-Depth for Storage
 
 - Configure Azure Storage firewalls and virtual networks (restrict access to VNet only)
 - Configure Service Endpoints for storage on VNet subnets
@@ -210,13 +210,13 @@
 
 ---
 
-## **Module 5: Monitor and Maintain Azure Resources (5 hours)**
+## **Module 5: Monitor and Maintain Azure Resources (6 hours)**
 
 **Exam Weight**: 10-15%[](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104)​
 
-## **Section 5.1: Monitor Resources in Azure (2.5 hours)**
+## **Section 5.1: Monitor Resources in Azure (2 hours)**
 
-**Hours 35-37**: Comprehensive Monitoring
+**Hours 37-38**: Comprehensive Monitoring
 
 - Interpret metrics in Azure Monitor (CPU, memory, network for game servers)
 - Configure log settings in Azure Monitor (collect VM logs, application logs)
@@ -231,7 +231,7 @@
 
 ## **Section 5.2: Implement Backup and Recovery (2.5 hours)**
 
-**Hours 38-40**: Business Continuity
+**Hours 39-41**: Business Continuity
 
 - Create a Recovery Services vault
 - Create an Azure Backup vault
@@ -243,13 +243,27 @@
 
 **Practical Task**: Configure automated backups for SkyCraft VMs and Azure SQL Database, perform test restore, configure Site Recovery for production failover
 
+---
+
+## **Section 5.3: Network Monitoring and Troubleshooting (1.5 hours)**
+
+**Hours 41-42**: Network Watcher
+
+- Enable and configure Azure Network Watcher
+- Use IP Flow Verify to identify NSG blocks and Next Hop to troubleshoot routing
+- Run Connection Troubleshooter and generate a network topology diagram
+- Enable a VNet flow log with Traffic Analytics on the production VNet
+- Create a Connection Monitor that probes the hub-to-spoke SSH path continuously
+
+**Practical Task**: Diagnose a blocked port 8080 to the development VM, then keep a flow log and a Connection Monitor running
+
 **Milestone**: Production-ready monitoring and disaster recovery capabilities
 
 ---
 
 ## **Capstone Project & Exam Preparation (Integrated throughout)**
 
-**Final Assessment** (embedded in Hour 40): Deploy complete SkyCraft infrastructure from scratch using learned skills in sequence:
+**Final Assessment** (embedded in Hour 42): Deploy complete SkyCraft infrastructure from scratch using learned skills in sequence:
 
 - Establish governance framework (policies, RBAC, tags)
 - Deploy network infrastructure (VNets, NSGs, load balancer)

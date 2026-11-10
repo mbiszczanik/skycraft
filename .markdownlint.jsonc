@@ -5,7 +5,7 @@
   // the markdownlint CI job is green on day one. Tighten rules incrementally in
   // follow-up PRs as the docs are cleaned up.
   // Verified green: markdownlint-cli2 v0.22.1 / markdownlint v0.40.0 over all
-  // 76 tracked *.md files -> 0 errors.
+  // tracked *.md files -> 0 errors.
   "default": true,
 
   // --- Explicitly required relaxations -------------------------------------

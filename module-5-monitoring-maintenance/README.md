@@ -1,4 +1,4 @@
-# Module 5: Monitor and Maintain Azure Resources (5 hours)
+# Module 5: Monitor and Maintain Azure Resources (6 hours)
 
 ## 📚 Module Overview
 
@@ -24,13 +24,13 @@ By completing this module, you will be able to:
 
 ## 📋 Module Sections
 
-| Lab     | Duration | Topic                                  | Exam Weight |
-| ------- | -------- | -------------------------------------- | ----------- |
-| **5.1** | 2 hours  | Azure Monitor & Insights               | ~5-6%       |
-| **5.2** | 2 hours  | Business Continuity & Backup           | ~3-5%       |
-| **5.3** | 1 hour   | Network Monitoring & Troubleshooting   | ~2-3%       |
+| Lab     | Duration  | Topic                                  | Exam Weight |
+| ------- | --------- | -------------------------------------- | ----------- |
+| **5.1** | 2 hours   | Azure Monitor & Insights               | ~5-6%       |
+| **5.2** | 2.5 hours | Business Continuity & Backup           | ~3-5%       |
+| **5.3** | 1.5 hours | Network Monitoring & Troubleshooting   | ~2-3%       |
 
-**Total Module Time**: 5 hours
+**Total Module Time**: 6 hours
 
 ---
 
@@ -137,13 +137,13 @@ This module covers **10-15%** of the AZ-104 exam. Key topics include:
 
 ## ⏱️ Time Management
 
-- **Total module time**: 5 hours
+- **Total module time**: 6 hours
 - **Recommended pace**: one lab per session; total of three sessions
 - **Lab 5.1** — 2 hours (Log Analytics, diagnostic settings, KQL, first alert)
-- **Lab 5.2** — 2 hours (Recovery Services Vault + Backup Vault, policies, restore drill)
-- **Lab 5.3** — 1 hour (Network Watcher: Flow Logs + Connection Monitor)
+- **Lab 5.2** - 2.5 hours (Recovery Services Vault + Backup Vault, policies, restore drill)
+- **Lab 5.3** - 1.5 hours (Network Watcher: Flow Logs + Connection Monitor)
 
-> **Pacing tip**: budget an extra 30 minutes in Lab 5.2 the first time through — backup jobs take several minutes to complete and you'll want to watch the first one end-to-end.
+> **Pacing tip**: budget the full 2.5 hours for Lab 5.2 the first time through: backup jobs take several minutes to complete and you'll want to watch the first one end-to-end.
 
 ---
 
