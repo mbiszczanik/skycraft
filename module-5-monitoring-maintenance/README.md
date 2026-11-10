@@ -140,10 +140,10 @@ This module covers **10-15%** of the AZ-104 exam. Key topics include:
 - **Total module time**: 6 hours
 - **Recommended pace**: one lab per session; total of three sessions
 - **Lab 5.1** — 2 hours (Log Analytics, diagnostic settings, KQL, first alert)
-- **Lab 5.2** — 2.5 hours (Recovery Services Vault + Backup Vault, policies, restore drill)
-- **Lab 5.3** — 1.5 hours (Network Watcher: Flow Logs + Connection Monitor)
+- **Lab 5.2** - 2.5 hours (Recovery Services Vault + Backup Vault, policies, restore drill)
+- **Lab 5.3** - 1.5 hours (Network Watcher: Flow Logs + Connection Monitor)
 
-> **Pacing tip**: budget the full 2.5 hours for Lab 5.2 the first time through — backup jobs take several minutes to complete and you'll want to watch the first one end-to-end.
+> **Pacing tip**: budget the full 2.5 hours for Lab 5.2 the first time through: backup jobs take several minutes to complete and you'll want to watch the first one end-to-end.
 
 ---
 
