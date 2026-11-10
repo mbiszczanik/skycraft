@@ -562,6 +562,10 @@ function Write-LabCycleReport {
         reported success, and this says the subscription agrees. A teardown where the first is
         clean and the second is not is the exact failure worth a section of its own.
 
+    .PARAMETER NotRun
+        Checks the cycle does not perform by design (manifest NotRun entries: Name, Reason),
+        listed so a green run is not read as covering them.
+
     .PARAMETER LeftBehind
         Documented residue.
 
@@ -592,6 +596,7 @@ function Write-LabCycleReport {
         [Parameter()][AllowEmptyCollection()]$Teardowns = @(),
         [Parameter()][AllowEmptyCollection()]$Assertions = @(),
         [Parameter()][AllowEmptyCollection()]$LeftBehind = @(),
+        [Parameter()][AllowEmptyCollection()]$NotRun = @(),
         [Parameter()]$Coverage,
         [Parameter()][AllowEmptyCollection()]$LivePhases = @(),
         [Parameter()][string]$LogDirectory,
@@ -724,6 +729,19 @@ function Write-LabCycleReport {
     else {
         foreach ($phase in $excluded) {
             $lines.Add("- **$($phase.Id)** ($($phase.Lab)) - $($phase.Cause)")
+        }
+    }
+    $lines.Add('')
+
+    # A green cycle does not cover these, and the report says so (#543).
+    $lines.Add('## Not run')
+    $lines.Add('')
+    if (@($NotRun).Count -eq 0) { $lines.Add('None.') }
+    else {
+        $lines.Add('Checks this run did not perform. A green result does not cover them.')
+        $lines.Add('')
+        foreach ($item in $NotRun) {
+            $lines.Add("- $($item.Name) - $($item.Reason)")
         }
     }
     $lines.Add('')

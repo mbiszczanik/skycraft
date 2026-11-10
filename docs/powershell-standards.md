@@ -303,8 +303,10 @@ Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
 Repo-wide conventions are enforced by **Pester 5** tests in [`tests/`](../tests/) (API version policy, CBH coverage, README casing, etc.). Run them — together with the lab-local suites described below — before pushing:
 
 ```powershell
-Invoke-Pester -Path (@('.\tests') + (Get-ChildItem -Directory -Filter 'module-*' | Get-ChildItem -Recurse -File -Filter '*.Tests.ps1').FullName)
+Invoke-Pester -CI -Path (@('.\tests') + (Get-ChildItem -Directory -Filter 'module-*' | Get-ChildItem -Recurse -File -Filter '*.Tests.ps1').FullName)
 ```
+
+Take the outcome from the process exit code, never from the console output, and run Pester with `-CI` (without it `Invoke-Pester` exits 0 on failed tests); CI decides the outcome explicitly, see the exit handling in [`lint.yml`](../.github/workflows/lint.yml).
 
 (Module directories first, then recurse — `Get-ChildItem -Path 'module-*' -Recurse -File -Filter '*.Tests.ps1'` silently returns nothing on pwsh 7.6.)
 
