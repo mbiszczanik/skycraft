@@ -8,18 +8,18 @@
 
 ### Vault Configuration
 
-- [x] Vault name: `platform-skycraft-swc-rsv`
-- [x] Location: **Sweden Central**
-- [x] Resource group: `platform-skycraft-swc-rg`
-- [x] Storage replication type: **Locally-redundant (LRS)**, set at creation on the **Redundancy** tab
-- [x] Soft delete: **AlwaysON** (platform-enforced by Azure Backup "secure by default"; only the retention, 14 days, is chosen at creation)
+- [ ] Vault name: `platform-skycraft-swc-rsv`
+- [ ] Location: **Sweden Central**
+- [ ] Resource group: `platform-skycraft-swc-rg`
+- [ ] Storage replication type: **Locally-redundant (LRS)**, set at creation on the **Redundancy** tab
+- [ ] Soft delete: **AlwaysON** (platform-enforced by Azure Backup "secure by default"; only the retention, 14 days, is chosen at creation)
 
 ### Tags
 
-- [x] Tag: `Project` = `SkyCraft`
-- [x] Tag: `Environment` = `Platform`
-- [x] Tag: `CostCenter` = `MSDN`
-- [x] Tag: `Owner` = `mbiszczanik`
+- [ ] Tag: `Project` = `SkyCraft`
+- [ ] Tag: `Environment` = `Platform`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -27,27 +27,27 @@
 
 ### VM Backup Policy
 
-- [x] Policy name: `SkyCraft-Daily-Prod`
-- [x] Policy sub-type: **Enhanced** (required for Trusted Launch VMs; cannot be changed later)
-- [x] Backup frequency: **Daily**
-- [x] Backup time: **02:00 AM UTC**
-- [x] Instant Restore retention: **2 days**
-- [x] Azure Backup Resource Group: name `platform-skycraft-swc-rpc`, suffix `-rg`
-- [x] Daily backup retention: **30 days** (the form's default is 180)
+- [ ] Policy name: `SkyCraft-Daily-Prod`
+- [ ] Policy sub-type: **Enhanced** (required for Trusted Launch VMs; cannot be changed later)
+- [ ] Backup frequency: **Daily**
+- [ ] Backup time: **02:00 AM UTC**
+- [ ] Instant Restore retention: **2 days**
+- [ ] Azure Backup Resource Group: name `platform-skycraft-swc-rpc`, suffix `-rg`
+- [ ] Daily backup retention: **30 days** (the form's default is 180)
 
 ### Instant-Restore Snapshot Resource Group
 
-- [x] Resource group `platform-skycraft-swc-rpc1-rg` in **Sweden Central**
-- [x] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` set
-- [x] No resource lock on the group (Azure Backup deletes expired snapshots from it)
-- [x] Restore point collections `AzureBackup_<vm>_<n>` in the group carry `Project` = `SkyCraft` (inherited through Lab 1.3's `Inherit-Project-Tag`)
+- [ ] Resource group `platform-skycraft-swc-rpc1-rg` in **Sweden Central**
+- [ ] Tags: `Project` = `SkyCraft`, `Environment` = `Platform`, `CostCenter` = `MSDN`, `Owner` set
+- [ ] No resource lock on the group (Azure Backup deletes expired snapshots from it)
+- [ ] Restore point collections `AzureBackup_<vm>_<n>` in the group carry `Project` = `SkyCraft` (inherited through Lab 1.3's `Inherit-Project-Tag`)
 
 ### Blob Backup Policy
 
-- [x] Policy name: `SkyCraft-Blob-Policy`, created by `New-LabBlobBackup.ps1` (not in the Portal)
-- [x] Operational backup only: one retention rule, **30 days** in the OperationalStore
-- [x] No vaulted backup rule (no Azure Backup charge)
-- [x] Associated vault: `platform-skycraft-swc-bv`
+- [ ] Policy name: `SkyCraft-Blob-Policy`, created by `New-LabBlobBackup.ps1` (not in the Portal)
+- [ ] Operational backup only: one retention rule, **30 days** in the OperationalStore
+- [ ] No vaulted backup rule (no Azure Backup charge)
+- [ ] Associated vault: `platform-skycraft-swc-bv`
 
 ---
 
@@ -55,15 +55,15 @@
 
 ### Key Vault Access for Encrypted VM Backup
 
-- [x] Only if the auth VM is ADE-encrypted (Lab 3.2's encryption is optional): Microsoft Entra app **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
-- [x] Granted before *Enable backup* of the ADE-encrypted `dev-skycraft-swc-auth-vm`
+- [ ] Only if the auth VM is ADE-encrypted (Lab 3.2's encryption is optional): Microsoft Entra app **Backup Management Service** holds **Key Vault Administrator** on `dev-skycraft-swc-kv`
+- [ ] Granted before *Enable backup* of the ADE-encrypted `dev-skycraft-swc-auth-vm`
 
 ### VM Backup
 
-- [x] VMs `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` listed under **Backup items** → Azure Virtual Machine
-- [x] Policy assigned to both: `SkyCraft-Daily-Prod`
-- [x] Initial backup of each: **Take Snapshot** sub-task **Completed**; job **Completed** or **In progress**, never **Failed** (a failure here is Troubleshooting, Issues 2 and 4 in the lab guide)
-- [x] Last backup status: **Success** (once completed)
+- [ ] VMs `dev-skycraft-swc-auth-vm` and `dev-skycraft-swc-world-vm` listed under **Backup items** → Azure Virtual Machine
+- [ ] Policy assigned to both: `SkyCraft-Daily-Prod`
+- [ ] Initial backup of each: **Take Snapshot** sub-task **Completed**; job **Completed** or **In progress**, never **Failed** (a failure here is Troubleshooting, Issues 2 and 4 in the lab guide)
+- [ ] Last backup status: **Success** (once completed)
 
 ---
 
@@ -71,19 +71,19 @@
 
 ### Vault Configuration
 
-- [x] Vault name: `platform-skycraft-swc-bv`
-- [x] Location: **Sweden Central**
-- [x] Resource group: `platform-skycraft-swc-rg`
-- [x] Storage redundancy: **Locally-redundant (LRS)**
-- [x] Identity type: **System Assigned**
-- [x] Soft delete: **Off** (lab-friction override for cleanup), so created with the ARM request of Step 5.2.4 or the Bicep: the Portal creates it AlwaysOn, which cannot be undone, and `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused
+- [ ] Vault name: `platform-skycraft-swc-bv`
+- [ ] Location: **Sweden Central**
+- [ ] Resource group: `platform-skycraft-swc-rg`
+- [ ] Storage redundancy: **Locally-redundant (LRS)**
+- [ ] Identity type: **System Assigned**
+- [ ] Soft delete: **Off** (lab-friction override for cleanup), so created with the ARM request of Step 5.2.4 or the Bicep: the Portal creates it AlwaysOn, which cannot be undone, and `New-AzDataProtectionBackupVault -SoftDeleteState Off` is refused
 
 ### Tags
 
-- [x] Tag: `Project` = `SkyCraft`
-- [x] Tag: `Environment` = `Platform`
-- [x] Tag: `CostCenter` = `MSDN`
-- [x] Tag: `Owner` = `mbiszczanik`
+- [ ] Tag: `Project` = `SkyCraft`
+- [ ] Tag: `Environment` = `Platform`
+- [ ] Tag: `CostCenter` = `MSDN`
+- [ ] Tag: `Owner` = `mbiszczanik`
 
 ---
 
@@ -289,12 +289,12 @@ $items | Format-Table -AutoSize
 
 | Component                   | Name                        | Type          | Status |
 | :-------------------------- | :-------------------------- | :------------ | :----- |
-| **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [x]    |
-| **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [x]    |
-| **Protected VMs**           | `dev-skycraft-swc-auth-vm`, `dev-skycraft-swc-world-vm` | VM Backup | [x] |
-| **Key Vault role**          | Backup Management Service on `dev-skycraft-swc-kv` | Key Vault Administrator | [x] |
-| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS, soft delete Off | [x] |
-| **Blob Policy**             | `SkyCraft-Blob-Policy`      | Operational, 30-day | [x] |
+| **Recovery Services Vault** | `platform-skycraft-swc-rsv` | LRS           | [ ]    |
+| **VM Backup Policy**        | `SkyCraft-Daily-Prod`       | Daily, 30-day | [ ]    |
+| **Protected VMs**           | `dev-skycraft-swc-auth-vm`, `dev-skycraft-swc-world-vm` | VM Backup | [ ] |
+| **Key Vault role**          | Backup Management Service on `dev-skycraft-swc-kv` | Key Vault Administrator | [ ] |
+| **Backup Vault**            | `platform-skycraft-swc-bv`  | LRS, soft delete Off | [ ] |
+| **Blob Policy**             | `SkyCraft-Blob-Policy`      | Operational, 30-day | [ ] |
 | **Alert processing rule**   | `skycraft-backup-critical-apr` | Sev0 → `skycraft-ops-ag` | [ ] |
 | **Site Recovery**           | `dev-skycraft-swc-world-vm` → North Europe, `platform-skycraft-neu-asr-rg` | Continuous    | [ ]    |
 | **Test Failover** (optional) | Completed + cleaned up, or skipped | Validated or skipped | [ ]    |
