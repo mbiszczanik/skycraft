@@ -1,8 +1,6 @@
 # SkyCraft Project Specification
 
-> **Version**: 1.0.0
-> **Last Updated**: 2026-01-11
-> **Status**: Approved
+> **Status**: Living document. It tracks the repository, not a release; the released version is in `version.txt` and `CHANGELOG.md`.
 
 This document defines the technical specification for the SkyCraft Azure learning project. It serves as the authoritative source for architectural decisions, identity frameworks, and infrastructure standards.
 
@@ -78,11 +76,17 @@ We use a scalable `/16` addressing scheme to prevent overlap.
 
 ### 4.2 Subnet Standards
 
-Standardized subnets across all spokes:
+Standardized subnets across both spokes (`10.1.x.0/24` in dev, `10.2.x.0/24` in prod), as deployed by `module-2-networking/2.1-virtual-networks/bicep/main.bicep`:
 
 - `AuthSubnet` (`10.x.1.0/24`): Authentication Servers
 - `WorldSubnet` (`10.x.2.0/24`): Game World Servers
 - `DatabaseSubnet` (`10.x.3.0/24`): Persistence Layer (SQL/Storage)
+- `AppServiceSubnet` (`10.x.4.0/24`): App Service
+
+The hub has two subnets of its own:
+
+- `AzureBastionSubnet` (`10.0.0.0/26`): Azure Bastion
+- `GatewaySubnet` (`10.0.1.0/27`): reserved for a future gateway
 
 ---
 
@@ -94,8 +98,8 @@ All resources must have the following tags:
 
 - `Project`: `SkyCraft`
 - `Environment`: `Platform`, `Development`, or `Production`
-- `CostCenter`: `MSDN` or `Student-Funded`
-- `Owner`: `malfurion.stormrage@...`
+- `CostCenter`: `MSDN`
+- `Owner`: the owner handle (Bicep parameter `parOwner`; default `mbiszczanik`)
 
 ### 5.2 Naming Convention
 
@@ -109,18 +113,29 @@ _Example_: `prod-skycraft-swc-vnet`
 ### Module 1: Identities & Governance
 
 - **Focus**: Setting up the "People" and "Rules".
-- **Key Deliverables**: Entra ID Users/Groups, RBAC Assignments, Policy Definitions, Resource Locks, Budgets.
+- **Key Deliverables**: Entra ID Users/Groups, RBAC Assignments, Policy Assignments, optional Resource Locks (applied only with `-ApplyLocks` or `parApplyLocks`, removed in Lab 1.3 Step 1.3.14), Budgets.
 
 ### Module 2: Networking
 
 - **Focus**: Building the "Roads".
-- **Key Deliverables**: VNet Peering, NSGs, ASGs, Azure Bastion, Public/Private DNS, Load Balancers.
+- **Key Deliverables**: VNet Peering, NSGs, ASGs, Azure Bastion (optional), Public/Private DNS, Load Balancers.
 
-### Module 3: Compute (Planned)
+### Module 3: Compute
 
 - **Focus**: Building the "Use Case".
 - **Key Deliverables**:
-  - Virtual Machines (Linux/Windows)
+  - Infrastructure as Code with Bicep
+  - Virtual Machines (Linux), with optional Azure Disk Encryption on the Authserver VM (`-SkipEncryption` skips it)
   - Virtual Machine Scale Sets (VMSS)
-  - App Services (Web Apps)
-  - Container Instances (ACI)
+  - Container Registry and Container Instances (ACI)
+  - App Service (Web Apps) with deployment slots
+
+### Module 4: Storage
+
+- **Focus**: Building the "Vault" for game data.
+- **Key Deliverables**: Storage accounts (GRS for Platform and Prod, LRS for Dev), Blob storage with versioning, soft delete and lifecycle rules, Azure Files shares and snapshots, storage security (SAS tokens, stored access policies, firewalls, encryption).
+
+### Module 5: Monitoring & Maintenance
+
+- **Focus**: Keeping the platform observable and recoverable.
+- **Key Deliverables**: Azure Monitor with a Log Analytics workspace, diagnostic settings, KQL queries and alerts; Recovery Services Vault and Backup Vault with backup, restore and cross-region failover drills; Network Watcher with a VNet flow log and Connection Monitor.
