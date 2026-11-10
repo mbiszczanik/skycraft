@@ -33,6 +33,8 @@ A full run takes roughly **10-12 minutes** on a typical dev box, dominated by PS
 
 Every selected check runs to completion even when an earlier one fails, so a single run reports every problem instead of only the first.
 
+When you run `Invoke-Pester` for the whole suite by hand, run it with `-CI` and take the outcome from the process exit code, not from the console output; CI does the same through the explicit exit handling in [`lint.yml`](../.github/workflows/lint.yml).
+
 ### 2.1 Prerequisites
 
 | Tool | Needed by | Install |
