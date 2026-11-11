@@ -164,7 +164,7 @@ The wizard starts **Resource Group** on `dev-skycraft-swc-rg`, the group of the 
    > [!WARNING]
    > **Cost**: a Syslog data source saved with no facility ticked is stored as all 25 facilities at all 8 levels (Debug and up), and the workspace bills every GB it ingests. Tick only the facilities you want, or accept that cost: a lab VM writes little, a busy one does not. Switching to the **Destination** tab and back can clear the ticked facilities (the levels stay): re-check them on the **Data source** tab before **Review + create**.
 
-6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`.
+6. **Tags**: `Project = SkyCraft`, `Environment = Platform`, `CostCenter = MSDN`, `Owner = <your name>`. In each row, click the **Value** field before you type: after **Tab** from **Name** the focus does not reach it, the text you type is not entered and the Policy banner (*All resources must be tagged with Project=SkyCraft*) stays.
 7. Click **Review + create** → **Create**.
 8. Open the VM and, under **Settings** (expand it if it is collapsed), click **Extensions + applications**. The wizard has installed `AzureMonitorLinuxAgent` itself: it is listed with **Provisioning succeeded** and the `Project` tag only. Run the block below only if the agent is missing, or to give it all four tags (the Portal offers no tags field for it). Running the block over an installed agent only sets its tags:
 
