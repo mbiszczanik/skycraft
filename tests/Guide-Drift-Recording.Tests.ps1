@@ -53,7 +53,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202, #206, #207, #317
+    Issue:   #189, #199, #200, #202, #206, #207, #317, #320
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -322,6 +322,62 @@ $RejectedRuleCases = @(
     @{ json = '{ "rejected": ["Illidan Stormrage", 1] }'; problem = "step 9.9.1 label 'Malfurion Stormrage': rejected entry 1 is not 'role ""name""'; step 9.9.1 label 'Malfurion Stormrage': rejected entry 2 is not 'role ""name""'" }
 ) | ForEach-Object { $_.actual = @(Get-RejectedProblem -StepId '9.9.1' -Label 'Malfurion Stormrage' -Entry ($_.json | ConvertFrom-Json) -Roles $LabelRoles) -join '; '; $_ }
 
+# Why a step's recorded viewUrl, startBlade or result.text may name a person (#320); nothing when it
+# may. The words of the lab's own guide are the lab's resource and fictional user names; the
+# runner refuses any display name it saw (run.py, Runner.holds_name), and this is the backstop for
+# what it could not see. A result's text may hold only words the guide holds (compared regardless
+# of case). A view or blade is read fully decoded, and a path segment that reads as prose (it has
+# a space and is no JSON value) may hold only such words too; a blade's own names ('UserBlade',
+# 'Microsoft_AAD_IAM') have no space. A problem names the entry by its position, never by its
+# text, so a failure prints no name into a CI log.
+function Get-NameProblem {
+    param([string]$StepId, [string]$Key, [object]$Text, [string[]]$GuideWords)
+    if ($Text -isnot [string] -or [string]::IsNullOrEmpty($Text)) { return }
+    $allowed = @{}
+    foreach ($word in $GuideWords) { $allowed[$word.ToLowerInvariant()] = $true }
+    if ($Key -eq 'result.text') {
+        $position = 0
+        foreach ($m in [regex]::Matches($Text, '[\p{L}\p{N}]+')) {
+            $position++
+            if (-not $allowed.ContainsKey($m.Value.ToLowerInvariant())) {
+                "step $StepId $Key word $position is not in the lab's guide: only the lab's own resource and fictional user names may be recorded"
+            }
+        }
+        return
+    }
+    $decoded = $Text
+    for ($round = 0; $round -lt 5; $round++) {
+        $next = [uri]::UnescapeDataString($decoded)
+        if ($next -ceq $decoded) { break }
+        $decoded = $next
+    }
+    $segment = 0
+    foreach ($part in ($decoded -split '/')) {
+        $segment++
+        if ($part -notmatch '\s' -or $part -match '^\s*[\{\["]') { continue }
+        $position = 0
+        foreach ($m in [regex]::Matches($part, '[\p{L}\p{N}]+')) {
+            $position++
+            if (-not $allowed.ContainsKey($m.Value.ToLowerInvariant())) {
+                "step $StepId $Key segment $segment word $position is not in the lab's guide: only the lab's own resource and fictional user names may be recorded"
+            }
+        }
+    }
+}
+
+# Example data only: the lab's fictional names, and made-up ones that are in no guide.
+$NameRuleWords = @('Group', 'Malfurion', 'Stormrage', 'SkyCraft', 'Admins', 'Users')
+$NameRuleCases = @(
+    @{ key = 'result.text'; text = 'Malfurion Stormrage'; problem = '' }
+    @{ key = 'result.text'; text = 'group skycraft-admins'; problem = '' }
+    @{ key = 'result.text'; text = 'Khadgar Archmage'; problem = "step 9.9.1 result.text word 1 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded; step 9.9.1 result.text word 2 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded" }
+    @{ key = 'result.text'; text = 'Users of Jaina Proudmoore'; problem = "step 9.9.1 result.text word 2 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded; step 9.9.1 result.text word 3 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded; step 9.9.1 result.text word 4 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded" }
+    @{ key = 'viewUrl'; text = 'https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups'; problem = '' }
+    @{ key = 'viewUrl'; text = 'https://portal.azure.com/#view/Group/name/SkyCraft%20Admins'; problem = '' }
+    @{ key = 'viewUrl'; text = 'https://portal.azure.com/#view/UserProfile/name/Khadgar%20Archmage'; problem = "step 9.9.1 viewUrl segment 7 word 1 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded; step 9.9.1 viewUrl segment 7 word 2 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded" }
+    @{ key = 'startBlade'; text = 'https://portal.azure.com/#UserProfile/name/Jaina%2520Proudmoore'; problem = "step 9.9.1 startBlade segment 6 word 1 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded; step 9.9.1 startBlade segment 6 word 2 is not in the lab's guide: only the lab's own resource and fictional user names may be recorded" }
+) | ForEach-Object { $_.actual = @(Get-NameProblem -StepId '9.9.1' -Key $_.key -Text $_.text -GuideWords $NameRuleWords) -join '; '; $_ }
+
 $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/recordings') -Filter 'lab-*.json' |
     ForEach-Object {
         $file      = $_
@@ -444,6 +500,25 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             }
         )
 
+        # The words of the lab's own guide: its resource and fictional user names (#320).
+        $guideWords = @()
+        if (Test-Path -LiteralPath $guidePath) {
+            $guideWords = @([regex]::Matches((Get-Content -Raw -Encoding utf8 -LiteralPath $guidePath), '[\p{L}\p{N}]+') |
+                    ForEach-Object { $_.Value } | Sort-Object -Unique)
+        }
+        $badNames = @(
+            foreach ($prop in $recording.steps.PSObject.Properties) {
+                $entry = $prop.Value
+                Get-NameProblem -StepId $prop.Name -Key 'viewUrl' -Text $entry.viewUrl -GuideWords $guideWords
+                $blade = $entry.PSObject.Properties['startBlade']
+                if ($blade) { Get-NameProblem -StepId $prop.Name -Key 'startBlade' -Text ('https://portal.azure.com/#' + $blade.Value) -GuideWords $guideWords }
+                $result = $entry.PSObject.Properties['result']
+                if ($result -and $result.Value -and $result.Value.PSObject.Properties['text']) {
+                    Get-NameProblem -StepId $prop.Name -Key 'result.text' -Text $result.Value.text -GuideWords $guideWords
+                }
+            }
+        )
+
         @{
             file        = $file.Name
             lab         = $recording.lab
@@ -459,6 +534,8 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
             badUrls     = $badUrls
             badBlades   = $badBlades
             badRejected = $badRejected
+            badNames    = $badNames
+            guideWordCount = $guideWords.Count
             raw         = $raw
         }
     }
@@ -570,6 +647,17 @@ Describe 'Guide drift recordings - nothing tenant-specific is literal (this repo
     }
 
     It "reports the decision <json> as '<problem>' (empty: its rejected candidates may be recorded)" -ForEach $RejectedRuleCases {
+        $actual | Should -Be $problem
+    }
+
+    It "'<file>' records in viewUrl, startBlade and result.text only the lab's own resource and fictional user names" -ForEach $RecordingCases {
+        # Read the guide's words before judging: an empty set would flag everything, or nothing.
+        $guideWordCount | Should -BeGreaterThan 0
+        # A problem names the entry by position only, so this failure prints no name.
+        $badNames | Should -BeNullOrEmpty -Because ($badNames -join '; ')
+    }
+
+    It "reports the <key> '<text>' as '<problem>' (empty: it may be recorded)" -ForEach $NameRuleCases {
         $actual | Should -Be $problem
     }
 }
