@@ -111,6 +111,18 @@ Describe 'Test-LabConsistency.ps1 - findings' {
         $run.Output | Should -Match 'no Prerequisites section'
     }
 
+    It 'fails when the validator looks up a resource name no guide step names' {
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Validator 'Get-AzResourceGroup -Name "dev-skycraft-swc-rg"')
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match "\[ValidatorResourceName\].*looks up 'dev-skycraft-swc-rg'"
+    }
+
+    It 'passes when the guide of the lab names the resource the validator looks up' {
+        $guide = $script:GoodGuide + "`nCreate the resource group dev-skycraft-swc-rg.`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide -Validator 'Get-AzResourceGroup -Name "dev-skycraft-swc-rg"')
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+    }
+
     It 'fails when the guide has no Leaves Behind section' {
         $guide = $script:GoodGuide -replace '(?s)## What This Lab Leaves Behind.*', ''
         $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
