@@ -44,6 +44,8 @@ By completing this lab, you will:
 - **Section 6**: Route Storage Diagnostics to the Workspace (10 min)
 - **Section 7**: Alert on a Missing Heartbeat (15 min)
 
+> **Platform wait**: after the agent install in Step 5.1.2, the first `Heartbeat` row takes 13 to 85 minutes to reach a new workspace (live timings of 2026-11-01 and 2026-11-02, `main` `c940f10`; Step 5.1.3 shows it). The wait is Azure's, not your work: plan for it apart from the section times. Start it by finishing Step 5.1.2 first, then do Steps 5.1.5 and 5.1.7 while it runs: neither needs agent data. Steps 5.1.3, 5.1.4 and 5.1.6 do.
+
 ---
 
 ## ✅ Prerequisites

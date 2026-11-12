@@ -48,6 +48,8 @@ By completing this lab, you will:
 - **Section 5**: Reports & Alerts (15 min)
 - **Section 6**: Recovery Simulation (15 min)
 
+> **Platform wait**: the Site Recovery replication of Step 5.2.6 runs on its own and took 45 to 70 minutes in live runs (a scripted deploy with Site Recovery took about 70 minutes in all; timings of 2026-11-01 and 2026-11-02, `main` `c940f10`). The wait is Azure's, not your work: plan for it apart from the section times. Start Step 5.2.6 right after the vault is ready and the prerequisites hold, then do Steps 5.2.8 and 5.2.9 while it replicates; Step 5.2.7 (test failover) needs it finished.
+
 ---
 
 ## ✅ Prerequisites
