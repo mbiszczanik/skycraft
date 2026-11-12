@@ -361,6 +361,20 @@ module modNetworkWatcher 'br/public:avm/res/network/network-watcher:0.5.1' = {
 
 ---
 
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 5.3.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Connection Monitor `skycraft-hub-spoke-cm` | `NetworkWatcherRG` | Keeps probing every five minutes while it exists. `Remove-LabResource.ps1` deletes it |
+| VNet flow log `prod-skycraft-swc-vnet-flowlog`, with its records in the platform storage account (price not listed here) | Network Watcher; `platformskycraftswcsa` (Lab 4.1) | Keeps writing records and feeding Traffic Analytics. The cleanup deletes the flow log and the platform account's lifecycle policy; the records already written stay in the account |
+| The `NWTA-*` data collection endpoint and rule that Azure creates when Traffic Analytics is enabled | `platform-skycraft-swc-rg` | Azure creates and manages them, not you. `Remove-LabResource.ps1` deletes them, but only after the flow-log listing succeeded |
+| The `AzureNetworkWatcherExtension` on the endpoint VMs | Lab 3.2's VMs | `Remove-LabResource.ps1` removes it from a running VM. On a stopped VM Azure refuses the change (`OperationNotAllowed`), so the script leaves it and prints `[SKIP]`; it goes when Lab 3.2's cleanup deletes the VM |
+| Lab 1.3's delete lock on the prod and platform groups | `prod-skycraft-swc-rg`, `platform-skycraft-swc-rg` | A manual delete of the flow log, the agent or the `NWTA-*` resources fails with `ScopeLocked`. The cleanup lifts the lock for its deletes and puts it back |
+
+---
+
 ## ✅ Lab Checklist
 
 - [ ] Network Watcher verified as active in Sweden Central

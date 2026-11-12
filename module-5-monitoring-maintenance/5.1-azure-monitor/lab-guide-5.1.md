@@ -500,6 +500,19 @@ The data collection rule, the action group and the tagged Azure Monitor Agent (`
 
 ---
 
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists Lab 5.2 and Lab 5.3 as depending on this lab: both need the workspace.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Log Analytics workspace `platform-skycraft-swc-law`. It bills for the data it ingests; no price is listed here | `platform-skycraft-swc-rg` | Lab 5.2 (backup reports) and Lab 5.3 (Traffic Analytics) send data to it. Deleting it first breaks them. A deleted workspace is soft-deleted and its name stays reserved for 14 days: recover or purge it before you build the lab again (Step 5.1.1, Troubleshooting Issue 6) |
+| The `AzureMonitorLinuxAgent` extension | `dev-skycraft-swc-auth-vm` | `Remove-LabResource.ps1` does not remove it, because other labs share the VM. It stays installed after the cleanup. Remove it with the command under Clean Up |
+| The private dashboard `SkyCraft-Ops` (Step 5.1.6) | Azure portal dashboards | Nothing. Delete it under **Dashboard** |
+| Lab 1.3's delete lock on the platform resource group | `platform-skycraft-swc-rg` | A manual delete of the alert rules, the data collection rule or the action group fails with `ScopeLocked`. `Remove-LabResource.ps1` lifts the lock for its deletes and puts it back with the same name and level |
+
+---
+
 ## 🧹 Clean Up
 
 Remove the lab's resources when you finish; the workspace bills for what it ingests.
