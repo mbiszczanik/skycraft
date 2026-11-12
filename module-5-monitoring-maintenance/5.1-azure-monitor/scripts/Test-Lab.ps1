@@ -130,6 +130,7 @@ $scheduledQueryApiVersion = '2023-12-01'
 
 $passCount = 0
 $failCount = 0
+$skipCount = 0
 
 # Whether a lookup's error says the object does not exist rather than that the lookup failed.
 # Same rule as Test-LabNotFoundError in this lab's Remove-LabResource.ps1.
@@ -203,6 +204,10 @@ function Invoke-Test {
             Write-Host " FAIL" -ForegroundColor Red
             $script:failCount++
         }
+    } catch [System.OperationCanceledException] {
+        # Skip-LabCheck: the check could not run, so it is neither a pass nor a failure (#530).
+        Write-Host " SKIPPED ($($_.Exception.Message))" -ForegroundColor Yellow
+        $script:skipCount++
     } catch {
         Write-Host " FAIL ($($_.Exception.Message))" -ForegroundColor Red
         $script:failCount++
@@ -561,8 +566,9 @@ Invoke-Test "Heartbeat from the rule's VMs in the last $heartbeatWindow minutes"
         catch {
             # Only a missing table is waited for; any other failure is a failure.
             if ($_.Exception.Message -match "\b(Forbidden|Unauthorized)\b") {
-                # A session started from an access token holds no Log Analytics token (#530).
-                throw "$($_.Exception.Message) (the session may lack a Log Analytics token: sign in with Connect-AzAccount, not -AccessToken)"
+                # A session started from an access token holds no Log Analytics token: the check
+                # cannot run, so it is SKIPPED with the reason and never counted as a pass (#530).
+                Skip-LabCheck -Reason "$($_.Exception.Message) (the session may lack a Log Analytics token: sign in with Connect-AzAccount, not -AccessToken)"
             }
             if ($_.Exception.Message -notmatch $tableMissingPattern -or $null -ne $rowDeadline) { throw }
             $tableError = $_.Exception.Message
@@ -845,6 +851,9 @@ if ($failCount -gt 0) {
     Write-Host "  Failed: $failCount" -ForegroundColor Red
 } else {
     Write-Host "  Failed: $failCount" -ForegroundColor Gray
+}
+if ($skipCount -gt 0) {
+    Write-Host "  Skipped: $skipCount (a skipped check proves nothing: see the SKIPPED lines above)" -ForegroundColor Yellow
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
