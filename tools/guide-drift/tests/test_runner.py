@@ -128,6 +128,100 @@ class RunnerTestCase(unittest.TestCase):
         return json.loads((self.tmp / "state.json").read_text(encoding="utf-8"))
 
 
+class NothingToSaveTests(RunnerTestCase):
+    """#209: an option that is already selected is 'already set', and a greyed-out commit button
+    after nothing but 'already set' items has nothing to save."""
+
+    STEP = {"id": "9.9.1", "title": "One", "portal": True, "expected": None, "images": [],
+            "items": [{"kind": "action", "labels": ["All"], "line": 3}, {"kind": "action", "labels": ["Save"], "line": 4}]}
+
+    def act(self, label: str, element, before=(), index: int = 0):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        for outcome, observed in before:
+            earlier = r.new_record(self.STEP, "action", "All")
+            earlier.update(outcome=outcome, observed=observed)
+            r.write(earlier)
+        clock = iter(range(0, 1_000_000, 1))
+        with mock.patch.object(run, "find_exact", return_value=element),                 mock.patch.object(run, "candidates_on_screen", return_value=[]),                 mock.patch.object(run.time, "monotonic", lambda: next(clock)):
+            return self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][index], label))
+
+    def test_an_option_that_is_already_selected_is_not_clicked(self) -> None:
+        for attribute in ("aria-pressed", "aria-checked", "aria-selected"):
+            with self.subTest(attribute=attribute):
+                element = FakeElement()
+                element.attributes[attribute] = "true"
+                record = self.act("All", element)
+                self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", "already set", 0))
+
+    def test_an_option_that_is_not_selected_is_clicked(self) -> None:
+        element = FakeElement()
+        element.attributes["aria-pressed"] = "false"
+        record = self.act("All", element)
+        self.assertEqual((record["outcome"], element.clicked), ("match", 1))
+
+    def test_a_disabled_commit_button_after_only_already_set_items_has_nothing_to_save(self) -> None:
+        element = FakeElement(disabled=True)
+        record = self.act("Save", element, before=[("match", "already set")], index=1)
+        self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", run.NOTHING_TO_SAVE, 0))
+
+    def test_a_disabled_commit_button_after_a_real_change_stays_unknown(self) -> None:
+        element = FakeElement(disabled=True)
+        record = self.act("Save", element, before=[("match", "already set"), ("match", "All")], index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Save'"))
+
+    def test_a_disabled_commit_button_with_no_earlier_item_stays_unknown(self) -> None:
+        record = self.act("Save", FakeElement(disabled=True), index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Save'"))
+
+    def test_a_disabled_button_that_commits_nothing_stays_unknown(self) -> None:
+        record = self.act("Next", FakeElement(disabled=True), before=[("match", "already set")], index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Next'"))
+
+
+class StaleScreenshotTests(RunnerTestCase):
+    """#318: a drift the guide is not at fault for does not make the step's images stale."""
+
+    STEP = {"id": "9.9.2", "title": "Two", "portal": True, "items": [], "expected": None,
+            "images": ["images/Step-9.9.2.png"]}
+
+    def screenshot_after(self, **drift) -> dict:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        if drift:
+            record = r.new_record(self.STEP, "label", "Create")
+            record.update(outcome="drift", severity="misleading", **drift)
+            r.write(record)
+        return r.screenshot(self.STEP)
+
+    def test_a_step_without_drift_is_not_stale(self) -> None:
+        self.assertEqual(self.screenshot_after()["outcome"], "match")
+
+    def test_a_drift_that_proposes_an_edit_makes_the_images_stale(self) -> None:
+        record = self.screenshot_after(notProposed=None, observed="Add")
+        self.assertEqual((record["outcome"], record["category"]), ("drift", "stale"))
+        self.assertEqual(record["observed"], "images/Step-9.9.2.png")
+
+    def test_a_drift_held_back_for_its_token_reason_still_makes_the_images_stale(self) -> None:
+        why = run.TOKEN_REASON.format(token="<tenant>")
+        self.assertEqual(self.screenshot_after(notProposed=why)["category"], "stale")
+
+    def test_a_drift_the_guide_is_not_at_fault_for_leaves_the_images_alone(self) -> None:
+        for why in (run.WORKAROUND_REASON,
+                    f"the Portal was not where the guide leads in this step ({run.WRONG_BLADE})",
+                    "the step started where the run, not the guide, left the Portal (a resume)",
+                    run.DECORATION_REASON.format(what="a suffix")):
+            with self.subTest(why=why):
+                record = self.screenshot_after(notProposed=why)
+                self.assertEqual((record["outcome"], record["category"]), ("match", None))
+
+    def test_one_ordinary_drift_among_excused_ones_makes_the_images_stale(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        for why in (run.WORKAROUND_REASON, None):
+            record = r.new_record(self.STEP, "label", "Create")
+            record.update(outcome="drift", severity="misleading", notProposed=why)
+            r.write(record)
+        self.assertEqual(r.screenshot(self.STEP)["category"], "stale")
+
+
 class RunBookkeepingTests(RunnerTestCase):
     def test_a_clean_run_completes_every_portal_step_and_finishes_the_state(self) -> None:
         r = self.runner()
@@ -342,6 +436,10 @@ class FakeElement:
         self.disabled_for = disabled_for      # for this many looks, as while a blade loads
         self.clicked = 0
         self.calls: list[str] = []
+        self.attributes: dict[str, str] = {}  # aria-pressed and the like, as the Portal shows them
+
+    def get_attribute(self, name, timeout=None):
+        return self.attributes.get(name)
 
     def scroll_into_view_if_needed(self, timeout=None) -> None:
         self.calls.append("scroll")

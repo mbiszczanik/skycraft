@@ -341,6 +341,15 @@ WORKAROUND_REASON = "used as a workaround, not as the guide's element"
 TOKEN_REASON = "the Portal's name holds tenant or personal data ({token})"
 # A name that is the guide's label plus a decoration the screen does not show (#244).
 DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})"
+
+
+def guide_at_fault(record: dict) -> bool:
+    """Whether a drift record says the guide differs from the Portal (#318): it proposes an edit, or
+    it is held back only for its token reason (the Portal's name holds tenant data, so the label
+    differs but cannot be written into the guide). A drift with any other 'notProposed' reason, a
+    workaround, a wrong blade, an excused start or a decoration, says nothing about the guide."""
+    why = record.get("notProposed")
+    return not why or why.startswith(TOKEN_REASON.split("{")[0])
 # Why a pick at the prompt is used as a workaround and not recorded (#315): replay looks the element
 # up by the name the recording keeps, and the recording cannot keep this one (Runner.recordable).
 UNRECORDABLE_NAME = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
@@ -1438,6 +1447,23 @@ def stays_disabled(page: Page, element: Locator) -> bool:
     return False
 
 
+# Buttons that commit a form or a blade; one that stays disabled after every value of its step was
+# already in place has nothing to save (#209).
+COMMIT_BUTTON = re.compile(r"^(save|create|apply|update|submit|ok|done|confirm|add|select)\b", re.IGNORECASE)
+NOTHING_TO_SAVE = "nothing to save"
+
+
+def option_selected(element: Locator) -> bool:
+    """Whether `element`, an option of a choice group (a toggle, a radio or a pivot button), shows
+    it is already selected: aria-pressed, aria-checked or aria-selected is 'true' (#209). Clicking
+    such an option changes nothing, so the runner records 'already set' instead."""
+    try:
+        return any(element.get_attribute(name, timeout=1000) == "true"
+                   for name in ("aria-pressed", "aria-checked", "aria-selected"))
+    except PlaywrightError:
+        return False
+
+
 def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
     """The element a decision chose, by role and name: a string matches exactly and case-
     sensitively, a pattern (Redactor.matcher) as written. Raises Ambiguous rather than guess."""
@@ -2442,7 +2468,14 @@ class Runner:
                               observed=f"the guide sets '{acted_on}' to {'checked' if state else 'unchecked'}, "
                                        "but it is no switch, check box or radio")
                 return record
+            elif kind != "field" and not toggle and option_selected(element):
+                note = "already set"      # an option of a choice group that is already selected (#209)
             elif stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
+                if self.nothing_to_save(step, acted_on):
+                    # Every value of the step was in place and its commit button is greyed out for
+                    # that reason: the step's outcome is already true (#209).
+                    record.update(outcome="match", observed=NOTHING_TO_SAVE)
+                    return record
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
             elif kind == "field":
@@ -2555,6 +2588,15 @@ class Runner:
         old = guide_lines[line - 1]
         new = old.replace(f"**{old_label}**", f"**{new_label}**")
         return None if new == old else {"line": line, "old": old, "new": new}
+
+    def nothing_to_save(self, step: dict, acted_on: str) -> bool:
+        """Whether a disabled commit button (COMMIT_BUTTON) has nothing to save (#209): the step has
+        earlier items, and every one of them matched as 'already set'. A disabled button after any
+        real change stays unknown."""
+        if not COMMIT_BUTTON.match(acted_on.strip()):
+            return False
+        earlier = [r for r in self.records if r["step"] == step["id"] and r["kind"] != "screenshot"]
+        return bool(earlier) and all(r["outcome"] == "match" and r["observed"] == "already set" for r in earlier)
 
     def not_proposed(self, step: dict, decision: Decision, label: str) -> str | None:
         """Why a misleading or cosmetic drift of the guide's `label` proposes no guide edit, for
@@ -2890,9 +2932,13 @@ class Runner:
         self.page.screenshot(path=str(path), full_page=False)
         record = self.new_record(step, "screenshot", None)
         # A missing resource is no drift of the guide, and a wrong blade is a navigation the guide
-        # leaves out, not a blade it shows: neither makes the guide's images stale.
+        # leaves out, not a blade it shows: neither makes the guide's images stale. Nor does a drift
+        # that proposes no guide edit because the guide is not at fault (#318): a workaround, a step
+        # that started on the wrong blade, an excused start, a decoration. A drift held back for its
+        # token reason stays: the Portal really differs from the guide there.
         drifted = any(r["step"] == step["id"] and r["outcome"] == "drift"
-                      and r.get("category") not in (MISSING_RESOURCE, WRONG_BLADE) for r in self.records)
+                      and r.get("category") not in (MISSING_RESOURCE, WRONG_BLADE)
+                      and guide_at_fault(r) for r in self.records)
         if step["images"] and drifted:
             record.update(outcome="drift", category="stale", observed=", ".join(step["images"]))
         else:
