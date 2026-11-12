@@ -204,3 +204,17 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  identifying-data:
+    name: Identifying Data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # GUIDs, e-mail addresses and Windows user paths outside the reviewed allowlist, #523.
+      # Fails on an empty scan and on a binary file it cannot read; the log shows masked values only.
+      - name: Check tracked files for identifying data
+        shell: pwsh
+        run: |
+          ./tools/Test-IdentifyingData.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
