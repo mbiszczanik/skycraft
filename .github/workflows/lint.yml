@@ -250,3 +250,22 @@ jobs:
             $Host.SetShouldExit($LASTEXITCODE)
             exit $LASTEXITCODE
           }
+
+  lab-consistency:
+    name: Lab Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Validators, guides and tools/lab-cycle-manifest.psd1 must agree, #363, #364, #362: no property
+      # compared with -eq/-ne $false, every manifest dependency named in the guide's Prerequisites,
+      # every guide with a Leaves Behind section. Findings need a reasoned allowlist entry; an empty
+      # scan and a stale entry fail.
+      - name: Check guides, validators and the lab-cycle manifest
+        shell: pwsh
+        run: |
+          ./tools/Test-LabConsistency.ps1
+          if ($LASTEXITCODE -ne 0) {
+            $Host.SetShouldExit($LASTEXITCODE)
+            exit $LASTEXITCODE
+          }
