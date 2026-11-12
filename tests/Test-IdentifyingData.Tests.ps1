@@ -127,7 +127,7 @@ Describe 'Test-IdentifyingData.ps1 - a check that did not run is not a pass' {
         $bad = Join-Path $script:Fixture 'noreason.psd1'
         Set-Content -LiteralPath $bad -Value @'
 @{
-    GuidValue = @( @{ Value = '3f2a9c10-7b4d-4e11-9a05-c8d2e6f01b37'; Reason = '' } )
+    GuidValue = @( @{ Value = '00000000-0000-0000-0000-000000000001'; Reason = '' } )
     GuidPattern = @()
     EmailValue = @()
     EmailDomain = @()

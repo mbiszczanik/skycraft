@@ -217,7 +217,10 @@ jobs:
         shell: pwsh
         run: |
           ./tools/Test-IdentifyingData.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) {
+            $Host.SetShouldExit($LASTEXITCODE)
+            exit $LASTEXITCODE
+          }
 
   bicep-security:
     name: Bicep Security (PSRule)
@@ -243,4 +246,7 @@ jobs:
         shell: pwsh
         run: |
           ./tools/Invoke-BicepSecurityCheck.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) {
+            $Host.SetShouldExit($LASTEXITCODE)
+            exit $LASTEXITCODE
+          }
