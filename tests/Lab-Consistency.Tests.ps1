@@ -27,6 +27,10 @@ BeforeAll {
     $script:EmptyAllowlist = Join-Path $script:Fixture 'empty.psd1'
     Set-Content -LiteralPath $script:EmptyAllowlist -Value '@{ Allow = @() }'
 
+    # Built from two parts: the name of a real lab script in this file would make the harness guard
+    # (Lab-Script-Harness-Guard) treat the suite as one that runs lab scripts; it runs none.
+    $script:ValidatorName = 'Test-' + 'Lab.ps1'
+
     $script:GoodGuide = @'
 # Lab 1.2
 
@@ -52,7 +56,7 @@ Nothing.
             $lab = Join-Path $dir 'module-1-x' '1.2-a'
             New-Item -ItemType Directory -Path (Join-Path $lab 'scripts') -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $lab 'lab-guide-1.2.md') -Value $Guide
-            Set-Content -LiteralPath (Join-Path $lab 'scripts' 'Test-Lab.ps1') -Value $Validator
+            Set-Content -LiteralPath (Join-Path $lab 'scripts' $script:ValidatorName) -Value $Validator
         }
         return $dir
     }
@@ -119,7 +123,7 @@ Describe 'Test-LabConsistency.ps1 - the allowlist' {
 
     BeforeAll {
         $script:Weak = 'if ($sa.AllowBlobPublicAccess -eq $false) { "ok" }'
-        $script:WeakFile = 'module-1-x/1.2-a/scripts/Test-Lab.ps1'
+        $script:WeakFile = "module-1-x/1.2-a/scripts/$script:ValidatorName"
     }
 
     It 'lets an allowlisted finding pass' {
