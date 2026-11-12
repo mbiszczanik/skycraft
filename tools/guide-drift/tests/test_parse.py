@@ -552,10 +552,13 @@ class CheckListTests(unittest.TestCase):
     Expected Result. The fixtures copy the shapes of 2.2.11, 2.3.19, 4.1.2 and 4.1.11."""
 
     def step(self, markdown: str) -> tuple[list[dict], str | None]:
-        """Items and Expected Result of the one step in markdown (its heading is line 1)."""
+        """Items without the check items and the Expected Result with the check texts joined to
+        it (the view of #224) of the one step in markdown (its heading is line 1). The check
+        items themselves are asserted in CheckItemTests."""
         body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
         items, expected, _, _ = parse.read_step(body)
-        return items, expected
+        checks = [i["text"] for i in items if i["kind"] == "check"]
+        return [i for i in items if i["kind"] != "check"], parse.join_checks(expected, checks)
 
     def test_the_nested_items_of_a_numbered_verify_item_are_checks_not_fields(self) -> None:
         items, expected = self.step(
@@ -1068,6 +1071,84 @@ class CaptionTests(unittest.TestCase):
             started = time.perf_counter()
             self.assertIsNone(self.item(text))
             self.assertLess(time.perf_counter() - started, 1.0)
+
+
+class CheckItemTests(unittest.TestCase):
+    """Each check list is a 'check' item at its place in the step, after the navigation before it
+    (#292), and the step's Expected Result keeps only its own text."""
+
+    TWO_BLADES = (
+        "### Step 9.9.1: Two blades\n"
+        "\n"
+        "1. Navigate to **dev-vnet** → **Subnets** → **DatabaseSubnet**\n"
+        "2. Confirm **Service endpoints** shows:\n"
+        "\n"
+        "   - Microsoft.Sql\n"
+        "   - Microsoft.Storage\n"
+        "\n"
+        "3. Navigate to **Subnets** → **WorldSubnet**\n"
+        "4. Verify:\n"
+        "   - Service endpoints: `Microsoft.Storage`\n"
+        "\n"
+        "**Expected Result**: Both subnets are configured.\n")
+
+    def read(self, markdown: str) -> tuple[list[dict], str | None]:
+        body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
+        items, expected, _, _ = parse.read_step(body)
+        return items, expected
+
+    def test_two_check_lists_on_different_blades_are_items_after_their_navigation(self) -> None:
+        items, expected = self.read(self.TWO_BLADES)
+        self.assertEqual([(i["kind"], i.get("text") or i["labels"]) for i in items], [
+            ("navigation", ["dev-vnet", "Subnets", "DatabaseSubnet"]),
+            ("check", "Microsoft.Sql; Microsoft.Storage"),
+            ("navigation", ["Subnets", "WorldSubnet"]),
+            ("check", "Service endpoints: Microsoft.Storage")])
+        self.assertEqual(expected, "Both subnets are configured.")
+
+    def test_a_check_item_carries_the_line_of_the_line_that_introduces_it(self) -> None:
+        items, _ = self.read(self.TWO_BLADES)
+        self.assertEqual([i["line"] for i in items if i["kind"] == "check"], [4, 10])
+
+    def test_a_step_with_only_a_check_list_has_no_portal_part(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            guide = Path(folder) / "lab-guide-9.9.md"
+            guide.write_text("### Step 9.9.1: Look\n\n1. Verify:\n   - Status: **OK**\n", encoding="utf-8")
+            step = parse.parse_guide(guide)["steps"][0]
+        self.assertEqual([i["kind"] for i in step["items"]], ["check"])
+        self.assertFalse(step["portal"])
+        self.assertIsNone(step["expected"])
+
+    def test_an_expected_result_ending_in_a_colon_still_takes_its_list(self) -> None:
+        items, expected = self.read("### Step 9.9.1: X\n\n1. Click **Create**\n\n"
+                                    "**Expected Result**: Verify:\n\n- Name: `a`\n")
+        self.assertEqual([i["kind"] for i in items], ["action"])
+        self.assertEqual(expected, "Verify: Name: a")
+
+
+class SectionImageTests(unittest.TestCase):
+    """An image outside every step is attached to the step after it, or listed apart (#214)."""
+
+    GUIDE = ("# Lab\n\n![Overview](./images/overview.png)\n\n"
+             "## Section 1\n\n![Banner](./images/Step-9.9.1a.png)\n\n"
+             "### Step 9.9.1: One\n\n1. Click **A**\n\n![One](./images/Step-9.9.1.png)\n\n"
+             "## Section 2\n\n### Step 9.9.2: Two\n\n1. Click **B**\n\n"
+             "## Checklist\n\n![End](./images/end.png)\n")
+
+    def parsed(self) -> dict:
+        with tempfile.TemporaryDirectory() as folder:
+            guide = Path(folder) / "lab-guide-9.9.md"
+            guide.write_text(self.GUIDE, encoding="utf-8")
+            return parse.parse_guide(guide)
+
+    def test_images_above_a_step_are_its_section_images_and_never_its_own(self) -> None:
+        first, second = self.parsed()["steps"]
+        self.assertEqual(first["sectionImages"], ["images/overview.png", "images/Step-9.9.1a.png"])
+        self.assertEqual(first["images"], ["images/Step-9.9.1.png"])
+        self.assertNotIn("sectionImages", second)
+
+    def test_images_after_the_last_step_are_listed_apart(self) -> None:
+        self.assertEqual(self.parsed()["trailingImages"], ["images/end.png"])
 
 
 class LabCaptionTests(unittest.TestCase):

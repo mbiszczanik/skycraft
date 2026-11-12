@@ -5,7 +5,9 @@ Standard library only, so tests/Guide-Drift-Parser.Tests.ps1 can run it on the C
 without a browser. Rules (issue #189):
 
   * Only '### Step X.Y.N: Title' sections are read. Text before the first step and after the
-    last step's section (the next '##' or '###' heading) is ignored.
+    last step's section (the next '##' or '###' heading) is ignored, except images (#214): one
+    outside every step is the step's 'sectionImages' when a step follows it (1.1's section
+    banner, Step-1.1.10a.png), and 'trailingImages' of the guide when none does.
   * Fenced code blocks and HTML comments (<!-- ... -->, also across lines) are removed first, so a
     heading or a bold span quoted in a snippet or commented out never counts. As in CommonMark, a
     fence closes only on a run of its own character at least as long as the opener, followed by
@@ -51,18 +53,20 @@ without a browser. Rules (issue #189):
     list right after it at its own indent ('2. Verify:' then '- Status: **OK**' at column 0),
     read as after an Expected Result, so it ends at the next numbered step. After any other
     line it is the list right after it, read as after an Expected Result.
-    The checks are not items, so 'Status: **Succeeded**' is never a field to fill; they are
-    joined with '; ', markup stripped, and joined to the step's Expected Result, or are its
-    Expected Result alone when it has none. The introducing line is read as any other item
+    The checks are not fields, so 'Status: **Succeeded**' is never a field to fill; each list
+    is one 'check' item {kind, text, line} at its place in the step, after the navigation
+    before it (#292): its entries are joined with '; ', markup stripped, and the runner looks
+    for the text on the blade it has reached there. The step's own Expected Result is checked
+    at the end as before. The introducing line is read as any other item
     (a click on **Configuration**, 4.1.11), except a list item
     'Verify **X** shows:' or 'Confirm **X** shows:' (SHOWN_LABEL), whose bold span names the
     setting to read, not a control to click (2.2.21). A check list is read where items are: one in
     the body of an option that is not read is dropped with it.
-  * Checks are joined to an Expected Result text (join_checks) after a space when the text
-    ends with '.', '!', '?' or ':' ('Bastion is operational. Status: Succeeded', 2.2.11), and
-    after '; ' otherwise, so the text and the first check never meet as '.;' or ':;'. The
-    checks themselves are joined with '; ' whatever they end with ('... dev-skycraft-swc-vnet.;
-    Production source ...', 5.3.6).
+  * The list after an Expected Result that ends with a colon is joined to its text
+    (join_checks) after a space when the text ends with '.', '!', '?' or ':', and after '; '
+    otherwise, so the text and the first entry never meet as '.;' or ':;'. Entries are joined
+    with '; ' whatever they end with ('... dev-skycraft-swc-vnet.; Production source ...',
+    5.3.6).
   * Bold spans in list items are UI labels. A list item containing a chain (A → B, A -> B or
     A > B) is one 'navigation' item with several labels; otherwise it is an 'action' item.
     '\\*' inside bold is a literal asterisk; a leading '*' (the Portal's required-field marker)
@@ -302,13 +306,6 @@ Known gaps. Spec #189 records only lab 1.1; fix these before another lab is reco
     Value table turn its fields into checks. No guide has either shape today.
   * A fenced code block between an introduction and a form table is blanked out like any
     other, so the table after it is still read as checks. No guide has this shape today.
-  * Checks join the step's single Expected Result, which the runner checks at the end of the
-    step, though a check list can describe a blade the step then moves on from: 2.3.19 checks
-    the Overview and then opens Record sets; 2.3.20 checks the dev load balancer and ends on
-    prod; 2.2.21 checks DatabaseSubnet and WorldSubnet in the dev and the prod VNet and ends on
-    prod's WorldSubnet; 4.1.2 checks the wizard's Encryption tab and ends on the new account;
-    4.2.12 checks the account's Configuration blade and ends on a container's Change access
-    level dialog.
 
 Usage: python parse.py <path/to/lab-guide-X.Y.md> [--out steps.json] [--repo-root <dir>]
 """
@@ -646,6 +643,27 @@ def split_steps(lines: list[str]) -> list[dict]:
     return steps
 
 
+def outside_images(lines: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Image paths referenced outside every step section (#214): by the id of the step that
+    follows them, and the ones after the last step. 1.1's section banner sits under a '##'
+    heading, before the section's first step."""
+    pending: list[str] = []
+    before: dict[str, list[str]] = {}
+    inside = False
+    for line in lines:
+        m = STEP_HEADING.match(line)
+        if m:
+            inside = True
+            if pending:
+                before[m.group("id")] = pending
+                pending = []
+        elif inside and SECTION_END.match(line):
+            inside = False
+        elif not inside and line != HIDDEN:
+            pending.extend(img.group("path") for img in IMAGE.finditer(line))
+    return before, pending
+
+
 def option_regions(body: list[tuple[int, str]]) -> tuple[list[str | int], list[str]]:
     """Where each body line sits, and the name of each option ('1', 'A', 'B') in heading order.
 
@@ -856,13 +874,12 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: i
     first one in the step that is not inside another option's body; when there is none, the
     first one in a later option (the standard puts a single one after Option 3), never one in
     an earlier option, which describes that option's path. The items of a check list are read
-    where items are; they are joined to the Expected Result (join_checks) or, when the step has
-    none, are its Expected Result alone.
+    where items are; each list becomes one 'check' item at its place in the step (#292).
     """
     item_lines: list[tuple[int, str]] = []
     expected: str | None = None
     fallback: str | None = None
-    checks: list[str] = []
+    checks: list[dict] = []
     index = 0
     while index < len(body):
         if EXPECTED.match(body[index][1]):
@@ -881,13 +898,13 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: i
             if not (found and found[0] and li and SHOWN_LABEL.match(li.group("text").strip())):
                 item_lines.append(body[index])  # the line that introduces checks is read too
             if found and found[0]:
-                checks.extend(found[0])
+                checks.append({"kind": "check", "text": "; ".join(found[0]), "line": body[index][0]})
                 index = found[1]
                 continue
         index += 1
     items, images = parse_items(item_lines, captions)
-    result = expected if expected is not None else fallback
-    return items, join_checks(result, checks), images
+    items = sorted(items + checks, key=lambda item: item["line"])    # stable: a check follows its intro
+    return items, expected if expected is not None else fallback, images
 
 
 def table_form(header: list[str]) -> str | None:
@@ -1195,15 +1212,21 @@ def parse_guide(guide: Path, repo_root: Path | None = None) -> dict:
     lab = lab_match.group(1) if lab_match else ""
     captions = LAB_CAPTIONS.get(lab, NO_CAPTIONS)
     steps = []
+    before, trailing = outside_images(lines)
     for raw in split_steps(lines):
         items, expected, images, option = read_step(raw["body"], captions)
         step = {"id": raw["id"], "title": raw["title"], "line": raw["line"]}
         if option is not None:
             step["option"] = option          # only a step with Option headings carries it
-        step.update(portal=bool(items), items=items, expected=expected, images=images)
+        step.update(portal=any(i["kind"] != "check" for i in items), items=items, expected=expected, images=images)
+        if raw["id"] in before:
+            step["sectionImages"] = before[raw["id"]]      # referenced above it, outside any step (#214)
         steps.append(step)
     guide_rel = guide.relative_to(repo_root).as_posix() if repo_root else guide.as_posix()
-    return {"lab": lab, "guide": guide_rel, "steps": steps}
+    result = {"lab": lab, "guide": guide_rel, "steps": steps}
+    if trailing:
+        result["trailingImages"] = trailing      # after the last step, listed apart (#214)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

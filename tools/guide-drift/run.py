@@ -309,6 +309,7 @@ import argparse
 import datetime as dt
 import json
 import re
+import subprocess
 import sys
 import time
 import traceback
@@ -2636,7 +2637,8 @@ class Runner:
         anywhere (starts_anywhere), in which case nothing is compared either."""
         excuse = self.excused.get(step["id"])
         self.start_accounted = False
-        if not step["items"] or starts_anywhere(step["items"][0]):
+        acting = [item for item in step["items"] if item["kind"] != "check"]
+        if not acting or starts_anywhere(acting[0]):
             return None
         recorded = start_blade(self.recording, step["id"])
         if recorded is None:
@@ -2678,7 +2680,15 @@ class Runner:
         self.start_seen = self.check_start(step)
         step_failed = False
         in_form = False     # a field of the item before was acted on: the form is open
-        for position, item in enumerate(step["items"]):
+        position = -1       # of the item among those acted on; a check item is looked at, not acted on
+        checks = 0
+        for item in step["items"]:
+            if item["kind"] == "check":
+                # A check list is looked for on the blade reached so far (#292).
+                self.check_result(step, entry, item["text"], slot=checks)
+                checks += 1
+                continue
+            position += 1
             self.expanded = False
             self.first_item = position == 0
             if item["kind"] == "tag":
@@ -2828,11 +2838,18 @@ class Runner:
         self.append(marker)
         self.records = [r for r in self.records if r["step"] != step["id"]]
 
-    def check_result(self, step: dict, entry: dict) -> None:
-        if not step.get("expected"):
+    def check_result(self, step: dict, entry: dict, text: str | None = None, slot: int | None = None) -> None:
+        """Look for the step's Expected Result on screen; with `text` and `slot`, for the text of
+        the check list that is the slot-th check item of the step (#292), on the blade the step
+        has reached at that item. A slot keeps its recorded text under entry['checks'] and is asked
+        about once, as the Expected Result is."""
+        shown = text if slot is not None else step.get("expected")
+        if not shown:
             return
-        if entry["result"] is None and "result" not in entry.get("asked", []):
-            print(f'Expected Result: "{step["expected"]}"')
+        key = "result" if slot is None else f"check{slot}"
+        held = entry["result"] if slot is None else entry.get("checks", {}).get(key)
+        if held is None and key not in entry.get("asked", []):
+            print(f'{"Expected Result" if slot is None else "Check list"}: "{shown}"')
             # The recording is public (#212): a text it cannot keep (recordable) is asked again.
             while True:
                 answer = self.prompt("Text to look for on screen (Enter = not observable): ")
@@ -2842,16 +2859,20 @@ class Runner:
                     break
                 print("That text holds an id, an address or a secret, which the recording cannot keep; "
                       "type a shorter text, or press Enter if it is not observable.")
-            entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
-            entry.setdefault("asked", []).append("result")
+            held = {"text": self.redactor.redact(answer)} if answer else None
+            if slot is None:
+                entry["result"] = held
+            else:
+                entry.setdefault("checks", {})[key] = held
+            entry.setdefault("asked", []).append(key)
             self.save_recording()
-        if not entry["result"]:
+        if not held:
             return
-        record = self.new_record(step, "result", entry["result"]["text"])
+        record = self.new_record(step, "result" if slot is None else "check", held["text"])
         # Presence, not a unique element: a created group's name shows in the list and the
         # breadcrumb at once, and either proves the result. The Portal often shows the result a
         # few seconds after the last click (a notification, a refreshed list), so keep looking.
-        text = self.redactor.restore(entry["result"]["text"])
+        text = self.redactor.restore(held["text"])
 
         def shown_within(seconds: float) -> bool:
             deadline = time.monotonic() + seconds
@@ -3220,6 +3241,10 @@ class Runner:
         lines.append(f"## stale screenshots ({len(stale)})")
         lines += [f"- step {r['step']}: {r['observed']}" for r in stale] or ["- none"]
         lines.append("")
+        review = self.screenshot_review()
+        lines.append(f"## guide screenshots for review ({len(review)})")
+        lines += review or ["- none"]
+        lines.append("")
         lines.append(f"## proposed edits ({len(edits)})")
         for r in edits:
             e = r["proposedEdit"]
@@ -3243,6 +3268,31 @@ class Runner:
         (self.run_dir / "summary.md").write_text(summary + "\n", encoding="utf-8")
         print("\n" + summary)
         return min(len(by_severity["blocking"]) + len(unknown), 250)
+
+    def screenshot_review(self) -> list[str]:
+        """One line per guide screenshot the steps reference, with its age and the run's own
+        screenshot of the step next to it (#214): the reviewer compares the two. The drift flag
+        of the step stays a hint; it is no verdict. An image referenced outside a step is listed
+        under the step that follows it (sectionImages) or, after the last step, on its own."""
+        guide_dir = Path(self.steps.get("guide", "")).parent
+        stale = {r["step"] for r in self.records if r.get("category") == "stale"}
+        lines: list[str] = []
+
+        def line(where: str, image: str, hint: str) -> str:
+            path = (guide_dir / image).as_posix()
+            return f"- {where} `{image}`: last changed {image_age(self.args.repo_root, path)}{hint}"
+
+        for step in self.steps["steps"]:
+            taken = (self.run_dir / f"Step-{step['id']}.png").exists()
+            run_shot = f"run screenshot `Step-{step['id']}.png`" if taken else "no run screenshot (step not run)"
+            hint = f"; {run_shot}; drift hint: {'yes' if step['id'] in stale else 'no'}"
+            for image in step.get("images", []):
+                lines.append(line(f"step {step['id']}", image, hint))
+            for image in step.get("sectionImages", []):
+                lines.append(line(f"step {step['id']} (section image above the step)", image, hint))
+        for image in self.steps.get("trailingImages", []):
+            lines.append(line("after the last step", image, "; no step, no run screenshot"))
+        return lines
 
     @staticmethod
     def drift_line(record: dict) -> str:
@@ -3270,6 +3320,19 @@ class Runner:
         if record.get("observed"):
             return f"- step {record['step']} skipped after it failed: {record['observed']}"
         return f"- step {record['step']} skipped on resume"
+
+
+def image_age(repo_root: Path | str, path: str) -> str:
+    """The date of the last commit that touched `path` (a path inside the repository), as
+    YYYY-MM-DD; 'not committed' for a file git has no history of, 'unknown' when git cannot say."""
+    try:
+        done = subprocess.run(["git", "log", "-1", "--format=%cs", "--", path], cwd=str(repo_root),
+                              capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    if done.returncode != 0:
+        return "unknown"
+    return done.stdout.strip() or "not committed"
 
 
 def redacted_traceback(error: BaseException, redactor: Redactor, secrets: set[str]) -> str:

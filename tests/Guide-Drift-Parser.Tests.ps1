@@ -747,29 +747,33 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
         }
     }
 
-    It 'reads step <id> as <labels> and the list to verify as its Expected Result' -ForEach @(
+    It 'reads step <id> as <labels> and the list to verify as a check item after them (#292)' -ForEach @(
         @{ lab = '2.2'; id = '2.2.11'; labels = @('Bastions', 'platform-skycraft-swc-bas')
-           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets. Provisioning state: Succeeded; Virtual network/subnet: platform-skycraft-swc-vnet/AzureBastionSubnet; Public IPv4 address: platform-skycraft-swc-bas-pip; Tier: Basic' }
+           expected = 'Bastion is operational and ready to provide secure connectivity to VMs in all peered VNets.'
+           checks = @('Provisioning state: Succeeded; Virtual network/subnet: platform-skycraft-swc-vnet/AzureBastionSubnet; Public IPv4 address: platform-skycraft-swc-bas-pip; Tier: Basic') }
         # 'Under **Security + networking**, select **Encryption**' names the menu group as a place (#346, #358).
         @{ lab = '4.1'; id = '4.1.8'; labels = @('Storage accounts', 'Resources', 'prodskycraftswcsa', 'Encryption')
-           expected = 'Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled' }
+           expected = $null
+           checks = @('Encryption type: Microsoft-managed keys; This is always enabled and cannot be disabled') }
         @{ lab = '4.1'; id = '4.1.10'; labels = @('Configuration')
-           expected = 'Minimum TLS version: Version 1.2; Secure transfer required: Enabled' }
+           expected = $null
+           checks = @('Minimum TLS version: Version 1.2; Secure transfer required: Enabled') }
         @{ lab = '4.1'; id = '4.1.11'; labels = @('Configuration')
-           expected = 'The **Configuration** page of `prodskycraftswcsa` shows **Account kind** **StorageV2 (general purpose v2)**, **Performance** **Standard**, the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**. Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled' }
+           expected = 'The **Configuration** page of `prodskycraftswcsa` shows **Account kind** **StorageV2 (general purpose v2)**, **Performance** **Standard**, the values of Steps 4.1.10 and 4.1.11, and **Blob access tier (default)** **Hot**.'
+           checks = @('Allow Blob anonymous access: Disabled; Allow storage account key access: Enabled') }
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
-        @($step.items | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
         $step.expected | Should -Be $expected
     }
 
     It 'reads the list after the Expected Result of step 4.1.2 into its text, not as a Name field' {
         $step = $script:CheckLabs['4.1'].steps | Where-Object id -eq '4.1.2'
-        # The checks of the Encryption table follow (#246, pinned below).
-        $step.expected.StartsWith('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
-            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot;',
-            [System.StringComparison]::Ordinal) | Should -BeTrue
+        # The checks of the Encryption table are an item of their own (#246, #292, pinned below).
+        $step.expected | Should -BeExactly ('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
+            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot')
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.label -ceq 'Name' }) | Should -BeNullOrEmpty
         @($step.items)[-1].labels | Should -Be @('Create')
     }
@@ -799,19 +803,27 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
         $tags.Count | Should -Be 1
         @($step.items | Where-Object { $_.kind -eq 'field' -and $_.line -gt $encryption[0].line -and $_.line -lt $tags[0].line }) |
             Should -BeNullOrEmpty
-        $step.expected | Should -Be ('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
-            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot; ' +
-            'Encryption type: Microsoft-managed keys (MMK); Enable support for customer-managed keys: Blobs and files only; ' +
+        # The Encryption table is checked on the wizard's Encryption tab, between its click and the Tags tab (#292).
+        $check = @($step.items | Where-Object kind -eq 'check')
+        $check.Count | Should -Be 1
+        $check[0].text | Should -Be ('Encryption type: Microsoft-managed keys (MMK); Enable support for customer-managed keys: Blobs and files only; ' +
             'Enable infrastructure encryption: unchecked')
+        $check[0].line | Should -BeGreaterThan $encryption[0].line
+        $check[0].line | Should -BeLessThan $tags[0].line
+        $step.expected | Should -Be ('The deployment succeeds in about a minute. Navigate to the resource to verify: ' +
+            'Name: platformskycraftswcsa; Location: Sweden Central; Replication: Geo-redundant storage (GRS); Access tier: Hot')
     }
 
-    It 'reads step <id> as <labels> and what it introduces with Verify or Confirm into its Expected Result' -ForEach @(
+    It 'reads step <id> as <labels> and what it introduces with Verify or Confirm as check items (#292)' -ForEach @(
         # 'Confirm **Service endpoints** shows:' names the setting to read, not a control to click,
         # on DatabaseSubnet and on WorldSubnet of both VNets (#283): WorldSubnet's 'Microsoft.Storage' is a check, not a click.
         @{ lab = '2.2'; id = '2.2.21'
            labels = @('dev-skycraft-swc-vnet', 'Settings', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet',
                       'prod-skycraft-swc-vnet', 'Settings', 'Subnets', 'DatabaseSubnet', 'Subnets', 'WorldSubnet')
-           expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4. Microsoft.Sql; Microsoft.Storage; Microsoft.Storage; Microsoft.Sql; Microsoft.Storage; Microsoft.Storage' }
+           expected = 'Database subnets can access Azure SQL and Storage over Microsoft backbone (private routing), and both `WorldSubnet`s carry `Microsoft.Storage` for Lab 4.4.'
+           # One check per blade: each list follows the navigation to its subnet.
+           checks = @('Microsoft.Sql; Microsoft.Storage', 'Microsoft.Storage', 'Microsoft.Sql; Microsoft.Storage', 'Microsoft.Storage')
+           order = @('navigation', 'check', 'navigation', 'check', 'navigation', 'check', 'navigation', 'check') }
         # #344: the step then adds both VMs to the egress pool; ticking a row of the panel's table is no label.
         # #353: then both NICs into their ASGs, and the effective rules on the VM and the DB NSG.
         @{ lab = '3.2'; id = '3.2.13'
@@ -824,12 +836,15 @@ Describe 'parse.py - labs 2.2, 3.2, 4.1 and 5.2, Verify and Confirm introduce ch
                       'Virtual machines', 'dev-skycraft-swc-auth-vm', 'Networking', 'Network settings', 'Effective security rules',
                       'Network security groups', 'dev-skycraft-swc-db-nsg', 'Settings', 'Inbound security rules',
                       'Effective security rules')
-           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM''s network interface is in its application security group. dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM' }
+           expected = 'Both VMs running in different availability zones, connected to respective load balancer backend pools, `dev-skycraft-swc-lb-be-outbound` lists 2 VMs (auth and world), and each VM''s network interface is in its application security group.'
+           checks = @('dev-skycraft-swc-lb-be-auth: 1 VM; dev-skycraft-swc-lb-be-world: 1 VM') }
         # Step 5.2.9 left this list in #366: it creates an alert processing rule and has an Expected Result of its own.
     ) {
         $step = $script:IntroLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
-        @($step.items | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
+        if ($order) { @($step.items | ForEach-Object { $_.kind }) | Should -Be $order }
         $step.expected | Should -Be $expected
     }
 }
@@ -979,7 +994,10 @@ Describe 'parse.py - labs 3.3-5.3, captions, lines outside the options and guide
         foreach ($label in 'Save', 'Disabled', 'Allow Blob anonymous access', 'Deny', 'RequestDisallowedByPolicy') {
             $labels | Should -Not -Contain $label
         }
-        $step.expected | Should -BeExactly 'Allow Blob anonymous access: Disabled'
+        $step.expected | Should -BeNullOrEmpty
+        $check = @($step.items | Where-Object kind -eq 'check')
+        $check.Count | Should -Be 1
+        $check[0].text | Should -BeExactly 'Allow Blob anonymous access: Disabled'
     }
 
     It 'opens public-demo in step 4.2.12 before the upload, and opens the blob before copying its URL' {
@@ -1518,7 +1536,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         $labels = @($step.items | ForEach-Object { $_.labels; $_.label })
         foreach ($label in 'Blob access tier (default)', 'Hot', 'Save') { $labels | Should -Not -Contain $label }
         $labels | Should -Contain 'Configuration'
-        $step.expected | Should -Match 'Blob access tier \(default\): Hot'
+        @($step.items | Where-Object kind -eq 'check').text | Should -Match 'Blob access tier \(default\): Hot'
     }
 
     # Since the #359 review, step 4.2.8 fills its four If/Then blocks one item at a time: the
@@ -1545,5 +1563,24 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
                 }
             })
         $leaks | Should -BeNullOrEmpty -Because ($leaks -join '; ')
+    }
+}
+
+Describe 'parse.py - lab 1.1, an image outside a step is attached to the step after it (#214)' {
+    BeforeAll {
+        $guide = Join-Path $script:RepoRoot 'module-1-identities-governance/1.1-entra-users-groups/lab-guide-1.1.md'
+        $out   = Join-Path $TestDrive 'lab-1.1-images.json'
+        & $script:Python $script:Parser $guide --out $out --repo-root $script:RepoRoot
+        $script:Lab11 = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+    }
+
+    It 'gives step 1.1.10 the section banner it sits under, so no screenshot is skipped' {
+        $step = $script:Lab11.steps | Where-Object id -eq '1.1.10'
+        @($step.sectionImages) | Should -Be @('images/Step-1.1.10a.png')
+    }
+
+    It 'gives no step an image twice' {
+        $all = @($script:Lab11.steps | ForEach-Object { $_.images; $_.sectionImages } | Where-Object { $_ })
+        @($all | Select-Object -Unique).Count | Should -Be $all.Count
     }
 }
