@@ -1,0 +1,7 @@
+[tasks.check]
+description = "Offline lane: every Lint check that needs no Azure sign-in (parse, analyzer, Bicep, Pester)"
+run = "pwsh -NoProfile -File tools/Invoke-DryRun.ps1"
+
+[tasks."check:fast"]
+description = "Seconds, no credentials, no live change: every PowerShell file parses (the analyzer takes over a minute and runs in check)"
+run = "pwsh -NoProfile -Command \"& ./tools/Invoke-DryRun.ps1 -Check Parse; exit $LASTEXITCODE\""
