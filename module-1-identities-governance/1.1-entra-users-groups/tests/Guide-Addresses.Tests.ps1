@@ -223,7 +223,8 @@ function New-MgGroupMember {
             [string[]]$ArgumentList = @(),
             [string]$Domain = 'custom',
             [string]$ExistingUsers = '',
-            [string]$FailCreate = ''
+            [string]$FailCreate = '',
+            [string]$GuestEnv = ''
         )
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
@@ -234,6 +235,7 @@ function New-MgGroupMember {
             SKYCRAFT_STUB_LOG              = $logPath
             SKYCRAFT_STUB_EXISTING_USERS   = $ExistingUsers
             SKYCRAFT_STUB_CREATE_FAIL      = $FailCreate
+            SKYCRAFT_GUEST_EMAIL           = $GuestEnv
             SKYCRAFT_GRAPH_TENANT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_ID       = ''
             SKYCRAFT_GRAPH_CLIENT_SECRET   = ''
@@ -281,6 +283,20 @@ function New-MgGroupMember {
         $script:Failed["New-LabUser.ps1/$domainCase"]        = Invoke-AddressScript -ScriptPath $script:NewUserPath -Domain $domainCase
         $script:Failed["Test-Lab.ps1/$domainCase"]           = Invoke-AddressScript -ScriptPath $script:TestLabPath -Domain $domainCase
         $script:Failed["Remove-LabResource.ps1/$domainCase"] = Invoke-AddressScript -ScriptPath $script:RemovePath -ArgumentList '-Force' -Domain $domainCase
+    }
+    # The guest override (#343): the parameter, the environment variable, and the parameter over the
+    # variable. A malformed address stops the script before it names anything.
+    $script:Other = 'guest.one@example.test'
+    $script:OtherEnv = 'guest.two@example.test'
+    $script:GuestRuns = [ordered]@{}
+    foreach ($name in 'New-LabUser.ps1', 'Test-Lab.ps1', 'Remove-LabResource.ps1') {
+        $path = @{ 'New-LabUser.ps1' = $script:NewUserPath; 'Test-Lab.ps1' = $script:TestLabPath; 'Remove-LabResource.ps1' = $script:RemovePath }[$name]
+        $extra = @(if ($name -eq 'Remove-LabResource.ps1') { '-Force' })
+        $script:GuestRuns["$name/param"]    = Invoke-AddressScript -ScriptPath $path -ArgumentList ($extra + @('-GuestEmail', $script:Other))
+        $script:GuestRuns["$name/env"]      = Invoke-AddressScript -ScriptPath $path -ArgumentList $extra -GuestEnv $script:OtherEnv
+        $script:GuestRuns["$name/both"]     = Invoke-AddressScript -ScriptPath $path -ArgumentList ($extra + @('-GuestEmail', $script:Other)) -GuestEnv $script:OtherEnv
+        $script:GuestRuns["$name/badparam"] = Invoke-AddressScript -ScriptPath $path -ArgumentList ($extra + @('-GuestEmail', 'not-an-address'))
+        $script:GuestRuns["$name/badenv"]   = Invoke-AddressScript -ScriptPath $path -ArgumentList $extra -GuestEnv "o'neil@example.test"
     }
     $script:PasswordRuns = @{
         Existing = Invoke-AddressScript -ScriptPath $script:NewUserPath -ExistingUsers 'all'
@@ -409,5 +425,59 @@ Describe 'Generated password output follows successful user creation (#413)' {
     It 'names all successfully created users when it prints their password' {
         $block = [regex]::Match($script:Runs['New-LabUser.ps1'].Output, '(?s)=== Auto-Generated Initial Password ===.*').Value
         foreach ($upn in $script:GuideUpns) { $block | Should -Match ([regex]::Escape($upn)) }
+    }
+}
+
+Describe 'Lab 1.1 guest address override (#343)' {
+
+    It '<script> uses the address given as -GuestEmail instead of the guide''s' -ForEach @(
+        @{ script = 'New-LabUser.ps1' }
+        @{ script = 'Test-Lab.ps1' }
+        @{ script = 'Remove-LabResource.ps1' }
+    ) {
+        $run = $script:GuestRuns["$script/param"]
+        Get-NamedGuest -Calls $run.Calls | Should -Be @($script:Other) -Because "output was:`n$($run.Output)"
+    }
+
+    It '<script> uses SKYCRAFT_GUEST_EMAIL when no parameter is given' -ForEach @(
+        @{ script = 'New-LabUser.ps1' }
+        @{ script = 'Test-Lab.ps1' }
+        @{ script = 'Remove-LabResource.ps1' }
+    ) {
+        $run = $script:GuestRuns["$script/env"]
+        Get-NamedGuest -Calls $run.Calls | Should -Be @($script:OtherEnv) -Because "output was:`n$($run.Output)"
+    }
+
+    It '<script> prefers the parameter over SKYCRAFT_GUEST_EMAIL' -ForEach @(
+        @{ script = 'New-LabUser.ps1' }
+        @{ script = 'Test-Lab.ps1' }
+        @{ script = 'Remove-LabResource.ps1' }
+    ) {
+        $run = $script:GuestRuns["$script/both"]
+        Get-NamedGuest -Calls $run.Calls | Should -Be @($script:Other) -Because "output was:`n$($run.Output)"
+    }
+
+    It '<script> keeps the guide''s users when the guest is overridden' -ForEach @(
+        @{ script = 'New-LabUser.ps1' }
+        @{ script = 'Test-Lab.ps1' }
+        @{ script = 'Remove-LabResource.ps1' }
+    ) {
+        $run = $script:GuestRuns["$script/param"]
+        Get-NamedUpn -Calls $run.Calls | Should -Be ($script:GuideUpns | Sort-Object -Unique) -Because "output was:`n$($run.Output)"
+    }
+
+    It '<script> refuses a malformed <source> address before it names any user or guest' -ForEach @(
+        @{ script = 'New-LabUser.ps1'; source = 'parameter'; key = 'badparam' }
+        @{ script = 'Test-Lab.ps1'; source = 'parameter'; key = 'badparam' }
+        @{ script = 'Remove-LabResource.ps1'; source = 'parameter'; key = 'badparam' }
+        @{ script = 'New-LabUser.ps1'; source = 'environment'; key = 'badenv' }
+        @{ script = 'Test-Lab.ps1'; source = 'environment'; key = 'badenv' }
+        @{ script = 'Remove-LabResource.ps1'; source = 'environment'; key = 'badenv' }
+    ) {
+        $run = $script:GuestRuns["$script/$key"]
+        $run.Refused | Should -BeFalse
+        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match 'GuestEmail'
+        $run.Calls | Should -BeNullOrEmpty
     }
 }
