@@ -56,7 +56,7 @@ resource sa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 '@
     $script:WeakParam = "using './main.bicep'`nparam parName = 'fixturestorage001'`n"
 
-    function New-FixtureRepo {
+    function Initialize-FixtureRepo {
         param([hashtable]$File = @{})
         $dir = Join-Path $script:Fixture ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $dir | Out-Null
@@ -84,7 +84,7 @@ AfterAll {
 Describe 'Invoke-BicepSecurityCheck.ps1 - a check that did not run is not a pass' {
 
     It 'fails when the baseline does not exist' {
-        $repo = New-FixtureRepo -File @{ 'a.txt' = 'x' }
+        $repo = Initialize-FixtureRepo -File @{ 'a.txt' = 'x' }
         $run = Invoke-Gate -Repo $repo -Baseline (Join-Path $script:Fixture 'nope.psd1')
         $run.ExitCode | Should -Be 1
         $run.Output | Should -Match 'does not exist'
@@ -93,7 +93,7 @@ Describe 'Invoke-BicepSecurityCheck.ps1 - a check that did not run is not a pass
     It 'fails when a baseline entry has no reason' {
         $bad = Join-Path $script:Fixture 'noreason.psd1'
         Set-Content -LiteralPath $bad -Value "@{ Finding = @( @{ File = 'a.bicepparam'; Rule = 'Azure.X.Y'; Reason = '' } ); Unanalysable = @() }"
-        $run = Invoke-Gate -Repo (New-FixtureRepo -File @{ 'a.txt' = 'x' }) -Baseline $bad
+        $run = Invoke-Gate -Repo (Initialize-FixtureRepo -File @{ 'a.txt' = 'x' }) -Baseline $bad
         $run.ExitCode | Should -Be 1
         $run.Output | Should -Match "'Finding' entry has no Reason"
     }
@@ -101,13 +101,13 @@ Describe 'Invoke-BicepSecurityCheck.ps1 - a check that did not run is not a pass
     It 'fails when a baseline section is missing' {
         $bad = Join-Path $script:Fixture 'nosection.psd1'
         Set-Content -LiteralPath $bad -Value "@{ Finding = @() }"
-        $run = Invoke-Gate -Repo (New-FixtureRepo -File @{ 'a.txt' = 'x' }) -Baseline $bad
+        $run = Invoke-Gate -Repo (Initialize-FixtureRepo -File @{ 'a.txt' = 'x' }) -Baseline $bad
         $run.ExitCode | Should -Be 1
         $run.Output | Should -Match "section 'Unanalysable' is missing"
     }
 
     It 'fails when PSRule for Azure is not installed, instead of analysing nothing' {
-        $repo = New-FixtureRepo -File @{ 'a.txt' = 'x' }
+        $repo = Initialize-FixtureRepo -File @{ 'a.txt' = 'x' }
         $output = & pwsh -NoProfile -File $script:Tool -RepoRoot $repo -BaselinePath $script:EmptyBaseline -ModuleName 'PSRule.Rules.DoesNotExist' 2>&1 | Out-String
         $run = [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
         $run.ExitCode | Should -Be 1
@@ -115,7 +115,7 @@ Describe 'Invoke-BicepSecurityCheck.ps1 - a check that did not run is not a pass
     }
 
     It 'fails when the repository holds no Bicep file at all' -Skip:(-not $script:CanAnalyse) {
-        $run = Invoke-Gate -Repo (New-FixtureRepo -File @{ 'a.txt' = 'x' })
+        $run = Invoke-Gate -Repo (Initialize-FixtureRepo -File @{ 'a.txt' = 'x' })
         $run.ExitCode | Should -Be 1
         $run.Output | Should -Match 'PSRule analysed no file'
     }
@@ -125,7 +125,7 @@ Describe 'Invoke-BicepSecurityCheck.ps1 - findings against the baseline' {
 
     BeforeAll {
         if ($script:CanAnalyse) {
-            $script:WeakRepo = New-FixtureRepo -File @{ 'bicep/main.bicep' = $script:WeakBicep; 'bicep/main.bicepparam' = $script:WeakParam }
+            $script:WeakRepo = Initialize-FixtureRepo -File @{ 'bicep/main.bicep' = $script:WeakBicep; 'bicep/main.bicepparam' = $script:WeakParam }
             $script:NewFinding = Invoke-Gate -Repo $script:WeakRepo
         }
     }
