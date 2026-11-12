@@ -216,8 +216,8 @@ Describe 'Lab 5.3 cleanup - Traffic Analytics resource selection' {
 
     BeforeAll {
         $script:PlatformResource = @(
-            Get-PlatformResourceFixture -Name 'NWTA-794cbf46-8c63-4a87-9521-7582a107a678-swedencentral' -ResourceType 'Microsoft.Insights/dataCollectionEndpoints'
-            Get-PlatformResourceFixture -Name 'NWTA-794cbf46-8c63-4a87-9521-7582a107a678-swedencentral' -ResourceType 'Microsoft.Insights/dataCollectionRules'
+            Get-PlatformResourceFixture -Name 'NWTA-00000000-0000-0000-0000-0000000000a1-swedencentral' -ResourceType 'Microsoft.Insights/dataCollectionEndpoints'
+            Get-PlatformResourceFixture -Name 'NWTA-00000000-0000-0000-0000-0000000000a1-swedencentral' -ResourceType 'Microsoft.Insights/dataCollectionRules'
             Get-PlatformResourceFixture -Name 'platform-skycraft-swc-law'  -ResourceType 'Microsoft.OperationalInsights/workspaces'
             Get-PlatformResourceFixture -Name 'platformskycraftswcsa'      -ResourceType 'Microsoft.Storage/storageAccounts'
             Get-PlatformResourceFixture -Name 'skycraft-vm-dcr'            -ResourceType 'Microsoft.Insights/dataCollectionRules'

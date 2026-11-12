@@ -204,3 +204,49 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  identifying-data:
+    name: Identifying Data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # GUIDs, e-mail addresses and Windows user paths outside the reviewed allowlist, #523.
+      # Fails on an empty scan and on a binary file it cannot read; the log shows masked values only.
+      - name: Check tracked files for identifying data
+        shell: pwsh
+        run: |
+          ./tools/Test-IdentifyingData.ps1
+          if ($LASTEXITCODE -ne 0) {
+            $Host.SetShouldExit($LASTEXITCODE)
+            exit $LASTEXITCODE
+          }
+
+  bicep-security:
+    name: Bicep Security (PSRule)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same standalone install as the bicep job (#144); PSRule expands the templates with it.
+      - name: Install Bicep CLI
+        run: |
+          curl -fsSLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Install PSRule for Azure
+        shell: pwsh
+        run: ./tools/Install-GalleryModule.ps1 -Name PSRule.Rules.Azure -MinimumVersion 1.47.0 -MaximumVersion 1.47.99
+
+      # Findings outside tools/bicep-security-baseline.psd1, a file PSRule could not analyse and
+      # is not named there, or an empty analysis fail the job, #522.
+      - name: Assess the Bicep templates
+        shell: pwsh
+        run: |
+          ./tools/Invoke-BicepSecurityCheck.ps1
+          if ($LASTEXITCODE -ne 0) {
+            $Host.SetShouldExit($LASTEXITCODE)
+            exit $LASTEXITCODE
+          }
