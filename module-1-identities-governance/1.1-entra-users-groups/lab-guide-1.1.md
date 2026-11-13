@@ -144,6 +144,8 @@ You'll set up the following identity structure in Microsoft Entra ID:
 
 **Expected Result**: Invitation email sent to external partner.
 
+> **Your own guest**: `istormrage@illidari.com` cannot accept an invitation. To see the invitation accepted, invite an address you control instead, and pass it to the lab scripts as `-GuestEmail <that address>` (`New-LabUser.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` of this lab, and Lab 1.2's `Deploy-Bicep.ps1`, `New-LabRoleAssignment.ps1` and `Test-Lab.ps1`). Set `SKYCRAFT_GUEST_EMAIL` to the same address to pass it once for the whole session; the parameter wins over the variable.
+
 ![Create Guest User](./images/Step-1.1.5.png)
 
 ---

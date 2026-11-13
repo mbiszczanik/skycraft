@@ -324,7 +324,7 @@ from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
                        missing_env, field_action, rejected_candidates, resource_name, skip_reason,
-                       same_blade, start_blade, view_blade, write_json)
+                       fully_decoded, same_blade, start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
 
@@ -341,6 +341,15 @@ WORKAROUND_REASON = "used as a workaround, not as the guide's element"
 TOKEN_REASON = "the Portal's name holds tenant or personal data ({token})"
 # A name that is the guide's label plus a decoration the screen does not show (#244).
 DECORATION_REASON = "the Portal's name only decorates the guide's label ({what})"
+
+
+def guide_at_fault(record: dict) -> bool:
+    """Whether a drift record says the guide differs from the Portal (#318): it proposes an edit, or
+    it is held back only for its token reason (the Portal's name holds tenant data, so the label
+    differs but cannot be written into the guide). A drift with any other 'notProposed' reason, a
+    workaround, a wrong blade, an excused start or a decoration, says nothing about the guide."""
+    why = record.get("notProposed")
+    return not why or why.startswith(TOKEN_REASON.split("{")[0])
 # Why a pick at the prompt is used as a workaround and not recorded (#315): replay looks the element
 # up by the name the recording keeps, and the recording cannot keep this one (Runner.recordable).
 UNRECORDABLE_NAME = ("That element's name holds an id, an address or a secret, which the recording cannot keep: "
@@ -497,6 +506,8 @@ FIELD_CANDIDATE_JS = r"""e => {
     return !!target && ['listbox', 'menu'].includes(target.getAttribute('role'));
   });
 }"""
+# FIELD_CANDIDATE_JS over every element of a locator in one call (visible_in's `keep_js`).
+FIELD_CANDIDATES_JS = f"els => els.map({FIELD_CANDIDATE_JS})"
 # What toggle_kind reads of an element: [tag, type attribute].
 TAG_TYPE_JS = "e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]"
 # For a check box's label (label_of): [whether it belongs to the input, whether it holds a link].
@@ -520,6 +531,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--tenant-domain", required=True)
     p.add_argument("--tenant-name", default="",
                    help="the tenant's display name, kept out of the recording as [tenantname]")
+    p.add_argument("--account-name", action="append", default=[],
+                   help="display name of the signed-in account, kept out of a recorded view or result "
+                        "text (#320); may be repeated")
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--auth-state", type=Path, required=True)
     p.add_argument("--from-step")
@@ -771,6 +785,19 @@ def aria_lines(page: Page) -> list[tuple[str, str, int, bool, bool]]:
     return lines
 
 
+def entry_names_on_screen(page: Page) -> list[str]:
+    """The names of the list entries on screen (ENTRY_NAME_ROLES, the set aria_lines hands
+    EntryNames, #317): what a recording's view or result text must not repeat (#320)."""
+    names: list[str] = []
+    for frame in all_frames(page):
+        try:
+            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+        except PlaywrightError:     # timed out, or the frame went away while the Portal navigated
+            continue
+        names += [key[1] for key, _ in snapshot_elements(snapshot) if key[1] and key[0] in ENTRY_NAME_ROLES]
+    return names
+
+
 # --- finding and acting --------------------------------------------------------------------
 
 class Ambiguous(LookupError):
@@ -827,14 +854,25 @@ def frame_in_window(frame: Frame, viewport: dict | None) -> bool:
         return False
 
 
-def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
+def visible_in(locator: Locator, viewport: dict | None, keep_js: str | None = None) -> list[Locator]:
     """The elements of `locator` that are visible and, when `viewport` is given, overlap the
     window horizontally. is_visible() does not wait. An element that cannot be inspected (it
     went away mid-check) still counts: dropping it could turn two matches into one, and the
     runner would act on a guess. A frame that goes away raises PlaywrightError from count(),
-    which callers handle per frame."""
+    which callers handle per frame. `keep_js` maps all elements to booleans in one call
+    (FIELD_CANDIDATES_JS); the ones answered false are never looked at, so a lookup and its wait
+    only see what can match. When it cannot run, every element is kept, as for one that cannot
+    be inspected."""
+    keep: list[bool] | None = None
+    if keep_js is not None:
+        try:
+            keep = list(locator.evaluate_all(keep_js))
+        except PlaywrightError:
+            keep = None
     found = []
     for index in range(locator.count()):
+        if keep is not None and index < len(keep) and not keep[index]:
+            continue
         element = locator.nth(index)
         try:
             counts = element.is_visible() and in_window_columns(element, viewport)
@@ -846,12 +884,13 @@ def visible_in(locator: Locator, viewport: dict | None) -> list[Locator]:
 
 
 def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator],
-                          anywhere: bool = False) -> list[Locator]:
-    """Visible matches in every frame; outside the window's columns too when `anywhere`."""
+                          anywhere: bool = False, keep_js: str | None = None) -> list[Locator]:
+    """Visible matches in every frame; outside the window's columns too when `anywhere`;
+    only those `keep_js` keeps when it is given (visible_in)."""
     found: list[Locator] = []
     for frame in all_frames(page):
         try:
-            found += visible_in(make_locator(frame), None if anywhere else page.viewport_size)
+            found += visible_in(make_locator(frame), None if anywhere else page.viewport_size, keep_js)
         except PlaywrightError:     # the frame detached or navigated: nothing to act on there
             continue
     return found
@@ -898,7 +937,9 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator 
     clicking it navigates nowhere. Every frame is searched, or only inside `root` when it is
     given (the global search's results). `choose` picks among the matches of one role, or of the
     text: by default there must be at most one, and several raise Ambiguous. An ambiguous text
-    match counts as not found, so the person picks a role-specific candidate."""
+    match counts as not found, so the person picks a role-specific candidate. A `choose` with a
+    `survey` attribute is first given every match of every pass (the roles and the text), so it
+    can judge them as one set (search_result)."""
     def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
         if root is None:
             return visible_across_frames(page, make_locator)
@@ -907,12 +948,19 @@ def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator 
         except PlaywrightError:     # the results went away while the Portal reloaded them
             return []
 
+    by_role = [(role, matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True)))
+               for role in roles] if hasattr(choose, "survey") else None
+    texts = None
+    if by_role is not None:
+        texts = matches(lambda s: interactive_text(s, label))
+        choose.survey([e for _, found in by_role for e in found] + texts)
     for role in roles:
-        element = choose(matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True)), False)
+        found = dict(by_role)[role] if by_role is not None else             matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True))
+        element = choose(found, False)
         if element is not None:
             return element
     try:
-        return choose(matches(lambda s: interactive_text(s, label)), True)
+        return choose(texts if texts is not None else matches(lambda s: interactive_text(s, label)), True)
     except Ambiguous:
         return None
 
@@ -967,16 +1015,6 @@ def one_field(found: list[Locator]) -> Locator | None:
     raise Ambiguous(f"{len(found)} visible elements match ({', '.join(what for what, _ in kinds)})")
 
 
-def can_be_field(element: Locator) -> bool:
-    """Whether the element can be a form field (FIELD_CANDIDATE_JS). One that cannot be inspected
-    still counts: dropping it could turn two matches into one, and the runner would act on a
-    guess."""
-    try:
-        return bool(element.evaluate(FIELD_CANDIDATE_JS, timeout=1000))
-    except PlaywrightError:
-        return True
-
-
 def is_read_only(element: Locator) -> bool:
     """Whether the text field is read-only (READ_ONLY_JS). One that cannot be inspected is not:
     fill() then reports what went wrong."""
@@ -1000,12 +1038,12 @@ def find_field(page: Page, label: str) -> Locator | None:
     of the label (another labelled element, or a text box of that name), unless it holds a combo
     box: the Portal's 'User principal name' is a <div aria-label> around a text box, an '@' and
     a domain combo box, and fill_field splits the value over those parts. Only elements that can
-    be a field count (can_be_field): a list's column header or a plain button of the label's
+    be a field count (FIELD_CANDIDATES_JS, part of the lookup): a list's column header or a plain button of the label's
     name is never taken for the field, so the field is not found and the person decides. Of
     several matches, the one that takes a value wins (one_field). An ambiguous match raises
     Ambiguous."""
     def fields(make_locator: Callable[[Frame], Locator]) -> list[Locator]:
-        return [element for element in visible_across_frames(page, make_locator) if can_be_field(element)]
+        return visible_across_frames(page, make_locator, keep_js=FIELD_CANDIDATES_JS)
 
     labelled = fields(lambda f: f.get_by_label(label, exact=True))
     if labelled:
@@ -1073,10 +1111,9 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
         if names:
             pattern = re.compile("^(?:" + "|".join(map(literal_pattern, names)) + ")$")
             found += visible_across_frames(page, lambda f, role=role, pattern=pattern:
-                                           f.get_by_role(role, name=pattern))
-    if field:
-        return one_field([element for element in found if can_be_field(element)])
-    return only_one(found)
+                                           f.get_by_role(role, name=pattern),
+                                           keep_js=FIELD_CANDIDATES_JS if field else None)
+    return one_field(found) if field else only_one(found)
 
 
 def find_exact(page: Page, label: str, field: bool = False, decorated: bool = True) -> Locator | None:
@@ -1211,17 +1248,30 @@ def search_result(label: str, root: object) -> Choose:
     told apart from a Marketplace entry), and otherwise only when it is the only one left;
     several are Ambiguous. Plain text counts only when the whole result it sits in reads `label`,
     not when it is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A
-    result that changes while it is read raises Ambiguous, so the caller looks again."""
-    def choose(found: list[Locator], by_text: bool) -> Locator | None:
-        read: list[tuple[Locator, str, str]] = []
-        for element in found:
+    result that changes while it is read raises Ambiguous, so the caller looks again. "Another
+    result" means any match of any role pass or of the text (survey), not only of the pass at
+    hand."""
+    reads: dict[int, tuple[str, str]] = {}      # id(element) -> (section, whole)
+    seen: list[Locator] = []                    # keeps the ids valid
+    sectioned = False
+
+    def read_of(element: Locator) -> tuple[str, str]:
+        if id(element) not in reads:
             try:
                 group, heading, whole = element.evaluate(
                     RESULT_SECTION_JS, {"interactive": INTERACTIVE, "root": root}, timeout=1000)
             except PlaywrightError as error:
                 raise Ambiguous(f"a result changed while it was read ({type(error).__name__})") from error
-            read.append((element, group if SEARCH_SECTION.match(group) else heading, whole))
-        sectioned = any(section for _, section, _ in read)
+            reads[id(element)] = (group if SEARCH_SECTION.match(group) else heading, whole)
+            seen.append(element)
+        return reads[id(element)]
+
+    def survey(everything: list[Locator]) -> None:
+        nonlocal sectioned
+        sectioned = any(read_of(element)[0] for element in everything)
+
+    def choose(found: list[Locator], by_text: bool) -> Locator | None:
+        read = [(element, *read_of(element)) for element in found]
         services: list[Locator] = []
         others: list[Locator] = []
         for element, section, whole in read:
@@ -1236,6 +1286,7 @@ def search_result(label: str, root: object) -> Choose:
         if len(others) > 1:
             raise Ambiguous(f"{len(others)} visible results match, none of them under Services")
         return others[0] if others else None
+    choose.survey = survey      # type: ignore[attr-defined]
     return choose
 
 
@@ -1438,6 +1489,23 @@ def stays_disabled(page: Page, element: Locator) -> bool:
     return False
 
 
+# Buttons that commit a form or a blade; one that stays disabled after every value of its step was
+# already in place has nothing to save (#209).
+COMMIT_BUTTON = re.compile(r"^(save|create|apply|update|submit|ok|done|confirm|add|select)\b", re.IGNORECASE)
+NOTHING_TO_SAVE = "nothing to save"
+
+
+def option_selected(element: Locator) -> bool:
+    """Whether `element`, an option of a choice group (a toggle, a radio or a pivot button), shows
+    it is already selected: aria-pressed, aria-checked or aria-selected is 'true' (#209). Clicking
+    such an option changes nothing, so the runner records 'already set' instead."""
+    try:
+        return any(element.get_attribute(name, timeout=1000) == "true"
+                   for name in ("aria-pressed", "aria-checked", "aria-selected"))
+    except PlaywrightError:
+        return False
+
+
 def find_by_name(page: Page, role: str | None, name: str | re.Pattern[str]) -> Locator | None:
     """The element a decision chose, by role and name: a string matches exactly and case-
     sensitively, a pattern (Redactor.matcher) as written. Raises Ambiguous rather than guess."""
@@ -1533,6 +1601,11 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
         return fill_field(page, textboxes[0], value)
     if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
+        # A text box that cannot take the name is found out before the domain is picked: the combo box
+        # is not changed on a form the run then reports as not filled (#213).
+        box_tag = textboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
+        if current_text(textboxes[0], box_tag) != local and is_read_only(textboxes[0]):
+            raise ReadOnly("the field is read-only")
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
             picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
@@ -1972,6 +2045,10 @@ class Runner:
         # this run has reported, which are not reported again (#328).
         self.deployment_minutes: int = getattr(args, "deployment_timeout_minutes", DEPLOYMENT_TIMEOUT_MIN)
         self.reported_failures: set[str] = set()
+        # Display names a recorded view or result text must not hold (#320): the signed-in
+        # account's, and the list entries seen on screen during the run.
+        self.names: list[str] = list(getattr(args, "account_name", None) or [])
+        self.named: EntryNames | None = None
         # The current label was looked up past a failure already reported (wait_for_deployment): the
         # person's answer is used in this run only, never written to the recording (#328).
         self.failure_on_screen = False
@@ -2030,6 +2107,27 @@ class Runner:
         id, an address outside the tenant or a secret would be kept as '<id>', '<email>' or
         '[secret]', which is never on screen, and kept as it is it would be published."""
         return scrub(text, self.redactor, self.secrets) == self.redactor.redact(text)
+
+    def learn_names(self) -> None:
+        """Add the list entries on screen to the names the recording must not hold (#320)."""
+        try:
+            seen = entry_names_on_screen(self.page)
+        except PlaywrightError:
+            return
+        known = set(self.names)
+        fresh = [name for name in dict.fromkeys(seen) if name not in known]
+        if fresh or self.named is None:
+            self.names += fresh
+            self.named = EntryNames(self.names)
+
+    def holds_name(self, text: str | None) -> bool:
+        """Whether `text` holds, as whole words, a display name this run has seen (#320): a
+        directory object's, or the signed-in account's. Looks at the screen first, so a name
+        shown right now counts before the run has moved on."""
+        if not text:
+            return False
+        self.learn_names()
+        return self.named.held_by(text)
 
     def remember(self, step: dict, label: str, entry: dict | None) -> None:
         if entry is not None:
@@ -2442,7 +2540,14 @@ class Runner:
                               observed=f"the guide sets '{acted_on}' to {'checked' if state else 'unchecked'}, "
                                        "but it is no switch, check box or radio")
                 return record
+            elif kind != "field" and not toggle and option_selected(element):
+                note = "already set"      # an option of a choice group that is already selected (#209)
             elif stays_disabled(self.page, element):     # never click() into a 30 s Playwright wait
+                if self.nothing_to_save(step, acted_on):
+                    # Every value of the step was in place and its commit button is greyed out for
+                    # that reason: the step's outcome is already true (#209).
+                    record.update(outcome="match", observed=NOTHING_TO_SAVE)
+                    return record
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
             elif kind == "field":
@@ -2555,6 +2660,15 @@ class Runner:
         old = guide_lines[line - 1]
         new = old.replace(f"**{old_label}**", f"**{new_label}**")
         return None if new == old else {"line": line, "old": old, "new": new}
+
+    def nothing_to_save(self, step: dict, acted_on: str) -> bool:
+        """Whether a disabled commit button (COMMIT_BUTTON) has nothing to save (#209): the step has
+        earlier items, and every one of them matched as 'already set'. A disabled button after any
+        real change stays unknown."""
+        if not COMMIT_BUTTON.match(acted_on.strip()):
+            return False
+        earlier = [r for r in self.records if r["step"] == step["id"] and r["kind"] != "screenshot"]
+        return bool(earlier) and all(r["outcome"] == "match" and r["observed"] == "already set" for r in earlier)
 
     def not_proposed(self, step: dict, decision: Decision, label: str) -> str | None:
         """Why a misleading or cosmetic drift of the guide's `label` proposes no guide edit, for
@@ -2729,15 +2843,20 @@ class Runner:
                 self.write(record)
                 if record["outcome"] == "unknown" or record.get("severity") == "blocking":
                     step_failed = True
+            self.learn_names()
             if position == 0:
                 # A workaround reached the guide's place another way: the blade the step began on
                 # may not be its own (#211).
                 worked_around = any(record.get("workaround") for record in records)
                 if not step_failed and self.start_seen is not None and not worked_around:
                     # It went through on the blade the step started on: later runs compare with it.
-                    self.step_entry(step)["startBlade"] = self.start_seen
-                    self.save_recording()
-                    print(f"Recorded: step {step['id']} starts on {self.start_seen}")
+                    if self.holds_name(fully_decoded(self.start_seen) or self.start_seen):
+                        print(f"Not recorded: step {step['id']} start blade holds a display name seen "
+                              "in this run (#320).")
+                    else:
+                        self.step_entry(step)["startBlade"] = self.start_seen
+                        self.save_recording()
+                        print(f"Recorded: step {step['id']} starts on {self.start_seen}")
                 self.start_seen = None      # a later item's find_form must not change it
             if step_failed:
                 break
@@ -2779,7 +2898,12 @@ class Runner:
         address = urlsplit(self.page.url)
         if f"{address.scheme}://{address.netloc}" != PORTAL:
             return
-        self.step_entry(step)["viewUrl"] = self.redactor.view_url(self.page.url)
+        view = self.redactor.view_url(self.page.url)
+        if view is not None and self.holds_name(fully_decoded(view) or view):
+            print(f"Not recorded: the view step {step['id']} ended on holds a display name seen in this "
+                  "run (#320).")
+            view = None
+        self.step_entry(step)["viewUrl"] = view
         self.save_recording()
 
     def new_record(self, step: dict, kind: str, label: str | None) -> dict:
@@ -2838,10 +2962,16 @@ class Runner:
                 answer = self.prompt("Text to look for on screen (Enter = not observable): ")
                 if answer is None:          # input closed: ask again next time
                     return
-                if not answer or self.recordable(answer):
+                if not answer:
                     break
-                print("That text holds an id, an address or a secret, which the recording cannot keep; "
-                      "type a shorter text, or press Enter if it is not observable.")
+                if not self.recordable(answer):
+                    print("That text holds an id, an address or a secret, which the recording cannot keep; "
+                          "type a shorter text, or press Enter if it is not observable.")
+                elif self.holds_name(answer):
+                    print("That text holds a display name seen in this run, which the recording cannot "
+                          "keep; type a shorter text, or press Enter if it is not observable.")
+                else:
+                    break
             entry["result"] = {"text": self.redactor.redact(answer)} if answer else None
             entry.setdefault("asked", []).append("result")
             self.save_recording()
@@ -2890,9 +3020,13 @@ class Runner:
         self.page.screenshot(path=str(path), full_page=False)
         record = self.new_record(step, "screenshot", None)
         # A missing resource is no drift of the guide, and a wrong blade is a navigation the guide
-        # leaves out, not a blade it shows: neither makes the guide's images stale.
+        # leaves out, not a blade it shows: neither makes the guide's images stale. Nor does a drift
+        # that proposes no guide edit because the guide is not at fault (#318): a workaround, a step
+        # that started on the wrong blade, an excused start, a decoration. A drift held back for its
+        # token reason stays: the Portal really differs from the guide there.
         drifted = any(r["step"] == step["id"] and r["outcome"] == "drift"
-                      and r.get("category") not in (MISSING_RESOURCE, WRONG_BLADE) for r in self.records)
+                      and r.get("category") not in (MISSING_RESOURCE, WRONG_BLADE)
+                      and guide_at_fault(r) for r in self.records)
         if step["images"] and drifted:
             record.update(outcome="drift", category="stale", observed=", ".join(step["images"]))
         else:

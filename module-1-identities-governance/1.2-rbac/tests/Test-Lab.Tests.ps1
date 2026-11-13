@@ -94,6 +94,8 @@ $script:Principal = @{
     'SkyCraft-Developers'     = 'aaaaaaaa-0000-0000-0000-000000000002'
     'SkyCraft-Testers'        = 'aaaaaaaa-0000-0000-0000-000000000003'
     'istormrage@illidari.com' = 'aaaaaaaa-0000-0000-0000-000000000004'
+    'partner.one@example.test' = 'aaaaaaaa-0000-0000-0000-000000000004'
+    'partner.two@example.test' = 'aaaaaaaa-0000-0000-0000-000000000004'
 }
 
 function Write-StubCall {
@@ -147,7 +149,10 @@ function Get-AzADUser {
     switch ($Filter) {
         "userPrincipalName eq 'malfurion.stormrage@contoso.onmicrosoft.com'" { Find-StubPrincipal -Name 'malfurion.stormrage' }
         "mail eq 'istormrage@illidari.com'" { Find-StubPrincipal -Name 'istormrage@illidari.com' }
-        default { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
+        default {
+            if ($Filter -match "^mail eq '(?<m>[^']+)'$") { Find-StubPrincipal -Name $Matches['m'] }
+            else { throw "stub: unexpected Get-AzADUser filter '$Filter'" }
+        }
     }
 }
 
@@ -213,7 +218,8 @@ function Get-StubRoleAssignment {
             [switch]$NoContext,
             [switch]$DomainFail,
             [switch]$NoInitial,
-            [string[]]$ArgumentList = @()
+            [string[]]$ArgumentList = @(),
+            [string]$GuestEnv = ''
         )
 
         $logPath = Join-Path $Stub.Directory 'calls.log'
@@ -231,6 +237,7 @@ function Get-StubRoleAssignment {
             SKYCRAFT_STUB_DOMAIN_FAIL    = if ($DomainFail) { '1' } else { '0' }
             SKYCRAFT_STUB_NOINITIAL      = if ($NoInitial) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
+            SKYCRAFT_GUEST_EMAIL         = $GuestEnv
         }
 
         $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -269,10 +276,17 @@ function Get-StubRoleAssignment {
     $script:CycleRgMissing = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-SkipRoleAssignments' `
         -MissingResourceGroup 'dev-skycraft-swc-rg'
 
+    # The guest override (#343): the parameter, the environment variable, both, and a malformed address.
+    $script:GuestParam = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-GuestEmail', 'partner.one@example.test'
+    $script:GuestEnvRun = Invoke-ValidatorScript -Stub $script:Stub -GuestEnv 'partner.two@example.test'
+    $script:GuestBoth = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-GuestEmail', 'partner.one@example.test' -GuestEnv 'partner.two@example.test'
+    $script:GuestBad = Invoke-ValidatorScript -Stub $script:Stub -ArgumentList '-GuestEmail', 'not-an-address'
+
     $script:AllRuns = @(
         $script:AllPass, $script:RgMissing, $script:RoleMissing, $script:RoleLookupFail,
         $script:OwnerCondition, $script:NoContext, $script:CycleRun, $script:CycleRgMissing, $script:GraphFail, $script:NoDevelopers,
-        $script:TwoDevelopers, $script:DomainDenied, $script:NoInitialDomain
+        $script:TwoDevelopers, $script:DomainDenied, $script:NoInitialDomain,
+        $script:GuestParam, $script:GuestEnvRun, $script:GuestBoth, $script:GuestBad
     )
 }
 
@@ -458,5 +472,36 @@ Describe 'Lab 1.2 Test-Lab.ps1 -SkipRoleAssignments - the lab cycle''s run' {
         $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
         $run.FailLines | Should -Be 1
         $run.Output | Should -Match 'Failed: 1\b'
+    }
+}
+
+Describe 'Lab 1.2 Test-Lab.ps1 - the guest address can be overridden (#343)' {
+
+    It 'looks the External Partner up by -GuestEmail and passes' {
+        $run = $script:GuestParam
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.one@example.test'"
+        $run.Calls | Should -Not -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'"
+    }
+
+    It 'looks the External Partner up by SKYCRAFT_GUEST_EMAIL when no parameter is given' {
+        $run = $script:GuestEnvRun
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.two@example.test'"
+    }
+
+    It 'prefers the parameter over SKYCRAFT_GUEST_EMAIL' {
+        $script:GuestBoth.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.one@example.test'"
+        $script:GuestBoth.Calls | Should -Not -Contain "Get-AzADUser|mail eq 'partner.two@example.test'"
+    }
+
+    It 'keeps the guide''s address as the default' {
+        $script:AllPass.Calls | Should -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'"
+    }
+
+    It 'refuses a malformed address before it reads anything' {
+        $script:GuestBad.ExitCode | Should -Not -Be 0
+        $script:GuestBad.Output | Should -Match 'GuestEmail'
+        $script:GuestBad.Calls | Should -BeNullOrEmpty
     }
 }

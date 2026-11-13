@@ -128,6 +128,100 @@ class RunnerTestCase(unittest.TestCase):
         return json.loads((self.tmp / "state.json").read_text(encoding="utf-8"))
 
 
+class NothingToSaveTests(RunnerTestCase):
+    """#209: an option that is already selected is 'already set', and a greyed-out commit button
+    after nothing but 'already set' items has nothing to save."""
+
+    STEP = {"id": "9.9.1", "title": "One", "portal": True, "expected": None, "images": [],
+            "items": [{"kind": "action", "labels": ["All"], "line": 3}, {"kind": "action", "labels": ["Save"], "line": 4}]}
+
+    def act(self, label: str, element, before=(), index: int = 0):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        for outcome, observed in before:
+            earlier = r.new_record(self.STEP, "action", "All")
+            earlier.update(outcome=outcome, observed=observed)
+            r.write(earlier)
+        clock = iter(range(0, 1_000_000, 1))
+        with mock.patch.object(run, "find_exact", return_value=element),                 mock.patch.object(run, "candidates_on_screen", return_value=[]),                 mock.patch.object(run.time, "monotonic", lambda: next(clock)):
+            return self.quietly(lambda: r.act_on_label(self.STEP, self.STEP["items"][index], label))
+
+    def test_an_option_that_is_already_selected_is_not_clicked(self) -> None:
+        for attribute in ("aria-pressed", "aria-checked", "aria-selected"):
+            with self.subTest(attribute=attribute):
+                element = FakeElement()
+                element.attributes[attribute] = "true"
+                record = self.act("All", element)
+                self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", "already set", 0))
+
+    def test_an_option_that_is_not_selected_is_clicked(self) -> None:
+        element = FakeElement()
+        element.attributes["aria-pressed"] = "false"
+        record = self.act("All", element)
+        self.assertEqual((record["outcome"], element.clicked), ("match", 1))
+
+    def test_a_disabled_commit_button_after_only_already_set_items_has_nothing_to_save(self) -> None:
+        element = FakeElement(disabled=True)
+        record = self.act("Save", element, before=[("match", "already set")], index=1)
+        self.assertEqual((record["outcome"], record["observed"], element.clicked), ("match", run.NOTHING_TO_SAVE, 0))
+
+    def test_a_disabled_commit_button_after_a_real_change_stays_unknown(self) -> None:
+        element = FakeElement(disabled=True)
+        record = self.act("Save", element, before=[("match", "already set"), ("match", "All")], index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Save'"))
+
+    def test_a_disabled_commit_button_with_no_earlier_item_stays_unknown(self) -> None:
+        record = self.act("Save", FakeElement(disabled=True), index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Save'"))
+
+    def test_a_disabled_button_that_commits_nothing_stays_unknown(self) -> None:
+        record = self.act("Next", FakeElement(disabled=True), before=[("match", "already set")], index=1)
+        self.assertEqual((record["outcome"], record["observed"]), ("unknown", "disabled: 'Next'"))
+
+
+class StaleScreenshotTests(RunnerTestCase):
+    """#318: a drift the guide is not at fault for does not make the step's images stale."""
+
+    STEP = {"id": "9.9.2", "title": "Two", "portal": True, "items": [], "expected": None,
+            "images": ["images/Step-9.9.2.png"]}
+
+    def screenshot_after(self, **drift) -> dict:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        if drift:
+            record = r.new_record(self.STEP, "label", "Create")
+            record.update(outcome="drift", severity="misleading", **drift)
+            r.write(record)
+        return r.screenshot(self.STEP)
+
+    def test_a_step_without_drift_is_not_stale(self) -> None:
+        self.assertEqual(self.screenshot_after()["outcome"], "match")
+
+    def test_a_drift_that_proposes_an_edit_makes_the_images_stale(self) -> None:
+        record = self.screenshot_after(notProposed=None, observed="Add")
+        self.assertEqual((record["outcome"], record["category"]), ("drift", "stale"))
+        self.assertEqual(record["observed"], "images/Step-9.9.2.png")
+
+    def test_a_drift_held_back_for_its_token_reason_still_makes_the_images_stale(self) -> None:
+        why = run.TOKEN_REASON.format(token="<tenant>")
+        self.assertEqual(self.screenshot_after(notProposed=why)["category"], "stale")
+
+    def test_a_drift_the_guide_is_not_at_fault_for_leaves_the_images_alone(self) -> None:
+        for why in (run.WORKAROUND_REASON,
+                    f"the Portal was not where the guide leads in this step ({run.WRONG_BLADE})",
+                    "the step started where the run, not the guide, left the Portal (a resume)",
+                    run.DECORATION_REASON.format(what="a suffix")):
+            with self.subTest(why=why):
+                record = self.screenshot_after(notProposed=why)
+                self.assertEqual((record["outcome"], record["category"]), ("match", None))
+
+    def test_one_ordinary_drift_among_excused_ones_makes_the_images_stale(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        for why in (run.WORKAROUND_REASON, None):
+            record = r.new_record(self.STEP, "label", "Create")
+            record.update(outcome="drift", severity="misleading", notProposed=why)
+            r.write(record)
+        self.assertEqual(r.screenshot(self.STEP)["category"], "stale")
+
+
 class RunBookkeepingTests(RunnerTestCase):
     def test_a_clean_run_completes_every_portal_step_and_finishes_the_state(self) -> None:
         r = self.runner()
@@ -342,6 +436,10 @@ class FakeElement:
         self.disabled_for = disabled_for      # for this many looks, as while a blade loads
         self.clicked = 0
         self.calls: list[str] = []
+        self.attributes: dict[str, str] = {}  # aria-pressed and the like, as the Portal shows them
+
+    def get_attribute(self, name, timeout=None):
+        return self.attributes.get(name)
 
     def scroll_into_view_if_needed(self, timeout=None) -> None:
         self.calls.append("scroll")
@@ -2042,17 +2140,19 @@ class ScreenNode(FakeElement):
                 raise run.PlaywrightError("element was detached")
             return [self.tag, self.attrs.get("role", ""), self.attrs.get("type", "").lower(),
                     self.attrs.get("aria-haspopup", "").lower(), self.editable]
-        if script == run.FIELD_CANDIDATE_JS:            # what the browser answers, in Python
-            role = self.attrs.get("role", "")
-            plain_button = role == "button" or (not role and self.tag == "button")
-            names_list = (bool(self.attrs.get("aria-controls") or self.attrs.get("aria-owns"))
-                          and self.controls_role in ("listbox", "menu"))
-            opens_list = (self.attrs.get("aria-haspopup", "").lower() in ("listbox", "menu", "true")
-                          or ("aria-expanded" in self.attrs and names_list))
-            return not self.in_header and (not plain_button or opens_list)
         if "tagName" in script:                     # fill_field: [tag, type]
             return [self.tag, self.attrs.get("type", "")]
         raise NotImplementedError(script)
+
+    def candidate(self) -> bool:
+        """What FIELD_CANDIDATE_JS answers in the browser, in Python."""
+        role = self.attrs.get("role", "")
+        plain_button = role == "button" or (not role and self.tag == "button")
+        names_list = (bool(self.attrs.get("aria-controls") or self.attrs.get("aria-owns"))
+                      and self.controls_role in ("listbox", "menu"))
+        opens_list = (self.attrs.get("aria-haspopup", "").lower() in ("listbox", "menu", "true")
+                      or ("aria-expanded" in self.attrs and names_list))
+        return not self.in_header and (not plain_button or opens_list)
 
     def aria_snapshot(self, timeout=None) -> str:
         return self.tree
@@ -2123,6 +2223,18 @@ class ScreenLocator:
 
     def nth(self, index: int):
         return self.nodes[index]
+
+    evaluate_all_fails = False
+    evaluated_all: list = []        # the scripts evaluate_all was given
+
+    def evaluate_all(self, script):
+        """FIELD_CANDIDATES_JS, answered per node as the browser would."""
+        ScreenLocator.evaluated_all.append(script)
+        if self.evaluate_all_fails:
+            raise run.PlaywrightError("frame was detached")
+        if script != run.FIELD_CANDIDATES_JS:
+            raise NotImplementedError(script)
+        return [node.candidate() for node in self.nodes]
 
     def aria_snapshot(self, timeout=None) -> str:
         return self.nodes[0].aria_snapshot(timeout)
@@ -2302,6 +2414,19 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual((record["outcome"], unsectioned.clicked, market.clicked), ("unknown", 0, 0))
         self.assertTrue(self.tree_file().is_file())
 
+    def test_a_result_without_a_section_never_counts_when_another_role_pass_found_a_section(self) -> None:
+        # RESULT_ROLES tries 'option' first: its only match has no section, the 'link' pass has Services.
+        unsectioned, services = self.result(""), self.result("Services (67)")
+        screen, _ = self.search_screen(("option", self.ENTRA, unsectioned), ("link", self.ENTRA, services))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], unsectioned.clicked, services.clicked), ("match", 0, 1))
+
+    def test_a_result_without_a_section_is_still_taken_when_no_pass_has_a_section(self) -> None:
+        first, second = self.result(""), self.result("")
+        screen, _ = self.search_screen(("option", self.ENTRA, first), ("link", self.ENTRA, second))
+        record, _ = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], first.clicked), ("match", 1))
+
     def test_one_result_without_a_section_is_taken(self) -> None:
         only = self.result("")
         screen, _ = self.search_screen(("option", self.ENTRA, only))
@@ -2462,10 +2587,10 @@ class FindOnScreenTests(RunnerTestCase):
     UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
     UPN_VALUE = "malfurion.stormrage@contoso.onmicrosoft.com"
 
-    def upn_screen(self, shown: str, offered=()) -> tuple[Screen, ScreenNode, ScreenNode]:
+    def upn_screen(self, shown: str, offered=(), read_only: bool = False) -> tuple[Screen, ScreenNode, ScreenNode]:
         """The Portal's 'User principal name': a labelled <div> holding a text box, an '@' and a
         domain combo box showing `shown`; opening the combo box lists `offered`."""
-        local = ScreenNode(tag="input")
+        local = ScreenNode(tag="input", read_only=read_only)
         domain = ScreenNode(attrs={"role": "combobox"}, text=shown)
         screen = Screen()
 
@@ -2483,6 +2608,15 @@ class FindOnScreenTests(RunnerTestCase):
         screen, local, domain = self.upn_screen("Contoso.onmicrosoft.com")    # preselected, other case
         record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
         self.assertEqual((record["outcome"], local.filled, domain.clicked), ("match", ["malfurion.stormrage"], 0))
+
+    def test_a_read_only_name_box_stops_the_form_before_the_domain_is_picked(self) -> None:
+        # #213: the domain used to be picked first, so a form reported as not filled had been changed.
+        screen, local, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example", "contoso.onmicrosoft.com"],
+                                                read_only=True)
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled, domain.clicked, domain.text),
+                         ("unknown", [], 0, "fabrikam.example"))
+        self.assertIn("read-only", record["observed"])
 
     def test_a_domain_not_shown_is_picked_from_the_combo_box(self) -> None:
         screen, local, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example", "CONTOSO.onmicrosoft.com"])
@@ -2521,6 +2655,33 @@ class FindOnScreenTests(RunnerTestCase):
                 record, r = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
                 self.assertEqual((record["outcome"], node.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
                 self.assertEqual(record["observed"], "no answer (input closed)")   # asked, not 'option not found'
+
+    def test_the_field_test_runs_in_the_lookup_once_per_locator_not_once_per_element(self) -> None:
+        header, area = ScreenNode(tag="button", in_header=True), ScreenNode(tag="textarea")
+        screen = Screen(("label", "Group description", header), ("label", "Group description", area))
+        ScreenLocator.evaluated_all = []
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIs(run.find_field(FakePage(), "Group description"), area)
+        self.assertEqual(ScreenLocator.evaluated_all, [run.FIELD_CANDIDATES_JS])
+        self.assertFalse(hasattr(run, "can_be_field"))
+
+    def test_an_element_the_field_test_rejects_is_never_inspected_or_waited_on(self) -> None:
+        header = ScreenNode(tag="button", in_header=True)
+        header.is_visible = lambda: (_ for _ in ()).throw(AssertionError("looked at a non-field"))
+        screen = Screen(("label", "Group description", header))
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(run.find_field(FakePage(), "Group description"))
+
+    def test_when_the_field_test_cannot_run_every_element_is_kept(self) -> None:
+        area, header = ScreenNode(tag="textarea"), ScreenNode(tag="button", in_header=True)
+        looked_at: list[str] = []
+        header.is_visible = lambda: looked_at.append("header") or True
+        screen = Screen(("label", "Group description", area), ("label", "Group description", header))
+        self.addCleanup(setattr, ScreenLocator, "evaluate_all_fails", False)
+        ScreenLocator.evaluate_all_fails = True
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIs(run.find_field(FakePage(), "Group description"), area)
+        self.assertEqual(looked_at, ["header"])
 
     DESCRIPTION = {"kind": "field", "label": "Group description", "value": "x", "line": 6}
 
@@ -5318,6 +5479,78 @@ class DecoratedNameTests(RunnerTestCase):
         summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
         for section in ("blocking", "misleading", "cosmetic", "unknown", "proposed edits", "not proposed"):
             self.assertIn(f"## {section} (0)\n- none", summary)
+
+
+class DisplayNameTests(RunnerTestCase):
+    """A recording's views and result texts hold no display name seen in the run (#320): the list
+    entries on screen and the signed-in account's. Fictional names only."""
+
+    ENTRY = "Khadgar Archmage"
+
+    def runner_seeing(self, *names: str, **overrides) -> run.Runner:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(**overrides), ask=Answers("Khadgar Archmage"))
+        patch = mock.patch.object(run, "entry_names_on_screen", lambda page: list(names))
+        patch.start()
+        self.addCleanup(patch.stop)
+        return r
+
+    def test_the_names_are_whole_words_above_the_minimum_length(self) -> None:
+        r = self.runner_seeing(self.ENTRY, "Li", "Groups")
+        self.assertTrue(r.holds_name("Welcome, khadgar archmage"))
+        self.assertTrue(r.holds_name("Khadgar%20Archmage".replace("%20", " ")))
+        self.assertFalse(r.holds_name("Khadgar Archmages"))      # not a whole word
+        self.assertFalse(r.holds_name("Li"))                     # entry name too short
+        self.assertFalse(r.holds_name("Archmage"))               # only part of the name
+        self.assertFalse(r.holds_name(None))
+
+    def test_the_signed_in_account_name_counts_without_being_on_screen(self) -> None:
+        r = self.runner_seeing(account_name=["Jaina Proudmoore"])
+        self.assertTrue(r.holds_name("Signed in as Jaina Proudmoore"))
+        self.assertFalse(r.holds_name("Jaina"))
+
+    def test_a_name_seen_earlier_still_counts_once_it_left_the_screen(self) -> None:
+        shown = [self.ENTRY]
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "entry_names_on_screen", lambda page: list(shown)):
+            r.learn_names()
+            shown.clear()
+            self.assertTrue(r.holds_name(f"Profile of {self.ENTRY}"))
+
+    def test_a_screen_that_cannot_be_read_keeps_the_names_known(self) -> None:
+        r = self.runner_seeing(self.ENTRY)
+        r.learn_names()
+        with mock.patch.object(run, "entry_names_on_screen", side_effect=run.PlaywrightError("gone")):
+            self.assertTrue(r.holds_name(self.ENTRY))
+
+    def test_a_result_text_with_a_name_is_asked_again_and_never_stored(self) -> None:
+        r = self.runner_seeing(self.ENTRY)
+        r.ask = Answers(f"{self.ENTRY} created", "Group created")
+        entry = r.step_entry({"id": "9.9.1"})
+        out = io.StringIO()
+        with mock.patch.object(run, "text_on_screen", lambda page, text: True), redirect_stdout(out):
+            r.check_result({"id": "9.9.1", "expected": "x"}, entry)
+        self.assertEqual(len(r.ask.prompts), 2)
+        self.assertEqual(out.getvalue().count("holds a display name seen in this run"), 1)
+        self.assertEqual(entry["result"], {"text": "Group created"})
+        self.assertNotIn("Khadgar", (self.tmp / "rec.json").read_text(encoding="utf-8"))
+
+    def test_a_view_with_a_name_is_recorded_as_none_and_says_why(self) -> None:
+        r = self.runner_seeing(self.ENTRY)
+        r.page.url = address("Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/name/Khadgar%20Archmage")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            r.record_view({"id": "9.9.1"})
+        self.assertIsNone(self.recording["steps"]["9.9.1"]["viewUrl"])
+        self.assertIn("holds a display name", out.getvalue())
+        self.assertNotIn("Khadgar", (self.tmp / "rec.json").read_text(encoding="utf-8"))
+
+    def test_a_view_without_a_name_is_recorded(self) -> None:
+        r = self.runner_seeing(self.ENTRY)
+        r.page.url = address(USERS)
+        self.quietly(lambda: r.record_view({"id": "9.9.1"}))
+        self.assertEqual(self.recording["steps"]["9.9.1"]["viewUrl"],
+                         f"https://portal.azure.com/#{USERS}")
+
 
 
 if __name__ == "__main__":
