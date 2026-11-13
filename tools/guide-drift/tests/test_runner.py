@@ -3916,6 +3916,130 @@ class FieldValueTests(RunnerTestCase):
         self.assertEqual(act.call_args.args[-1], "malfurion.stormrage@contoso.onmicrosoft.com")
 
 
+class CheckItemRunTests(RunnerTestCase):
+    """A check item is looked for on the blade reached at its place in the step (#292); the
+    step's own Expected Result still comes last."""
+
+    NAV = {"kind": "navigation", "labels": ["Subnets", "A"], "line": 3}
+    STEP = {"id": "9.9.1", "title": "One", "expected": "Done", "images": [], "items": [
+        NAV, {"kind": "check", "text": "first list", "line": 4},
+        {"kind": "navigation", "labels": ["Subnets", "B"], "line": 5},
+        {"kind": "check", "text": "second list", "line": 6}]}
+
+    def run_it(self, step: dict) -> tuple[bool, list[tuple]]:
+        events: list[tuple] = []
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+
+        def act(_self, _step, item, label, *args, **kwargs):
+            events.append(("act", label))
+            record = r.new_record(step, "navigation", label)
+            record.update(outcome="match")
+            return record
+
+        def check(_self, _step, _entry, text=None, slot=None):
+            events.append(("check", slot, text))
+
+        with mock.patch.object(run.Runner, "act_on_label", act), \
+                mock.patch.object(run.Runner, "open_resource", act), \
+                mock.patch.object(run.Runner, "check_result", check), \
+                mock.patch.object(run.Runner, "check_start", return_value=None):
+            done = self.quietly(lambda: r.run_step(step))
+        return done, events
+
+    def test_each_check_runs_after_the_navigation_before_it_and_the_result_last(self) -> None:
+        done, events = self.run_it(self.STEP)
+        self.assertTrue(done)
+        self.assertEqual(events, [("act", "Subnets"), ("act", "A"), ("check", 0, "first list"),
+                                  ("act", "Subnets"), ("act", "B"), ("check", 1, "second list"),
+                                  ("check", None, None)])
+
+    def test_a_failed_item_stops_the_step_before_the_checks_after_it(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run.Runner, "act_on_label") as act, \
+                mock.patch.object(run.Runner, "check_result") as check, \
+                mock.patch.object(run.Runner, "check_start", return_value=None):
+            bad = r.new_record(self.STEP, "navigation", "Subnets")
+            bad.update(outcome="unknown", observed="not found")
+            act.return_value = bad
+            done = self.quietly(lambda: r.run_step(self.STEP))
+        self.assertFalse(done)
+        check.assert_not_called()
+
+    def test_a_check_slot_is_asked_once_and_kept_apart_from_the_result(self) -> None:
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers("Subnets: A"))
+        entry = r.step_entry({"id": "9.9.1"})
+        looked_for: list[str] = []
+        with mock.patch.object(run, "text_on_screen", lambda page, text: looked_for.append(text) or True):
+            self.quietly(lambda: r.check_result({"id": "9.9.1", "expected": "Done"}, entry, "first list", slot=0))
+            self.quietly(lambda: r.check_result({"id": "9.9.1", "expected": "Done"}, entry, "first list", slot=0))
+        self.assertEqual(len(r.ask.prompts), 1)
+        self.assertEqual(entry["checks"], {"check0": {"text": "Subnets: A"}})
+        self.assertIsNone(entry["result"])
+        self.assertEqual(looked_for, ["Subnets: A", "Subnets: A"])
+        self.assertEqual([x["kind"] for x in r.records], ["check", "check"])
+
+
+class ScreenshotReviewTests(RunnerTestCase):
+    """The summary lists every screenshot the guide references, with its age and the run's own
+    screenshot of the step, and keeps the drift flag as a hint (#214)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.steps = {"lab": LAB, "guide": "mod/lab/guide.md", "steps": [
+            {"id": "9.9.1", "title": "One", "portal": True, "items": [], "expected": None,
+             "images": ["images/Step-9.9.1.png"], "sectionImages": ["images/Banner.png"]},
+            {"id": "9.9.2", "title": "Two", "portal": True, "items": [], "expected": None,
+             "images": ["images/Step-9.9.2.png"]}], "trailingImages": ["images/end.png"]}
+
+    def runner_for_steps(self) -> run.Runner:
+        r = run.Runner(FakePage(), self.steps, self.recording, self.args(), ask=Answers())
+        (r.run_dir / "Step-9.9.1.png").write_bytes(b"png")
+        stale = r.new_record(self.steps["steps"][0], "screenshot", None)
+        stale.update(outcome="drift", category="stale", observed="images/Step-9.9.1.png")
+        r.records.append(stale)
+        return r
+
+    def test_every_image_is_listed_with_its_age_the_run_screenshot_and_the_hint(self) -> None:
+        r = self.runner_for_steps()
+        with mock.patch.object(run, "image_age", lambda root, path: "2026-01-02" if "9.9.1" in path else "unknown"):
+            lines = r.screenshot_review()
+        self.assertEqual(lines, [
+            "- step 9.9.1 `images/Step-9.9.1.png`: last changed 2026-01-02; run screenshot `Step-9.9.1.png`; "
+            "drift hint: yes",
+            "- step 9.9.1 (section image above the step) `images/Banner.png`: last changed unknown; "
+            "run screenshot `Step-9.9.1.png`; drift hint: yes",
+            "- step 9.9.2 `images/Step-9.9.2.png`: last changed unknown; "
+            "no run screenshot (step not run); drift hint: no",
+            "- after the last step `images/end.png`: last changed unknown; no step, no run screenshot"])
+
+    def test_the_age_is_asked_of_git_for_the_path_next_to_the_guide(self) -> None:
+        r = self.runner_for_steps()
+        asked: list[str] = []
+        with mock.patch.object(run, "image_age", lambda root, path: asked.append(path) or "x"):
+            r.screenshot_review()
+        self.assertEqual(asked[0], "mod/lab/images/Step-9.9.1.png")
+
+    def test_finish_writes_the_section_and_keeps_the_stale_hint_section(self) -> None:
+        r = self.runner_for_steps()
+        self.quietly(r.finish)
+        summary = (r.run_dir / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("## guide screenshots for review (4)\n- step 9.9.1 `images/Step-9.9.1.png`: last changed ",
+                      summary)
+        self.assertIn("## stale screenshots (1)", summary)
+
+    def test_image_age_is_the_date_of_the_last_commit_or_says_it_cannot_tell(self) -> None:
+        done = mock.Mock(returncode=0, stdout="2026-03-04\n")
+        with mock.patch.object(run.subprocess, "run", return_value=done) as call:
+            self.assertEqual(run.image_age(self.tmp, "a/b.png"), "2026-03-04")
+        self.assertEqual(call.call_args.args[0], ["git", "log", "-1", "--format=%cs", "--", "a/b.png"])
+        with mock.patch.object(run.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="")):
+            self.assertEqual(run.image_age(self.tmp, "a/b.png"), "not committed")
+        with mock.patch.object(run.subprocess, "run", return_value=mock.Mock(returncode=128, stdout="")):
+            self.assertEqual(run.image_age(self.tmp, "a/b.png"), "unknown")
+        with mock.patch.object(run.subprocess, "run", side_effect=OSError):
+            self.assertEqual(run.image_age(self.tmp, "a/b.png"), "unknown")
+
+
 class PromptValueTests(RunnerTestCase):
     """The prompt about a field that is not found shows the value the runner types, after the
     recording's placeholders and overrides, scrubbed as the rest of the prompt (#210)."""
