@@ -25,6 +25,11 @@
     tenants, it stops with [ERROR] and names both. With no source, Microsoft Graph picks the
     account's home tenant, which for a personal Microsoft account is not the lab tenant.
 
+.PARAMETER GuestEmail
+    The address of the guest Lab 1.1 invites in step 1.1.5. When omitted, the script reads
+    SKYCRAFT_GUEST_EMAIL, and without that it uses the guide's address (istormrage@illidari.com).
+    Pass an address you control to run the lab with a guest who can accept the invitation.
+
 .EXAMPLE
     .\Test-Lab.ps1
     Runs the validation suite.
@@ -39,7 +44,17 @@
 #Requires -Version 7.0
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Mandatory = $false, HelpMessage = "Address of the guest Lab 1.1 invites (default: SKYCRAFT_GUEST_EMAIL, else the guide's address).")]
+    [ValidatePattern('^[^@\s'']+@[^@\s'']+\.[^@\s'']+$')]
+    [string]$GuestEmail
+)
+
+# The guest of step 1.1.5: -GuestEmail, else SKYCRAFT_GUEST_EMAIL, else the guide's address (#343).
+# The assignment keeps the parameter's pattern, so a bad environment value stops here.
+if (-not $PSBoundParameters.ContainsKey('GuestEmail')) {
+    $GuestEmail = if ($env:SKYCRAFT_GUEST_EMAIL) { $env:SKYCRAFT_GUEST_EMAIL } else { 'istormrage@illidari.com' }
+}
 
 # --- Microsoft Graph sign-in (issue #76) ---------------------------------------------------
 # Lab 1.1 is the only lab that talks to Entra ID rather than ARM, and the only one that hung.
@@ -488,8 +503,8 @@ catch {
     Exit-Lab -FailureCount 1
 }
 
-# The guest the guide invites in step 1.1.5 (and New-LabUser.ps1 invites).
-$guestEmail = "istormrage@illidari.com"
+# The guest New-LabUser.ps1 invites (step 1.1.5): the guide's address unless -GuestEmail says otherwise.
+$guestEmail = $GuestEmail
 
 # Define Expected Users (Warcraft Theme)
 $expectedUsers = @(

@@ -44,6 +44,11 @@
     - SkyCraft-Testers    -> Reader (dev-skycraft-swc-rg, prod-skycraft-swc-rg)
     - Illidan Stormrage   -> Reader (platform-skycraft-swc-rg)
 
+.PARAMETER GuestEmail
+    The address of the guest Lab 1.1 invites in step 1.1.5. When omitted, the script reads
+    SKYCRAFT_GUEST_EMAIL, and without that it uses the guide's address (istormrage@illidari.com).
+    Pass an address you control to run the lab with a guest who can accept the invitation.
+
 .EXAMPLE
     .\New-LabRoleAssignment.ps1
     Assigns roles to the current subscription.
@@ -57,7 +62,17 @@
 #Requires -Modules Az.Accounts, Az.Resources
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Mandatory = $false, HelpMessage = "Address of the guest Lab 1.1 invites (default: SKYCRAFT_GUEST_EMAIL, else the guide's address).")]
+    [ValidatePattern('^[^@\s'']+@[^@\s'']+\.[^@\s'']+$')]
+    [string]$GuestEmail
+)
+
+# The guest of step 1.1.5: -GuestEmail, else SKYCRAFT_GUEST_EMAIL, else the guide's address (#343).
+# The assignment keeps the parameter's pattern, so a bad environment value stops here.
+if (-not $PSBoundParameters.ContainsKey('GuestEmail')) {
+    $GuestEmail = if ($env:SKYCRAFT_GUEST_EMAIL) { $env:SKYCRAFT_GUEST_EMAIL } else { 'istormrage@illidari.com' }
+}
 
 # --- Microsoft Graph sign-in (issues #76, #242, #273) -------------------------------------
 # This script reads the users and groups Lab 1.1 creates, through Microsoft Graph, so it signs in
@@ -553,7 +568,7 @@ $assignments = @(
     # Illidan -> Reader on Platform RG
     @{
         Type           = "Guest"
-        PrincipalName  = "istormrage@illidari.com" # Search by mail
+        PrincipalName  = $GuestEmail # Search by mail
         Role           = "Reader"
         Scope          = "/subscriptions/$subscriptionId/resourceGroups/platform-skycraft-swc-rg"
         ScopeName      = "platform-skycraft-swc-rg"

@@ -285,6 +285,7 @@ function Get-AzADGroup {
     [CmdletBinding()]
     param([string]$DisplayName, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name "Get-AzADGroup|$DisplayName"
+    if ($env:SKYCRAFT_STUB_GROUPS -eq '1') { [pscustomobject]@{ Id = 'bbbbbbbb-0000-0000-0000-000000000002' } }
 }
 
 function Get-AzResourceGroup {
@@ -319,15 +320,17 @@ function Get-AzDeploymentWhatIfResult {
             -Body $stubBody -RequiredModule $requiredModules
 
         function Invoke-DeployScript {
-            param([string]$Domain)
+            param([string]$Domain, [string[]]$GuestArgument = @(), [string]$GuestEnv = '', [switch]$Groups)
 
             $logPath = Join-Path $script:DeployStub.Directory 'calls.log'
             Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
             $run = Invoke-LabScriptWithStub -Stub $script:DeployStub -ScriptPath $script:DeployScriptPath `
-                -ArgumentList '-IncludeRoleAssignments', '-WhatIf' -Environment @{
+                -ArgumentList (@('-IncludeRoleAssignments', '-WhatIf') + $GuestArgument) -Environment @{
                     SKYCRAFT_STUB_DOMAIN = $Domain
                     SKYCRAFT_STUB_LOG    = $logPath
+                    SKYCRAFT_STUB_GROUPS = if ($Groups) { '1' } else { '0' }
+                    SKYCRAFT_GUEST_EMAIL = $GuestEnv
                 }
 
             $calls = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { @() }
@@ -338,6 +341,12 @@ function Get-AzDeploymentWhatIfResult {
         $script:Custom    = Invoke-DeployScript -Domain 'custom'
         $script:NoInitial = Invoke-DeployScript -Domain 'noinitial'
         $script:Http403   = Invoke-DeployScript -Domain 'http403'
+        # The guest override (#343): with the groups found, the run reaches the guest lookup.
+        $script:GuestDefault = Invoke-DeployScript -Domain 'custom' -Groups
+        $script:GuestParam   = Invoke-DeployScript -Domain 'custom' -Groups -GuestArgument '-GuestEmail', 'partner.one@example.test'
+        $script:GuestEnvRun  = Invoke-DeployScript -Domain 'custom' -Groups -GuestEnv 'partner.two@example.test'
+        $script:GuestBoth    = Invoke-DeployScript -Domain 'custom' -Groups -GuestArgument '-GuestEmail', 'partner.one@example.test' -GuestEnv 'partner.two@example.test'
+        $script:GuestBad     = Invoke-DeployScript -Domain 'custom' -Groups -GuestArgument '-GuestEmail', 'not-an-address'
     }
 
     AfterAll {
@@ -345,7 +354,7 @@ function Get-AzDeploymentWhatIfResult {
     }
 
     It 'shadows the real Az commands instead of touching a tenant or a subscription' {
-        foreach ($run in @($script:Custom, $script:NoInitial, $script:Http403)) {
+        foreach ($run in @($script:Custom, $script:NoInitial, $script:Http403, $script:GuestDefault, $script:GuestParam, $script:GuestEnvRun, $script:GuestBoth, $script:GuestBad)) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
             $run.Calls | Should -Not -Contain 'New-AzDeployment'
             $run.Calls | Should -Not -Contain 'Get-AzDeploymentWhatIfResult'
@@ -372,6 +381,33 @@ function Get-AzDeploymentWhatIfResult {
         @($run.Calls | Where-Object { $_ -like 'Invoke-AzRestMethod|GET https://graph.microsoft.com/v1.0/domains*' }).Count | Should -Be 1
         @($run.Calls | Where-Object { $_ -like 'Get-AzADUser|*' -or $_ -like 'Get-AzADGroup|*' -or $_ -eq 'Get-AzResourceGroup' }) |
             Should -BeNullOrEmpty -Because 'nothing may be looked up or deployed on a guessed domain'
+    }
+}
+
+Describe 'Lab 1.2 - Deploy-Bicep.ps1 looks the External Partner up by -GuestEmail (#343)' {
+
+    It 'looks the guide''s guest up by default' {
+        $script:GuestDefault.Calls | Should -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'" -Because "output was:`n$($script:GuestDefault.Output)"
+    }
+
+    It 'looks the guest up by -GuestEmail instead' {
+        $script:GuestParam.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.one@example.test'" -Because "output was:`n$($script:GuestParam.Output)"
+        $script:GuestParam.Calls | Should -Not -Contain "Get-AzADUser|mail eq 'istormrage@illidari.com'"
+    }
+
+    It 'looks the guest up by SKYCRAFT_GUEST_EMAIL when no parameter is given' {
+        $script:GuestEnvRun.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.two@example.test'" -Because "output was:`n$($script:GuestEnvRun.Output)"
+    }
+
+    It 'prefers the parameter over SKYCRAFT_GUEST_EMAIL' {
+        $script:GuestBoth.Calls | Should -Contain "Get-AzADUser|mail eq 'partner.one@example.test'"
+        $script:GuestBoth.Calls | Should -Not -Contain "Get-AzADUser|mail eq 'partner.two@example.test'"
+    }
+
+    It 'refuses a malformed address before it looks anything up' {
+        $script:GuestBad.ExitCode | Should -Not -Be 0
+        $script:GuestBad.Output | Should -Match 'GuestEmail'
+        $script:GuestBad.Calls | Should -BeNullOrEmpty
     }
 }
 
