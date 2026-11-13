@@ -121,7 +121,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/compute/virtual-machine/extension` | `0.1.0` | Lab 5.1 |
 | `avm/res/container-instance/container-group` | `0.7.1` | Lab 3.3 |
 | `avm/res/container-registry/registry` | `0.13.1` | Lab 3.3 |
-| `avm/res/data-protection/backup-vault` | `0.13.2` | Lab 5.2 |
+| `avm/res/data-protection/backup-vault` | `0.13.3` | Lab 5.2 |
 | `avm/res/insights/action-group` | `0.8.0` | Lab 5.1 |
 | `avm/res/insights/data-collection-rule` | `0.11.0` | Lab 5.1 |
 | `avm/res/insights/metric-alert` | `0.4.1` | Lab 5.1 |
@@ -139,7 +139,7 @@ Every AVM reference pins an **exact version** (`x.y.z`), and a given AVM module 
 | `avm/res/network/virtual-network/subnet` | `0.2.0` | Labs 2.1, 2.2 |
 | `avm/res/network/virtual-network/virtual-network-peering` | `0.2.0` | Lab 2.1 |
 | `avm/res/operational-insights/workspace` | `0.16.1` | Lab 5.1 |
-| `avm/res/recovery-services/vault` | `0.13.0` | Lab 5.2 |
+| `avm/res/recovery-services/vault` | `0.13.2` | Lab 5.2 |
 | `avm/res/resources/resource-group` | `0.4.4` | Labs 1.2, 1.3, 3.3, 5.2 |
 | `avm/res/storage/storage-account` | `0.33.0` | Labs 4.1, 4.2, 4.3, 4.4 |
 | `avm/res/web/serverfarm` | `0.7.0` | Lab 3.4 |
