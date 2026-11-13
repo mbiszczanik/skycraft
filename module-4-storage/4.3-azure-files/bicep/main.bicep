@@ -76,7 +76,7 @@ var varSkuNames = {
 // blobServices is passed empty on purpose: an empty value makes AVM skip the blob service
 // deployment entirely, so the containers, versioning and lifecycle rules Lab 4.2 configured
 // survive this deployment untouched. This lab owns the file service only.
-module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
+module modStorage 'br/public:avm/res/storage/storage-account:0.33.1' = {
   name: 'sa-deployment-files'
   scope: resourceGroup('${parEnvironment}-skycraft-swc-rg')
   params: {

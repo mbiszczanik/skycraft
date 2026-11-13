@@ -122,7 +122,7 @@ resource resVnet 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
 *     Modules      *
 *******************/
 
-module modStorage 'br/public:avm/res/storage/storage-account:0.33.0' = {
+module modStorage 'br/public:avm/res/storage/storage-account:0.33.1' = {
   name: 'sa-deployment-security'
   scope: resourceGroup(varResourceGroupName)
   params: {
