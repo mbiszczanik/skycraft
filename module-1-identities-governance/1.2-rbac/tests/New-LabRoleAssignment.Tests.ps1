@@ -191,7 +191,7 @@ function Get-MgUser {
     param([string]$Filter, [Parameter(ValueFromRemainingArguments)]$Rest)
     Write-StubCall -Name "Get-MgUser|$Filter"
     if ($Filter -like '*malfurion.stormrage@*') { Get-StubPrincipalId -Key 'malfurion' }
-    elseif ($Filter -eq "Mail eq 'istormrage@illidari.com'") { Get-StubPrincipalId -Key 'istormrage' }
+    elseif ($Filter -match "^Mail eq '[^']+'$") { Get-StubPrincipalId -Key 'istormrage' }
 }
 
 # With SKYCRAFT_STUB_TWINS '1' a second group is also named SkyCraft-Developers.
@@ -244,12 +244,13 @@ function New-StubRoleAssignment {
     $script:Lab11Scopes     = 'User.ReadWrite.All,Group.ReadWrite.All,Directory.ReadWrite.All,Domain.Read.All,User.Invite.All'
 
     function Invoke-RoleAssignmentScript {
-        param([string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext, [switch]$Principals, [switch]$Held, [switch]$RoleLookupFail, [switch]$MgSignInFail, [switch]$MgLookupFail, [switch]$Conditioned, [switch]$Twins)
+        param([string[]]$ArgumentList = @(), [string]$GuestEnv = '', [string]$Domain = 'custom', [string]$Scopes = $script:Lab11Scopes, [switch]$NoContext, [string]$MgTenant = '', [switch]$MgFresh, [switch]$NoAzContext, [switch]$Principals, [switch]$Held, [switch]$RoleLookupFail, [switch]$MgSignInFail, [switch]$MgLookupFail, [switch]$Conditioned, [switch]$Twins)
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 
-        $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -Environment @{
+        $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
+            SKYCRAFT_GUEST_EMAIL           = $GuestEnv
             SKYCRAFT_STUB_DOMAIN           = $Domain
             SKYCRAFT_STUB_SCOPES           = $Scopes
             SKYCRAFT_STUB_NOCONTEXT        = if ($NoContext) { '1' } else { '0' }
@@ -291,6 +292,11 @@ function New-StubRoleAssignment {
     $script:Absent    = Invoke-RoleAssignmentScript -Domain 'custom'
     $script:Fail      = Invoke-RoleAssignmentScript -Domain 'fail'
     $script:NoInitial = Invoke-RoleAssignmentScript -Domain 'noinitial'
+    # The guest override (#343): the parameter, the environment variable, both, a malformed address.
+    $script:GuestParam  = Invoke-RoleAssignmentScript -Principals -ArgumentList '-GuestEmail', 'partner.one@example.test'
+    $script:GuestEnvRun = Invoke-RoleAssignmentScript -Principals -GuestEnv 'partner.two@example.test'
+    $script:GuestBoth   = Invoke-RoleAssignmentScript -Principals -ArgumentList '-GuestEmail', 'partner.one@example.test' -GuestEnv 'partner.two@example.test'
+    $script:GuestBad    = Invoke-RoleAssignmentScript -Principals -ArgumentList '-GuestEmail', 'not-an-address'
     # The #273 shape: a context in the session that holds a Read scope only.
     $script:ReadOnly  = Invoke-RoleAssignmentScript -Scopes 'User.Read.All' -Principals
     # The #242 shape: a sign-in that returns without a context.
@@ -475,5 +481,34 @@ Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - what it cannot finish is an [ERROR
         @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000002|*' -or $_ -like 'New-RoleAssignment:aaaaaaaa-0000-0000-0000-000000000022|*' }) | Should -BeNullOrEmpty
         @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:*' }).Count | Should -Be 4
         $run.Output | Should -Match 'Role assignment finished with 1 error\(s\)'
+    }
+}
+
+Describe 'Lab 1.2 New-LabRoleAssignment.ps1 - the guest address can be overridden (#343)' {
+
+    It 'resolves the guest by -GuestEmail' {
+        $run = $script:GuestParam
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $run.Calls | Should -Contain "Get-MgUser|Mail eq 'partner.one@example.test'"
+        $run.Calls | Should -Not -Contain "Get-MgUser|Mail eq 'istormrage@illidari.com'"
+    }
+
+    It 'resolves the guest by SKYCRAFT_GUEST_EMAIL when no parameter is given' {
+        $script:GuestEnvRun.Calls | Should -Contain "Get-MgUser|Mail eq 'partner.two@example.test'"
+    }
+
+    It 'prefers the parameter over SKYCRAFT_GUEST_EMAIL' {
+        $script:GuestBoth.Calls | Should -Contain "Get-MgUser|Mail eq 'partner.one@example.test'"
+        $script:GuestBoth.Calls | Should -Not -Contain "Get-MgUser|Mail eq 'partner.two@example.test'"
+    }
+
+    It 'keeps the guide''s address as the default' {
+        $script:Custom.Calls | Should -Contain "Get-MgUser|Mail eq 'istormrage@illidari.com'"
+    }
+
+    It 'refuses a malformed address before it looks anything up' {
+        $script:GuestBad.ExitCode | Should -Not -Be 0
+        $script:GuestBad.Output | Should -Match 'GuestEmail'
+        $script:GuestBad.Calls | Should -BeNullOrEmpty
     }
 }

@@ -42,6 +42,11 @@
 .PARAMETER WhatIf
     Previews the deployment with the ARM what-if API and exits. Nothing is created or changed.
 
+.PARAMETER GuestEmail
+    The address of the guest Lab 1.1 invites in step 1.1.5. When omitted, the script reads
+    SKYCRAFT_GUEST_EMAIL, and without that it uses the guide's address (istormrage@illidari.com).
+    Pass an address you control to run the lab with a guest who can accept the invitation.
+
 .EXAMPLE
     .\Deploy-Bicep.ps1
     Deploys the three resource groups to Sweden Central.
@@ -70,8 +75,18 @@ param(
 
     [switch]$IncludeRoleAssignments,
 
-    [switch]$WhatIf
+    [switch]$WhatIf,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Address of the guest Lab 1.1 invites (default: SKYCRAFT_GUEST_EMAIL, else the guide's address).")]
+    [ValidatePattern('^[^@\s'']+@[^@\s'']+\.[^@\s'']+$')]
+    [string]$GuestEmail
 )
+
+# The guest of step 1.1.5: -GuestEmail, else SKYCRAFT_GUEST_EMAIL, else the guide's address (#343).
+# The assignment keeps the parameter's pattern, so a bad environment value stops here.
+if (-not $PSBoundParameters.ContainsKey('GuestEmail')) {
+    $GuestEmail = if ($env:SKYCRAFT_GUEST_EMAIL) { $env:SKYCRAFT_GUEST_EMAIL } else { 'istormrage@illidari.com' }
+}
 
 $ErrorActionPreference = 'Stop'
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -258,7 +273,7 @@ if ($IncludeRoleAssignments) {
             parAdminPrincipalId          = Resolve-LabPrincipalId -Type User  -Name "malfurion.stormrage@$domain"
             parDeveloperGroupPrincipalId = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Developers'
             parTesterGroupPrincipalId    = Resolve-LabPrincipalId -Type Group -Name 'SkyCraft-Testers'
-            parPartnerPrincipalId        = Resolve-LabPrincipalId -Type Guest -Name 'istormrage@illidari.com'
+            parPartnerPrincipalId        = Resolve-LabPrincipalId -Type Guest -Name $GuestEmail
         }
         foreach ($entry in $principal.GetEnumerator()) {
             Write-Host "  $($entry.Key): $($entry.Value)" -ForegroundColor Gray

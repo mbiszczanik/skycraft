@@ -28,6 +28,11 @@
     assignments (Deploy-Bicep.ps1 without -IncludeRoleAssignments) and does not run Lab 1.1, so
     the assignments those checks look for are not the cycle's to create.
 
+.PARAMETER GuestEmail
+    The address of the guest Lab 1.1 invites in step 1.1.5. When omitted, the script reads
+    SKYCRAFT_GUEST_EMAIL, and without that it uses the guide's address (istormrage@illidari.com).
+    Pass an address you control to run the lab with a guest who can accept the invitation.
+
 .EXAMPLE
     .\Test-Lab.ps1
     Runs validation.
@@ -46,8 +51,18 @@
 
 [CmdletBinding()]
 param(
-    [switch]$SkipRoleAssignments
+    [switch]$SkipRoleAssignments,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Address of the guest Lab 1.1 invites (default: SKYCRAFT_GUEST_EMAIL, else the guide's address).")]
+    [ValidatePattern('^[^@\s'']+@[^@\s'']+\.[^@\s'']+$')]
+    [string]$GuestEmail
 )
+
+# The guest of step 1.1.5: -GuestEmail, else SKYCRAFT_GUEST_EMAIL, else the guide's address (#343).
+# The assignment keeps the parameter's pattern, so a bad environment value stops here.
+if (-not $PSBoundParameters.ContainsKey('GuestEmail')) {
+    $GuestEmail = if ($env:SKYCRAFT_GUEST_EMAIL) { $env:SKYCRAFT_GUEST_EMAIL } else { 'istormrage@illidari.com' }
+}
 
 $ErrorActionPreference = "Stop"
 # Exit-Lab ends the script with exit code 0 or 1 and leaves an interactive session open (#257).
@@ -105,7 +120,7 @@ $checks = @(
     @{ Name="Developers Group";  Principal="SkyCraft-Developers";  Role="Contributor"; Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Dev)"; Principal="SkyCraft-Testers";   Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/dev-skycraft-swc-rg" }
     @{ Name="Testers Group (Prod)"; Principal="SkyCraft-Testers";  Role="Reader";      Scope="/subscriptions/$subId/resourceGroups/prod-skycraft-swc-rg" }
-    @{ Name="External Partner";  Principal="istormrage@illidari.com"; Role="Reader";   Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
+    @{ Name="External Partner";  Principal=$GuestEmail; Role="Reader";   Scope="/subscriptions/$subId/resourceGroups/platform-skycraft-swc-rg" }
 )
 
 # The tenant's domains, as Microsoft Graph lists them (GET /v1.0/domains: id, isInitial, ...).

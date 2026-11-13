@@ -39,6 +39,11 @@
 .PARAMETER Force
     Skip the confirmation prompt.
 
+.PARAMETER GuestEmail
+    The address of the guest Lab 1.1 invites in step 1.1.5. When omitted, the script reads
+    SKYCRAFT_GUEST_EMAIL, and without that it uses the guide's address (istormrage@illidari.com).
+    Pass an address you control to run the lab with a guest who can accept the invitation.
+
 .EXAMPLE
     .\Remove-LabResource.ps1
     Prompts for confirmation before deleting resources.
@@ -59,8 +64,18 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $false)]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Address of the guest Lab 1.1 invites (default: SKYCRAFT_GUEST_EMAIL, else the guide's address).")]
+    [ValidatePattern('^[^@\s'']+@[^@\s'']+\.[^@\s'']+$')]
+    [string]$GuestEmail
 )
+
+# The guest of step 1.1.5: -GuestEmail, else SKYCRAFT_GUEST_EMAIL, else the guide's address (#343).
+# The assignment keeps the parameter's pattern, so a bad environment value stops here.
+if (-not $PSBoundParameters.ContainsKey('GuestEmail')) {
+    $GuestEmail = if ($env:SKYCRAFT_GUEST_EMAIL) { $env:SKYCRAFT_GUEST_EMAIL } else { 'istormrage@illidari.com' }
+}
 
 # --- Microsoft Graph sign-in (issue #76) ---------------------------------------------------
 # Lab 1.1 is the only lab that talks to Entra ID rather than ARM, and the only one that hung.
@@ -554,7 +569,7 @@ foreach ($upn in $usersToDelete) {
 
 # Cleanup Guest
 Write-Host "`nDeleting Guest User..." -ForegroundColor Yellow
-$guestEmail = "istormrage@illidari.com" # The address the guide invites in step 1.1.5
+$guestEmail = $GuestEmail # The guide invites istormrage@illidari.com in step 1.1.5
 $guest = $null
 $guestLookedUp = $false
 try {

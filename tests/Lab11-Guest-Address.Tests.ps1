@@ -72,7 +72,9 @@ Describe 'Lab 1.1 guest address - one address everywhere (#193)' {
         # rewritten to <alias>_<domain>#EXT#@<tenant>) and then reads its role assignments by
         # object id through the ARM API (#397), so the check names the guide's address itself.
         $text = Get-FileText (Join-Path $script:Lab12 'scripts' 'Test-Lab.ps1')
-        $text | Should -Match ('Name="External Partner";\s*Principal="' + [regex]::Escape($script:Guest) + '"')
+        # The address is the -GuestEmail parameter (#343); its default is the guide's guest, which the
+        # test above already requires in the script.
+        $text | Should -Match 'Name="External Partner";\s*Principal=\$GuestEmail'
         $text | Should -Match ([regex]::Escape('Get-AzADUser -Filter "mail eq ''$Name''"'))
     }
 }
