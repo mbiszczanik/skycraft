@@ -2560,10 +2560,10 @@ class FindOnScreenTests(RunnerTestCase):
     UPN = {"kind": "field", "label": "User principal name", "value": "x", "line": 4}
     UPN_VALUE = "malfurion.stormrage@contoso.onmicrosoft.com"
 
-    def upn_screen(self, shown: str, offered=()) -> tuple[Screen, ScreenNode, ScreenNode]:
+    def upn_screen(self, shown: str, offered=(), read_only: bool = False) -> tuple[Screen, ScreenNode, ScreenNode]:
         """The Portal's 'User principal name': a labelled <div> holding a text box, an '@' and a
         domain combo box showing `shown`; opening the combo box lists `offered`."""
-        local = ScreenNode(tag="input")
+        local = ScreenNode(tag="input", read_only=read_only)
         domain = ScreenNode(attrs={"role": "combobox"}, text=shown)
         screen = Screen()
 
@@ -2581,6 +2581,15 @@ class FindOnScreenTests(RunnerTestCase):
         screen, local, domain = self.upn_screen("Contoso.onmicrosoft.com")    # preselected, other case
         record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
         self.assertEqual((record["outcome"], local.filled, domain.clicked), ("match", ["malfurion.stormrage"], 0))
+
+    def test_a_read_only_name_box_stops_the_form_before_the_domain_is_picked(self) -> None:
+        # #213: the domain used to be picked first, so a form reported as not filled had been changed.
+        screen, local, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example", "contoso.onmicrosoft.com"],
+                                                read_only=True)
+        record, _ = self.act(screen, self.UPN, "User principal name", value=self.UPN_VALUE)
+        self.assertEqual((record["outcome"], local.filled, domain.clicked, domain.text),
+                         ("unknown", [], 0, "fabrikam.example"))
+        self.assertIn("read-only", record["observed"])
 
     def test_a_domain_not_shown_is_picked_from_the_combo_box(self) -> None:
         screen, local, domain = self.upn_screen("fabrikam.example", offered=["fabrikam.example", "CONTOSO.onmicrosoft.com"])

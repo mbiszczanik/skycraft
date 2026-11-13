@@ -1559,6 +1559,11 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
         return fill_field(page, textboxes[0], value)
     if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
+        # A text box that cannot take the name is found out before the domain is picked: the combo box
+        # is not changed on a form the run then reports as not filled (#213).
+        box_tag = textboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
+        if current_text(textboxes[0], box_tag) != local and is_read_only(textboxes[0]):
+            raise ReadOnly("the field is read-only")
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
             picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
