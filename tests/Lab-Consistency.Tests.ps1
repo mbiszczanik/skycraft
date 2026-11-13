@@ -123,6 +123,55 @@ Describe 'Test-LabConsistency.ps1 - findings' {
         $run.ExitCode | Should -Be 0 -Because $run.Output
     }
 
+    It 'fails when a body section is not in the Estimated Time list' {
+        $guide = $script:GoodGuide + "`n## Estimated Time: 1 hour`n`n- **Section 1**: One (10 min)`n`n## Section 1: One (10 min)`n`n## Section 2: Two (10 min)`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match "\[TimePlanSections\].*'## Section 2:' and the Estimated Time list does not"
+    }
+
+    It 'fails when the Estimated Time list names a section the body lacks' {
+        $guide = $script:GoodGuide + "`n## Estimated Time: 1 hour`n`n- **Section 1**: One (10 min)`n- **Section 2**: Two (10 min)`n`n## Section 1: One (10 min)`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[TimePlanSections\].*names Section 2 and the body has no'
+    }
+
+    It 'fails when the guide has sections and no Estimated Time list' {
+        $guide = $script:GoodGuide + "`n## Section 1: One (10 min)`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[TimePlanSections\]'
+    }
+
+    It 'passes when the time plan and the section headings agree' {
+        $guide = $script:GoodGuide + "`n## Estimated Time: 1 hour`n`n- **Section 1**: One (10 min)`n- **Section 2**: Two (10 min)`n- **What This Lab Leaves Behind** (5 min)`n`n## Section 1: One (10 min)`n`n## Section 2: Two (10 min)`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+    }
+
+    It 'fails when an objective cites a section the body does not have' {
+        $guide = "## Learning Objectives`n`n- Do a thing (Section 3)`n`n" + $script:GoodGuide
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[ObjectiveSection\].*cites Section 3'
+    }
+
+    It 'warns about a checklist name no step uses, without failing the gate' {
+        $guide = $script:GoodGuide + "`n## Lab Checklist`n`n- [ ] ``ghost-resource`` exists`n`n## Next`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Match "\[WARN\] \[ChecklistTerm\].*'ghost-resource'"
+        $run.Output | Should -Match '1 warning\(s\)'
+    }
+
+    It 'does not warn when a step names the checklist item' {
+        $guide = $script:GoodGuide + "`nCreate ghost-resource.`n`n## Lab Checklist`n`n- [ ] ``ghost-resource`` exists`n`n## Next`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Match '0 warning\(s\)'
+    }
+
     It 'fails when the guide has no Leaves Behind section' {
         $guide = $script:GoodGuide -replace '(?s)## What This Lab Leaves Behind.*', ''
         $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
