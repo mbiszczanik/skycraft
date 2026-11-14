@@ -39,6 +39,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $failCount = 0
+$script:passCount = 0
 
 Write-Host "=== Lab 3.1 Validation Script ($Environment) ===" -ForegroundColor Cyan
 
@@ -53,25 +54,25 @@ $pipName  = "$Environment-$project-$locationShortCode-lb-pip"
 # 1. Verify Resource Group
 try {
     $rg = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
-    Write-Host "[OK] Resource Group '$($rg.ResourceGroupName)' found." -ForegroundColor Green
+    Write-Host "[OK] Resource Group '$($rg.ResourceGroupName)' found." -ForegroundColor Green; $script:passCount++
 }
 catch {
     Write-Host "[FAIL] Resource Group '$rgName' NOT found." -ForegroundColor Red
     $failCount++
     # Cannot proceed with VNet/NSG/LB checks if the RG is missing
     Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor Red
-    Exit-Lab -FailureCount $failCount
+    Exit-Lab -FailureCount $failCount -PassCount $script:passCount
 }
 
 # 2. Verify VNet
 try {
     $vnet = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $rgName -ErrorAction Stop
-    Write-Host "[OK] VNet '$vnetName' found." -ForegroundColor Green
+    Write-Host "[OK] VNet '$vnetName' found." -ForegroundColor Green; $script:passCount++
 
     $expectedSubnets = @('AuthSubnet', 'WorldSubnet', 'DatabaseSubnet')
     foreach ($sub in $expectedSubnets) {
         if ($vnet.Subnets.Name -contains $sub) {
-            Write-Host "  - [OK] Subnet '$sub' found." -ForegroundColor Green
+            Write-Host "  - [OK] Subnet '$sub' found." -ForegroundColor Green; $script:passCount++
         }
         else {
             Write-Host "  - [FAIL] Subnet '$sub' MISSING." -ForegroundColor Red
@@ -89,7 +90,7 @@ try {
         $failCount++
     }
     elseif (@($appSubnet.Delegations.ServiceName) -contains $appServiceName) {
-        Write-Host "  - [OK] Subnet '$appSubnetName' found, delegated to $appServiceName." -ForegroundColor Green
+        Write-Host "  - [OK] Subnet '$appSubnetName' found, delegated to $appServiceName." -ForegroundColor Green; $script:passCount++
     }
     else {
         $actual = @($appSubnet.Delegations.ServiceName | Where-Object { $_ })
@@ -108,10 +109,10 @@ $expectedNsgs = @('auth-nsg', 'world-nsg')
 foreach ($nsgName in $expectedNsgs) {
     try {
         $nsg = Get-AzNetworkSecurityGroup -Name $nsgName -ResourceGroupName $rgName -ErrorAction Stop
-        Write-Host "[OK] NSG '$nsgName' found." -ForegroundColor Green
+        Write-Host "[OK] NSG '$nsgName' found." -ForegroundColor Green; $script:passCount++
 
         if ($nsg.SecurityRules.Count -gt 0) {
-            Write-Host "  - [OK] Rules present ($($nsg.SecurityRules.Count))." -ForegroundColor Green
+            Write-Host "  - [OK] Rules present ($($nsg.SecurityRules.Count))." -ForegroundColor Green; $script:passCount++
         }
         else {
             Write-Host "  - [WARN] No security rules defined." -ForegroundColor Yellow
@@ -126,10 +127,10 @@ foreach ($nsgName in $expectedNsgs) {
 # 4. Verify Load Balancer
 try {
     $lb = Get-AzLoadBalancer -Name $lbName -ResourceGroupName $rgName -ErrorAction Stop
-    Write-Host "[OK] Load Balancer '$lbName' found." -ForegroundColor Green
+    Write-Host "[OK] Load Balancer '$lbName' found." -ForegroundColor Green; $script:passCount++
 
     if ($lb.FrontendIpConfigurations.Count -gt 0) {
-        Write-Host "  - [OK] Frontend IP Configured." -ForegroundColor Green
+        Write-Host "  - [OK] Frontend IP Configured." -ForegroundColor Green; $script:passCount++
     }
     else {
         Write-Host "  - [FAIL] No Frontend IP Config." -ForegroundColor Red
@@ -144,10 +145,10 @@ catch {
 # 5. Verify Public IP
 try {
     $pip = Get-AzPublicIpAddress -Name $pipName -ResourceGroupName $rgName -ErrorAction Stop
-    Write-Host "[OK] Public IP '$pipName' found." -ForegroundColor Green
+    Write-Host "[OK] Public IP '$pipName' found." -ForegroundColor Green; $script:passCount++
 
     if ($pip.IpAddress) {
-        Write-Host "  - [OK] IP Address: $($pip.IpAddress)" -ForegroundColor Green
+        Write-Host "  - [OK] IP Address: $($pip.IpAddress)" -ForegroundColor Green; $script:passCount++
     }
 }
 catch {
@@ -156,4 +157,4 @@ catch {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
-Exit-Lab -FailureCount $failCount
+Exit-Lab -FailureCount $failCount -PassCount $script:passCount
