@@ -747,6 +747,31 @@ Describe 'SkyCraft PowerShell - Exit-Lab reaches both callers (real pwsh process
         $prompt | Should -Match 'Exit-Lab: not the process entry point, plain exit 1' -Because "output was:`n$prompt"
     }
 
+    It 'prints the RESULT line as the last output line, in a real pwsh -File process (#363)' -ForEach @(
+        @{ name = 'passed and failed'; extra = '-Pass 4'; count = 2; expected = 'RESULT passed=4 failed=2'; code = 1 }
+        @{ name = 'all passed';        extra = '-Pass 7'; count = 0; expected = 'RESULT passed=7 failed=0'; code = 0 }
+        @{ name = 'with skipped';      extra = '-Pass 3 -Skip 2'; count = 0; expected = 'RESULT passed=3 failed=0 skipped=2'; code = 0 }
+        @{ name = 'zero passed';       extra = '-Pass 0'; count = 1; expected = 'RESULT passed=0 failed=1'; code = 1 }
+    ) {
+        $resultScript = Join-Path $TestDrive 'Result-Fixture.ps1'
+        @(
+            '[CmdletBinding()]'
+            'param([int]$Count, [int]$Pass, [int]$Skip, [switch]$NoPass)'
+            "Import-Module '$LabCommonPath' -Force -Verbose:`$false"
+            'Write-Host "a check"'
+            'if ($PSBoundParameters.ContainsKey(''Skip'')) { Exit-Lab -FailureCount $Count -PassCount $Pass -SkipCount $Skip }'
+            'Exit-Lab -FailureCount $Count -PassCount $Pass'
+        ) | Set-Content -LiteralPath $resultScript -Encoding utf8
+        $lines = @(& $script:Pwsh -NoProfile -File $resultScript -Count $count @($extra -split ' ') 2>&1 | Out-String -Stream | Where-Object { $_.Trim() })
+        $LASTEXITCODE | Should -Be $code
+        $lines[-1] | Should -Be $expected -Because "output was:`n$($lines -join "`n")"
+    }
+
+    It 'prints no RESULT line when Exit-Lab gets no -PassCount (#363)' {
+        $output = & $script:Pwsh -NoProfile -File $script:LabScript -Count 1 2>&1 | Out-String
+        $output | Should -Not -Match 'RESULT passed='
+    }
+
     It 'Exit-Lab typed at the prompt, after a lab script loaded it, warns and leaves the session open' {
         $output = Invoke-InteractiveSession -Line @(
             "& '$($script:LabScript)' -Count 0"

@@ -57,6 +57,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $failCount = 0
+$script:passCount = 0
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
 $vnetName           = "$Environment-skycraft-swc-vnet"
@@ -66,7 +67,7 @@ Write-Host "=== Lab 4.4: Validating Storage Security ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1 -PassCount 0
 }
 
 # 2. The storage account and its firewall (Step 4.4.2)
@@ -84,6 +85,7 @@ if ($sa) {
     # A storage account Azure left in a Failed state passes every settings check below (#371).
     if ("$($sa.ProvisioningState)" -eq 'Succeeded') {
         Write-Host "  -> Storage account is provisioned (Succeeded)." -ForegroundColor Green
+        $script:passCount++
     }
     else {
         Write-Host "  -> [FAIL] Storage account provisioning state is '$($sa.ProvisioningState)'. Expected: Succeeded." -ForegroundColor Red
@@ -92,6 +94,7 @@ if ($sa) {
 
     if ($sa.NetworkRuleSet.DefaultAction -eq 'Deny') {
         Write-Host "  -> Firewall is correctly set to 'Deny' by default." -ForegroundColor Green
+        $script:passCount++
     }
     else {
         Write-Host "  -> [FAIL] Firewall default action is '$($sa.NetworkRuleSet.DefaultAction)'. Expected: Deny (Step 4.4.2, 'Enabled from selected networks')." -ForegroundColor Red
@@ -115,6 +118,7 @@ if ($sa) {
         }
         else {
             Write-Host "  -> Virtual network rule for '$vnetName/$subnetName' found." -ForegroundColor Green
+            $script:passCount++
         }
     }
 
@@ -131,6 +135,7 @@ try {
     if ($worldSubnet) {
         if ($worldSubnet.ServiceEndpoints.Service -contains 'Microsoft.Storage') {
             Write-Host "  -> Service Endpoint 'Microsoft.Storage' is enabled on $subnetName." -ForegroundColor Green
+            $script:passCount++
         }
         else {
             Write-Host "  -> [FAIL] Service Endpoint 'Microsoft.Storage' is NOT enabled on $subnetName." -ForegroundColor Red
@@ -187,6 +192,7 @@ if ($sa) {
 
         if ($containers.Name -contains $containerName) {
             Write-Host "  -> Container '$containerName' found." -ForegroundColor Green
+            $script:passCount++
             if ($holders -contains $containerName) {
                 Write-Host "  -> [INFO] '$containerName' still holds '$policyName': Step 4.4.4 deletes it at its end. Not counted." -ForegroundColor Gray
             }
@@ -199,6 +205,7 @@ if ($sa) {
         }
         elseif ($holders.Count -gt 0) {
             Write-Host "  -> Container '$($holders -join "', '")' holds stored access policy '$policyName' (the exercise container of an older guide; Step 4.4.3 now creates '$containerName')." -ForegroundColor Green
+            $script:passCount++
         }
         elseif ($readErrors.Count -gt 0) {
             Write-Host "  -> [FAIL] Container '$containerName' not found, and the stored access policies of $($readErrors.Count) container(s) could not be read (is your client IP allowed, step 4.4.2?): $($readErrors -join '; ')" -ForegroundColor Red
@@ -226,6 +233,7 @@ if ($sa) {
             # identifies the directory. The output may be pasted as evidence, so it names the kind only.
             $kinds = (@($assignments | ForEach-Object { if ($_.ObjectType) { "$($_.ObjectType)" } else { 'Unknown' } }) | Sort-Object -Unique) -join ', '
             Write-Host "  -> '$roleName' is assigned on the account: $($assignments.Count) assignment(s), principal type(s): $kinds." -ForegroundColor Green
+            $script:passCount++
         }
         else {
             Write-Host "  -> [FAIL] No '$roleName' assignment on '$storageAccountName' itself. Step 4.4.7 assigns it to your account." -ForegroundColor Red
@@ -257,4 +265,4 @@ if ($sa) {
 }
 
 Write-Host "`nValidation Complete. Failures: $failCount" -ForegroundColor $(if ($failCount -eq 0) { 'Cyan' } else { 'Red' })
-Exit-Lab -FailureCount $failCount
+Exit-Lab -FailureCount $failCount -PassCount $script:passCount

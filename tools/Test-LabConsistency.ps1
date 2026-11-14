@@ -27,9 +27,18 @@
                             ("Section N"), and every "Section N" of the list has a heading (#363
                             check 3, #357).
       ObjectiveSection      An objective that cites "(Section N)" cites a section the body has.
+      ChangeStepCommand     Warn-only, never fails the gate (#363 check 4): a "### Step X.Y.N" section that
+                            changes Azure and has neither a powershell/pwsh block nor the words
+                            "Portal only". Heuristic; one [WARN] per guide lists the steps.
       ChecklistTerm         Warn-only, never fails the gate: a `backticked` name in a guide checklist
                             or in lab-checklist-*.md that no step names (#363 check 3). Too fuzzy
                             to fail (placeholders, commands, examples).
+
+      ResultLine            A lab's Test-Lab.ps1 ends through Exit-Lab with -PassCount, which prints
+                            the one machine-readable last line `RESULT passed=<n> failed=<n>`
+                            (with ` skipped=<n>` where the validator can skip), or prints that
+                            line itself (#363 check 6). The last Exit-Lab call decides; a trap
+                            handler's call does not.
 
     Check 5 of #363 (menu paths name their group) is tests/Guide-Menu-Groups.Tests.ps1.
 
@@ -130,6 +139,19 @@ foreach ($file in $validators) {
     }
 }
 
+# ResultLine
+foreach ($file in $validators) {
+    $lines = @(Get-Content -LiteralPath (Join-Path $RepoRoot $file))
+    $code = @($lines | Where-Object { $_ -notmatch '^\s*#' -and $_ -notmatch '\btrap\s*\{' })
+    $exits = @($code | Where-Object { $_ -match '\bExit-Lab\b' })
+    $printsItself = @($code | Where-Object { $_ -match 'RESULT passed=' }).Count -gt 0
+    if ($exits.Count -eq 0 -and -not $printsItself) {
+        Add-Finding -Check 'ResultLine' -File $file -Match 'Exit-Lab' -Detail 'the validator never calls Exit-Lab, so it prints no RESULT line'
+    } elseif ($exits.Count -gt 0 -and $exits[-1] -notmatch '-PassCount\b' -and -not $printsItself) {
+        Add-Finding -Check 'ResultLine' -File $file -Match $exits[-1].Trim() -Detail 'the last Exit-Lab call has no -PassCount, so the validator prints no RESULT line (RESULT passed=<n> failed=<n>)'
+    }
+}
+
 # PrerequisiteEdges and LeavesBehindSection
 foreach ($phase in $phases) {
     $labId = $phase.Id
@@ -220,6 +242,23 @@ foreach ($guide in $guides) {
         if ($m.Groups[1].Value -notin $bodyNumbers) {
             Add-Finding -Check 'ObjectiveSection' -File $guide -Match "Section $($m.Groups[1].Value)" -Detail "an objective cites Section $($m.Groups[1].Value) and the body has no such section"
         }
+    }
+
+    # ChangeStepCommand (warn-only, #363 check 4): a "### Step X.Y.N" section that changes Azure (a
+    # Create, Save, Add, Delete ... button or a Review + create) and holds no powershell/pwsh block
+    # and no "Portal only" marker. A heuristic over the step text, so it warns and never fails.
+    $changeWords = '\*\*(Create|Review \+ create|Save|Apply|Delete|Add|Enable|Assign|Associate|Deploy|Start|Stop|Restart|Update|Link|Connect|Upload)\*\*|Review \+ create'
+    $bare = [System.Collections.Generic.List[string]]::new()
+    foreach ($step in [regex]::Split($text, '(?m)^(?=### Step \d+\.\d+\.\d+)')) {
+        $head = [regex]::Match($step, '^### Step (\d+\.\d+\.\d+)')
+        if (-not $head.Success) { continue }
+        $body = ($step -split '(?m)^## ')[0]
+        if ($body -notmatch $changeWords) { continue }
+        if ($body -match '(?m)^\s*```(powershell|pwsh)\b' -or $body -match 'portal[- ]only') { continue }
+        $bare.Add($head.Groups[1].Value)
+    }
+    if ($bare.Count -gt 0) {
+        $warnings.Add("[ChangeStepCommand] ${guide}: $($bare.Count) step(s) change Azure with no Az PowerShell block and no 'Portal only' marker: Step $($bare -join ', ')")
     }
 
     $checklist = [regex]::Match($text, '(?ms)^##\s+\S*\s*Lab Checklist\s*$(?<b>.*?)(?=^##\s|\z)')

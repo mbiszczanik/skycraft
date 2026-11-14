@@ -280,4 +280,4 @@ if ($script:testsFailed -eq 0) {
 else {
     Write-Host "Some tests failed. Review the errors above." -ForegroundColor Red
 }
-Exit-Lab -FailureCount $script:testsFailed
+Exit-Lab -FailureCount $script:testsFailed -PassCount $script:testsPassed

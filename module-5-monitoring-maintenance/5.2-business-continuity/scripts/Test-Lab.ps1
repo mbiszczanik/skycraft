@@ -141,6 +141,7 @@ $backupVaultApiVersion = '2024-04-01'
 
 $passCount = 0
 $failCount = 0
+$skipCount = 0
 
 # Whether a lookup's error says the object does not exist rather than that the lookup failed.
 # Same rule as Test-LabNotFoundError in this lab's Remove-LabResource.ps1.
@@ -229,7 +230,7 @@ Write-Host ""
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 Write-Host ""
@@ -765,6 +766,7 @@ Invoke-Test "Target group holds a Recovery Services vault" {
 if ($SkipSiteRecovery) {
     foreach ($skipped in @("'$asrVm' has a replication item in the vault", "Replication of '$asrVm' is Protected", "Replication health of '$asrVm' is Normal")) {
         Write-Host "  [SKIP] $skipped (-SkipSiteRecovery, not counted)" -ForegroundColor Gray
+        $skipCount++
     }
 } elseif (-not (Get-AzVM -Name $asrVm -ResourceGroupName $vmRg -ErrorAction SilentlyContinue)) {
     Write-Host "  [WARNING] VM '$asrVm' not found in '$vmRg' - skipping its replication checks (not counted as failures)." -ForegroundColor Yellow
@@ -806,4 +808,4 @@ if ($failCount -gt 0) {
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Exit-Lab -FailureCount $failCount
+Exit-Lab -FailureCount $failCount -PassCount $passCount -SkipCount $skipCount

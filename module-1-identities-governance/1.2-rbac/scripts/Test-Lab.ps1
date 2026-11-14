@@ -79,7 +79,7 @@ Write-Host "`nChecking Azure connection..." -ForegroundColor Cyan
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "[ERROR] Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 $subId = $context.Subscription.Id
 Write-Host "Connected to: $($context.Subscription.Name) ($subId)" -ForegroundColor Green
@@ -283,8 +283,8 @@ Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Re
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.2 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount $passCount -SkipCount $(if ($SkipRoleAssignments) { $checks.Count } else { 0 })
 }
 
 Write-Host "`nLab 1.2 validation passed: all $passCount checks passed." -ForegroundColor Green
-Exit-Lab -FailureCount 0
+Exit-Lab -FailureCount 0 -PassCount $passCount -SkipCount $(if ($SkipRoleAssignments) { $checks.Count } else { 0 })

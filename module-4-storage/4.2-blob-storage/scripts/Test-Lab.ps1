@@ -187,7 +187,7 @@ try {
 }
 catch {
     Write-Host "FATAL: Could not retrieve storage accounts. Ensure deployment succeeded." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 
 # 2. Production Security Verification (Privacy & Versioning)
@@ -304,4 +304,4 @@ if ($failedCount -eq 0) {
 else {
     Write-Host "FAILURE: Some checks failed." -ForegroundColor Red
 }
-Exit-Lab -FailureCount $failedCount
+Exit-Lab -FailureCount $failedCount -PassCount $TestsPassed

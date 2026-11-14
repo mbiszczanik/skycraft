@@ -38,6 +38,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $script:failCount = 0
+$script:passCount = 0
 
 Write-Host "=== Lab 2.2 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -45,7 +46,7 @@ Write-Host "=== Lab 2.2 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -66,7 +67,7 @@ $expectedAsgs = @(
 
 foreach ($item in $expectedAsgs) {
     $asg = Get-AzApplicationSecurityGroup -ResourceGroupName $item.RG -Name $item.Name -ErrorAction SilentlyContinue
-    if ($asg) { Write-Host "[OK] ASG found: $($item.Name)" -ForegroundColor Green }
+    if ($asg) { Write-Host "[OK] ASG found: $($item.Name)" -ForegroundColor Green; $script:passCount++ }
     else {
         Write-Host "[FAIL] ASG missing: $($item.Name)" -ForegroundColor Red
         $script:failCount++
@@ -87,13 +88,13 @@ $nsgs = @(
 foreach ($nsgInfo in $nsgs) {
     $nsg = Get-AzNetworkSecurityGroup -ResourceGroupName $nsgInfo.RG -Name $nsgInfo.Name -ErrorAction SilentlyContinue
     if ($nsg) {
-        Write-Host "[OK] NSG found: $($nsgInfo.Name)" -ForegroundColor Green
+        Write-Host "[OK] NSG found: $($nsgInfo.Name)" -ForegroundColor Green; $script:passCount++
 
         if ($nsgInfo.Rule) {
             $rule = $nsg.SecurityRules | Where-Object { $_.Name -match $nsgInfo.Rule }
             if ($rule) {
                 if ($rule.DestinationPortRange -eq $nsgInfo.Port -and $rule.Access -eq "Allow") {
-                    Write-Host "  -> [OK] Rule '$($nsgInfo.Rule)' verified (Port: $($nsgInfo.Port))" -ForegroundColor Gray
+                    Write-Host "  -> [OK] Rule '$($nsgInfo.Rule)' verified (Port: $($nsgInfo.Port))" -ForegroundColor Gray; $script:passCount++
                 } else {
                     Write-Host "  -> [FAIL] Rule '$($nsgInfo.Rule)' matches incorrect settings" -ForegroundColor Red
                     $script:failCount++
@@ -101,7 +102,7 @@ foreach ($nsgInfo in $nsgs) {
             } else {
                 $ruleByPort = $nsg.SecurityRules | Where-Object { $_.DestinationPortRange -eq $nsgInfo.Port }
                 if ($ruleByPort) {
-                    Write-Host "  -> [OK] Rule for Port $($nsgInfo.Port) found (Name: $($ruleByPort.Name))" -ForegroundColor Gray
+                    Write-Host "  -> [OK] Rule for Port $($nsgInfo.Port) found (Name: $($ruleByPort.Name))" -ForegroundColor Gray; $script:passCount++
                 } else {
                     Write-Host "  -> [FAIL] Rule '$($nsgInfo.Rule)' missing" -ForegroundColor Red
                     $script:failCount++
@@ -125,7 +126,7 @@ function Test-Subnet {
         $sn = $vnet.Subnets | Where-Object { $_.Name -eq $SubnetName }
         if ($sn) {
             if ($sn.NetworkSecurityGroup.Id -match $ExpectedNsgName) {
-                Write-Host "[OK] $SubnetName associated with $ExpectedNsgName" -ForegroundColor Green
+                Write-Host "[OK] $SubnetName associated with $ExpectedNsgName" -ForegroundColor Green; $script:passCount++
             } else {
                 Write-Host "[FAIL] $SubnetName NOT associated with $ExpectedNsgName (Current: $($sn.NetworkSecurityGroup.Id))" -ForegroundColor Red
                 $script:failCount++
@@ -135,7 +136,7 @@ function Test-Subnet {
                 $present = @($sn.ServiceEndpoints | ForEach-Object { $_.Service })
                 $missing = @($ExpectedServiceEndpoints | Where-Object { $present -notcontains $_ })
                 if ($missing.Count -eq 0) {
-                    Write-Host "  -> [OK] Service Endpoints ($($ExpectedServiceEndpoints -join ', ')) enabled" -ForegroundColor Gray
+                    Write-Host "  -> [OK] Service Endpoints ($($ExpectedServiceEndpoints -join ', ')) enabled" -ForegroundColor Gray; $script:passCount++
                 } else {
                     Write-Host "  -> [FAIL] Missing Service Endpoints on ${SubnetName}: $($missing -join ', ')" -ForegroundColor Red
                     $script:failCount++
@@ -180,17 +181,17 @@ function Test-CanonicalTagSet {
 
 $bastion = Get-AzBastion -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas" -ErrorAction SilentlyContinue
 if ($bastion) {
-    Write-Host "[OK] Bastion 'platform-skycraft-swc-bas' found." -ForegroundColor Green
+    Write-Host "[OK] Bastion 'platform-skycraft-swc-bas' found." -ForegroundColor Green; $script:passCount++
 
     if ($bastion.Sku.Name -eq 'Basic') {
-        Write-Host "  -> [OK] Bastion SKU is Basic" -ForegroundColor Gray
+        Write-Host "  -> [OK] Bastion SKU is Basic" -ForegroundColor Gray; $script:passCount++
     } else {
         Write-Host "  -> [FAIL] Bastion SKU is $($bastion.Sku.Name) (Expected Basic)" -ForegroundColor Red
         $script:failCount++
     }
 
     if ("$($bastion.ProvisioningState)" -eq 'Succeeded') {
-        Write-Host "  -> [OK] Bastion provisioning state is Succeeded" -ForegroundColor Gray
+        Write-Host "  -> [OK] Bastion provisioning state is Succeeded" -ForegroundColor Gray; $script:passCount++
     } else {
         Write-Host "  -> [FAIL] Bastion provisioning state is '$($bastion.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
         $script:failCount++
@@ -200,17 +201,17 @@ if ($bastion) {
 
     $bastionPip = Get-AzPublicIpAddress -ResourceGroupName $platRg -Name "platform-skycraft-swc-bas-pip" -ErrorAction SilentlyContinue
     if ($bastionPip) {
-        Write-Host "  -> [OK] Bastion public IP 'platform-skycraft-swc-bas-pip' found" -ForegroundColor Gray
+        Write-Host "  -> [OK] Bastion public IP 'platform-skycraft-swc-bas-pip' found" -ForegroundColor Gray; $script:passCount++
 
         if ($bastionPip.Sku.Name -eq 'Standard') {
-            Write-Host "  -> [OK] Bastion public IP SKU is Standard" -ForegroundColor Gray
+            Write-Host "  -> [OK] Bastion public IP SKU is Standard" -ForegroundColor Gray; $script:passCount++
         } else {
             Write-Host "  -> [FAIL] Bastion public IP SKU is $($bastionPip.Sku.Name) (Expected Standard)" -ForegroundColor Red
             $script:failCount++
         }
 
         if ($bastionPip.PublicIpAllocationMethod -eq 'Static') {
-            Write-Host "  -> [OK] Bastion public IP allocation is Static" -ForegroundColor Gray
+            Write-Host "  -> [OK] Bastion public IP allocation is Static" -ForegroundColor Gray; $script:passCount++
         } else {
             Write-Host "  -> [FAIL] Bastion public IP allocation is $($bastionPip.PublicIpAllocationMethod) (Expected Static)" -ForegroundColor Red
             $script:failCount++
@@ -227,4 +228,4 @@ if ($bastion) {
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 Write-Host "Lab 2.2 validation complete. Failures: $($script:failCount)" -ForegroundColor $(if ($script:failCount -eq 0) { 'Green' } else { 'Red' })
-Exit-Lab -FailureCount $script:failCount
+Exit-Lab -FailureCount $script:failCount -PassCount $script:passCount
