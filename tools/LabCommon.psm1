@@ -1658,4 +1658,223 @@ function Write-LabWhatIfResult {
     }
 }
 
-Export-ModuleMember -Function Write-LabWhatIfResult, Write-Host, Protect-LabText, Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting
+# ---------------------------------------------------------------------------------------------
+# Check counting, lookups, subscription guard and role retry (issues #301, #530, #290).
+# ---------------------------------------------------------------------------------------------
+
+$script:LabCheckCount = @{ Passed = 0; Failed = 0; Skipped = 0 }
+
+function Reset-LabCheckCount {
+    <#
+    .SYNOPSIS
+        Sets the counters of Invoke-LabCheck to zero.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if ($PSCmdlet.ShouldProcess('the lab check counters', 'Reset')) {
+        $script:LabCheckCount = @{ Passed = 0; Failed = 0; Skipped = 0 }
+    }
+}
+
+function Get-LabCheckCount {
+    <#
+    .SYNOPSIS
+        Returns how many checks Invoke-LabCheck passed, failed and skipped since the last reset.
+    #>
+    [CmdletBinding()]
+    param()
+    [pscustomobject]@{
+        Passed  = [int]$script:LabCheckCount.Passed
+        Failed  = [int]$script:LabCheckCount.Failed
+        Skipped = [int]$script:LabCheckCount.Skipped
+    }
+}
+
+function Skip-LabCheck {
+    <#
+    .SYNOPSIS
+        Ends the running check as SKIPPED, with the reason.
+
+    .DESCRIPTION
+        Call it inside an Invoke-LabCheck -Test block when the check cannot run for a reason that is
+        not a defect of the lab, for example a token the session cannot get (issue #530). A skipped
+        check is neither a pass nor a failure: it is counted on its own and named in the output, so
+        a run that skipped it cannot claim to have proved it.
+
+    .PARAMETER Reason
+        Why the check could not run.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Reason)
+    throw [System.OperationCanceledException]::new($Reason)
+}
+
+function Invoke-LabCheck {
+    <#
+    .SYNOPSIS
+        Runs one lab check, prints [PASS], [FAIL] or [SKIPPED], and counts the outcome.
+
+    .DESCRIPTION
+        The test block passes when it returns $true. Any other result, or an exception, is a
+        failure and is counted; the function never throws on a failed check, so one failure does
+        not stop the checks after it. A block that calls Skip-LabCheck is counted as skipped.
+        Read the totals with Get-LabCheckCount and end the script with Exit-Lab -FailureCount.
+
+    .PARAMETER Name
+        The check's name, printed after the outcome.
+
+    .PARAMETER Test
+        The check. Returns $true to pass.
+
+    .OUTPUTS
+        PSCustomObject with Name, Outcome (Passed, Failed, Skipped) and Detail.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][scriptblock]$Test
+    )
+
+    $outcome = 'Failed'
+    $detail = ''
+    try {
+        $result = & $Test
+        if ($result -is [array]) { $result = $result[-1] }
+        if ($result -eq $true) { $outcome = 'Passed' }
+    } catch [System.OperationCanceledException] {
+        $outcome = 'Skipped'
+        $detail = $_.Exception.Message
+    } catch {
+        $detail = $_.Exception.Message
+    }
+
+    $script:LabCheckCount[$outcome]++
+    $suffix = if ($detail) { " - $detail" } else { '' }
+    switch ($outcome) {
+        'Passed' { Write-Host "  [PASS] $Name" -ForegroundColor Green }
+        'Skipped' { Write-Host "  [SKIPPED] $Name$suffix" -ForegroundColor Yellow }
+        default { Write-Host "  [FAIL] $Name$suffix" -ForegroundColor Red }
+    }
+    [pscustomobject]@{ Name = $Name; Outcome = $outcome; Detail = $detail }
+}
+
+function Get-LabResourceOrFail {
+    <#
+    .SYNOPSIS
+        Runs a lookup and tells "absent" apart from "the lookup failed".
+
+    .DESCRIPTION
+        A lookup that succeeds and finds nothing returns $null: the object is absent. A lookup that
+        reports the object as not found (HTTP 404, ResourceNotFound, ResourceGroupNotFound,
+        NotFound) also returns $null. Any other exception, such as a 403, throttling or an expired
+        token, is not "absent": it is thrown again with the description, so the caller cannot read
+        a failed lookup as a clean result (issues #96, #227, #238, #255, #290).
+
+    .PARAMETER Script
+        The lookup, for example { Get-AzResourceGroup -Name $name -ErrorAction Stop }.
+
+    .PARAMETER Description
+        What is being looked up, for the error message.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$Script,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    try {
+        return (& $Script)
+    } catch {
+        $text = "$($_.Exception.Message) $($_.FullyQualifiedErrorId)"
+        if ($text -match '(?i)\b(ResourceNotFound|ResourceGroupNotFound|NotFound|ParentResourceNotFound)\b|\b404\b|was not found|could not be found') {
+            return $null
+        }
+        throw "Could not look up ${Description}: $($_.Exception.Message)"
+    }
+}
+
+function Assert-LabSubscription {
+    <#
+    .SYNOPSIS
+        Stops when the Azure context is not on the subscription the run was told to use.
+
+    .DESCRIPTION
+        Compares ids, never names: two subscriptions can share a display name, and a context that
+        changed identity mid-session once answered "nothing found" against an unrelated
+        subscription one line before a delete. The cycle runs the same guard between phases
+        (Test-LabCycleSubscription); this is the one for a script started by hand.
+
+    .PARAMETER SubscriptionId
+        The subscription the script may touch.
+
+    .PARAMETER ContextProbe
+        Returns the current Azure context. Injectable for tests.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SubscriptionId,
+        [scriptblock]$ContextProbe = { Get-AzContext }
+    )
+
+    $context = & $ContextProbe
+    if (-not $context -or -not $context.Subscription) {
+        throw 'There is no Azure context. Run Connect-AzAccount first.'
+    }
+    if ($context.Subscription.Id -ne $SubscriptionId) {
+        throw "The Azure context is on subscription $($context.Subscription.Id), not on $SubscriptionId. Select the right one before this script changes anything."
+    }
+}
+
+function Invoke-LabRoleRetry {
+    <#
+    .SYNOPSIS
+        Retries a call that depends on a role assignment made moments earlier.
+
+    .DESCRIPTION
+        A new role assignment takes a few minutes to reach every service. The call is repeated
+        while it fails with an authorization or principal-not-found error, a line says that the
+        script is waiting for the role to take effect, and the last error is thrown only after the
+        timeout. Any other error is thrown at once. It replaces a fixed sleep that waits the full
+        time whether or not anything was assigned.
+
+    .PARAMETER Script
+        The dependent call. Runs with errors terminating.
+
+    .PARAMETER Description
+        What is waiting, for the progress line.
+
+    .PARAMETER TimeoutSeconds
+        How long to keep trying. Default 600.
+
+    .PARAMETER DelaySeconds
+        Wait between tries. Default 15.
+
+    .PARAMETER Sleep
+        Waits the given seconds. Injectable for tests.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$Script,
+        [Parameter(Mandatory)][string]$Description,
+        [int]$TimeoutSeconds = 600,
+        [int]$DelaySeconds = 15,
+        [scriptblock]$Sleep = { param($Seconds) Start-Sleep -Seconds $Seconds }
+    )
+
+    $waited = 0
+    while ($true) {
+        try {
+            return (& $Script)
+        } catch {
+            $text = "$($_.Exception.Message) $($_.FullyQualifiedErrorId)"
+            $roleNotYet = $text -match '(?i)AuthorizationFailed|does not have authorization|PrincipalNotFound|Forbidden|AuthorizationPermissionMismatch|not authorized'
+            if (-not $roleNotYet -or $waited -ge $TimeoutSeconds) { throw }
+            Write-Host "  [WAIT] $Description is waiting for the role assignment to take effect ($waited of $TimeoutSeconds seconds)" -ForegroundColor Yellow
+            & $Sleep $DelaySeconds
+            $waited += $DelaySeconds
+        }
+    }
+}
+
+Export-ModuleMember -Function Reset-LabCheckCount, Get-LabCheckCount, Skip-LabCheck, Invoke-LabCheck, Get-LabResourceOrFail, Assert-LabSubscription, Invoke-LabRoleRetry, Write-LabWhatIfResult, Write-Host, Protect-LabText, Exit-Lab, Get-LabBuiltInRoleId, Get-LabGraphSignInHint, Get-LabArmRoleAssignment, New-LabArmRoleAssignment, Remove-LabArmRoleAssignment, Get-LabArmBudget, Remove-LabArmBudget, Import-LabModule, Write-LabDeploymentOutput, Get-LabNameUnavailableReason, Test-LabGlobalName, Get-LabThrottleMessage, Get-LabDeploymentErrorText, Get-LabDnsLink, Remove-LabDnsLink, Invoke-LabWithoutLock, Get-LabDiagnosticResourceId, Get-LabResourceDiagnosticSetting, Remove-LabResourceDiagnosticSetting

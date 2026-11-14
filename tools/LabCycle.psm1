@@ -1801,7 +1801,38 @@ function Get-LabCycleSoftDeleteGuard {
     }
 }
 
-Export-ModuleMember -Function Get-PhaseOrder, Get-DependentPhase, Get-LabCycleFailedStatus,
+function Get-LabCycleSkippedCheck {
+    <#
+    .SYNOPSIS
+        Lists the checks a validator reported as SKIPPED, with the reason.
+
+    .DESCRIPTION
+        A check that could not run, for lack of a token the session cannot get, is neither a pass
+        nor a failure (issues #530, #550). The validator prints it as '[SKIPPED] <name> - <reason>'
+        (Invoke-LabCheck) or '  Testing: <name>... SKIPPED (<reason>)' (the validators' own
+        Invoke-Test). The cycle names each one in its summary so a green run does not claim it.
+
+    .PARAMETER Text
+        The validator's output.
+
+    .OUTPUTS
+        One hashtable per skipped check: Name and Reason.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([AllowEmptyString()][AllowNull()][string]$Text)
+
+    if (-not $Text) { return }
+    foreach ($line in ($Text -split "\r?\n")) {
+        if ($line -match '^\s*\[SKIPPED\]\s+(?<n>.+?)\s+-\s+(?<r>.+)$') {
+            @{ Name = $Matches['n'].Trim(); Reason = $Matches['r'].Trim() }
+        } elseif ($line -match '^\s*Testing:\s+(?<n>.+?)\.\.\.\s+SKIPPED\s+\((?<r>.+)\)\s*$') {
+            @{ Name = $Matches['n'].Trim(); Reason = $Matches['r'].Trim() }
+        }
+    }
+}
+
+Export-ModuleMember -Function Get-LabCycleSkippedCheck, Get-PhaseOrder, Get-DependentPhase, Get-LabCycleFailedStatus,
     Get-LabCycleUnknownUniqueName, Get-LabCycleUniqueNameArgument, Get-LabCycleSoftDeleteGuard,
     Test-LabCycleStatusBlocksDependent, Invoke-LabScriptProcess,
     Test-LabCycleSubscription, Test-LabCyclePreflight, Test-LabCycleActionAllowed, Invoke-LabCycleCanary,

@@ -880,12 +880,17 @@ Describe 'Lab 5.1 Test-Lab.ps1 - checks the Azure Monitor Agent and its Heartbea
         $run.Output | Should -Match 'Failed: 1\b'
     }
 
-    It 'names the missing Log Analytics token when the workspace query is Forbidden, and still fails (#530)' {
+    It 'reports the Heartbeat check as SKIPPED, naming the missing Log Analytics token, when the workspace query is Forbidden (#530)' {
         $run = $script:QueryForbidden
-        $run.ExitCode | Should -Not -Be 0 -Because "output was:`n$($run.Output)"
-        $run.Output | Should -Match "\[stub-query 1\] FAIL \(Operation returned an invalid status code 'Forbidden' \(the session may lack a Log Analytics token"
+        $run.Output | Should -Match "\[stub-query 1\] SKIPPED \(Operation returned an invalid status code 'Forbidden' \(the session may lack a Log Analytics token"
         $run.Output | Should -Not -Match 'stub-query 2'
-        $run.Output | Should -Match 'Failed: 1\b'
+        $run.Output | Should -Match 'Failed: 0\b'
+        $run.Output | Should -Match 'Skipped: 1\b'
+    }
+
+    It 'does not count the skipped Heartbeat check as a pass (#530)' {
+        $run = $script:QueryForbidden
+        $run.Output | Should -Not -Match "last 15 minutes\.\.\.(\[stub-query \d+\])? PASS"
     }
 
     It 'counts a workspace query that returns an error as a FAIL, not as zero rows' {

@@ -796,6 +796,53 @@ Describe 'Manifest - long steps the cycle does not need are skipped, and limits 
         $text | Should -Match 'bound check - bound reason'
         $text | Should -Not -Match 'other phase check'
     }
+
+    It 'names a check the validator skipped under Not run, and does not count it as proven (#530, #550)' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'a'; Lab = 'module-1-identities-governance/1.2-rbac'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    NotRun = @()
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{ BackupResourceGroupPrefix = 'AzureBackupRG_'; AssertAbsent = @(); ResourceGroups = @('fixture-rg') }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        $runner = { [pscustomobject]@{ ExitCode = 0; TimedOut = $false; Output = "  Testing: Heartbeat query... SKIPPED (no Log Analytics token)`n  [PASS] other`n" } }
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+            -PhaseRunner $runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -Yes -SkipCleanup @paths | Out-Null
+        $text = Get-Content -Raw -LiteralPath $paths.ReportPath
+        $text | Should -Match 'a check: Heartbeat query - skipped, not proven: no Log Analytics token'
+    }
+
+    It 'lists nothing under Not run for a validator that skipped nothing' {
+        $paths = @{} + $script:OfflinePaths
+        $paths.ReportPath = Join-Path $script:Scratch "report-$([guid]::NewGuid().ToString('N')).md"
+        $manifest = New-FixtureManifest -Body @'
+@{
+    Phases = @(
+        @{ Id = 'a'; Lab = 'module-1-identities-governance/1.2-rbac'; ParamFile = 'x'; Deploy = @{}; PostDeploy = $null; Test = @{}; DependsOn = @(); TimeoutMs = 1000; Excluded = $null }
+    )
+    NotRun = @()
+    SoftDeleteGuards = @()
+    CompileOnly = @()
+    Teardowns = @()
+    ResidualSweep = @{ BackupResourceGroupPrefix = 'AzureBackupRG_'; AssertAbsent = @(); ResourceGroups = @('fixture-rg') }
+    ToolingFloor = @{ AzCli = '2.75.0'; AzPowerShell = '7.5.0' }
+}
+'@
+        $runner = { [pscustomobject]@{ ExitCode = 0; TimedOut = $false; Output = "  [PASS] one`n  Testing: x... PASS`n" } }
+        & $script:InvokeCycle -SubscriptionId 'fixture-subscription' -ManifestPath $manifest `
+            -PhaseRunner $runner -PreflightRunner { @() } -ContextProbe $script:GoodContext `
+            -Yes -SkipCleanup @paths | Out-Null
+        (Get-Content -Raw -LiteralPath $paths.ReportPath) | Should -Match '(?s)## Not run\s+None\.'
+    }
 }
 
 Describe 'Manifest - the soft-delete guards name resources the labs really create' {
