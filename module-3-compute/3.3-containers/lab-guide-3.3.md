@@ -54,10 +54,12 @@ If you completed Lab 1.3, its policies are still assigned to your subscription a
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
 ```powershell
-Get-AzResourceGroup -Name 'dev-skycraft-swc-rg' | Select-Object ResourceGroupName, Location, Tags
+Get-AzResourceGroup -Name 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object ResourceGroupName, Location, Tags
 ```
 
 **Expected Result**: One resource group in `swedencentral`, whose tags include `Project` = `SkyCraft` and `Environment` = `Development`.
+
+**If the line stops with an error**: `dev-skycraft-swc-rg` does not exist, so the check has failed. Run Lab 1.2 first (Step 1.2.2, or `scripts/Deploy-Bicep.ps1` of Lab 1.2), then run it again.
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 

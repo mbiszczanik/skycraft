@@ -76,6 +76,20 @@ Before starting this lab:
 
 **Note**: With Contributor alone, the paths below end differently at Step 1.3.8. The Portal creates `Inherit-Project-Tag` without the identity's role and says so after **Create**: new resources still get the tag, but the optional remediation task in Step 1.3.10 fails. `scripts/Deploy-Bicep.ps1` fails at the role assignment. `scripts/Invoke-LabGovernance.ps1` creates the assignment, reports `[ERROR]` for the role and exits 1. With Contributor alone, use the Portal and skip the remediation task.
 
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
+
+```powershell
+Get-AzResourceGroup -Name 'platform-skycraft-swc-rg' -ErrorAction Stop | Select-Object ResourceGroupName, Location
+Get-AzResourceGroup -Name 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object ResourceGroupName, Location
+Get-AzResourceGroup -Name 'prod-skycraft-swc-rg' -ErrorAction Stop | Select-Object ResourceGroupName, Location
+```
+
+**Expected Result**: Three resource groups in `swedencentral`.
+
+**If a line stops with an error**: the resource group it names does not exist, so the check has failed. Run Lab 1.2 first (Steps 1.2.1-1.2.3, or `scripts/Deploy-Bicep.ps1` of Lab 1.2), then run this block again.
+
+---
+
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
 You can build this lab in the Portal by following this guide, with Az PowerShell, or with Bicep. With the Owner role (see Prerequisites), the three paths end in the same state: the same four policy assignments, with the assignment names, descriptions, non-compliance messages and parameters this guide gives, of which only `Inherit-Project-Tag` carries a managed identity, holding Contributor on the subscription. The one difference is the assignment's resource name: the Portal generates an id, the scripts use the assignment name. `scripts/Test-Lab.ps1` accepts that state whichever path built it:
