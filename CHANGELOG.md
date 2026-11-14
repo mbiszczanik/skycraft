@@ -9,6 +9,26 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0](https://github.com/mbiszczanik/skycraft/compare/v0.21.0...v0.22.0) (2026-11-14)
+
+
+### Features
+
+* **guide-drift:** fill the Subscription field from the run's subscription (Refs [#236](https://github.com/mbiszczanik/skycraft/issues/236)) ([#576](https://github.com/mbiszczanik/skycraft/issues/576)) ([56195f6](https://github.com/mbiszczanik/skycraft/commit/56195f60ed159efc7ac4b8eadaa137475014c6eb))
+* **lab-common:** shared check helpers, SKIPPED for token-less checks, cycle names them (Refs [#301](https://github.com/mbiszczanik/skycraft/issues/301), [#530](https://github.com/mbiszczanik/skycraft/issues/530), [#550](https://github.com/mbiszczanik/skycraft/issues/550)) ([#566](https://github.com/mbiszczanik/skycraft/issues/566)) ([6c2e509](https://github.com/mbiszczanik/skycraft/commit/6c2e509bfc26f81da8e8b9e3637df1f33bd4c6fd))
+
+
+### Bug Fixes
+
+* **lab-5.2:** print the error of a backup job lookup, test the lost-job case (Refs [#535](https://github.com/mbiszczanik/skycraft/issues/535)) ([#578](https://github.com/mbiszczanik/skycraft/issues/578)) ([5916e0d](https://github.com/mbiszczanik/skycraft/commit/5916e0d893015de1747d8d97299039177ef04491))
+
+
+### Documentation
+
+* **labs 1.1, 2.1, 3.1, 5.1-5.3:** prerequisites and what each lab leaves behind (Refs [#364](https://github.com/mbiszczanik/skycraft/issues/364)) ([#565](https://github.com/mbiszczanik/skycraft/issues/565)) ([29c57f7](https://github.com/mbiszczanik/skycraft/commit/29c57f7c9e408b94805e3cc0343daaefc1c9c00c))
+* **labs 5.1, 5.2:** name the platform waits next to the Estimated Time (Refs [#477](https://github.com/mbiszczanik/skycraft/issues/477)) ([#561](https://github.com/mbiszczanik/skycraft/issues/561)) ([48f261a](https://github.com/mbiszczanik/skycraft/commit/48f261a2a262316aad2e39c20445d481b948369c))
+* **labs:** check the prerequisites with one Get-Az line per resource (Refs [#364](https://github.com/mbiszczanik/skycraft/issues/364)) ([#577](https://github.com/mbiszczanik/skycraft/issues/577)) ([3393a01](https://github.com/mbiszczanik/skycraft/commit/3393a011e47b4d01347a6170bb4e1fa0306cb9fc))
+
 ## [0.21.0](https://github.com/mbiszczanik/skycraft/compare/v0.20.0...v0.21.0) (2026-11-13)
 
 
