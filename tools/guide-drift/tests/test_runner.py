@@ -17,6 +17,7 @@ repository root:
 import argparse
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -43,6 +44,7 @@ except ImportError:
     sys.modules["playwright.sync_api"] = _stub
 
 import decide  # noqa: E402
+import recording  # noqa: E402
 import run  # noqa: E402
 
 LAB = "9.9"
@@ -615,6 +617,53 @@ class DecisionRecordingTests(RunnerTestCase):
             self.assertTrue(self.quietly(lambda: r.run_step(self.STEP)))
         check.assert_called_once()
         self.assertEqual(self.recording["steps"]["9.9.1"]["viewUrl"], "https://portal.azure.com/#view/Two")
+
+
+class SubscriptionNameRedactionTests(RunnerTestCase):
+    """The run's subscription name (#236) is identifying and the run logs are committed: filling
+    the Subscription field from the built-in placeholder must leave it out of results.jsonl,
+    summary.md and the prompt, which shows a mask."""
+
+    NAME = "Fictional Hollow Subscription"
+    ITEM = {"kind": "field", "label": "Subscription", "value": "[Your subscription]", "line": 7, "literal": False}
+    STEP = {"id": "9.9.1", "title": "One", "portal": True, "items": [ITEM], "expected": None, "images": []}
+
+    def test_the_name_reaches_no_log(self) -> None:
+        (self.tmp / "guide.md").write_text("# Lab\n\n1. Fill in the form\n", encoding="utf-8")
+        steps = {"lab": LAB, "guide": "guide.md", "steps": [self.STEP]}
+        with mock.patch.dict(os.environ, {recording.SUBSCRIPTION_ENV: self.NAME}):
+            r = ScriptedRunner(FakePage(), steps, self.recording, self.args(), ask=Answers())
+            action, value = recording.field_action(self.recording, self.STEP, self.ITEM)
+            self.assertEqual((action, value), ("type", self.NAME))
+            prompt = run.scrub(run.prompt_value(self.recording, self.STEP, self.ITEM), r.redactor, r.secrets)
+            self.assertIn("[secret]", prompt)
+            self.assertNotIn(self.NAME, prompt)
+            # What the runner records for a typed value, and for failures whose Playwright error
+            # quotes it, as an error and a call log give it.
+            for outcome, observed in (
+                    ("match", value),
+                    ("unknown", f'Locator.fill: Timeout. fill("{self.NAME}") failed\nCall log:\n  - fill("{self.NAME}")'),
+                    ("drift", f"the field shows '{self.NAME}' and not the other one")):
+                record = r.new_record(self.STEP, "field", "Subscription")
+                record.update(outcome=outcome, severity="cosmetic" if outcome == "drift" else None, observed=observed)
+                r.write(record)
+            self.quietly(r.finish)
+        files = [path for path in r.run_dir.rglob("*") if path.is_file()]
+        self.assertIn("results.jsonl", {path.name for path in files})
+        self.assertIn("summary.md", {path.name for path in files})
+        for path in files:
+            self.assertNotIn(self.NAME, path.read_text(encoding="utf-8"), path.name)
+        results = (r.run_dir / "results.jsonl").read_text(encoding="utf-8")
+        # The typed value and the shown one are masked as a secret; the call's quoted one as a typed value.
+        self.assertEqual(len([line for line in results.splitlines() if "[secret]" in line]), 2)
+        self.assertIn('fill(\\"[typed]\\")', results)
+
+    def test_without_the_variable_nothing_is_masked_and_the_value_is_not_typed(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            r = self.runner()
+            self.assertEqual(recording.field_action(self.recording, self.STEP, self.ITEM),
+                             ("unresolved", "[Your subscription]"))
+            self.assertEqual(r.secrets, set())
 
 
 class SummaryTests(RunnerTestCase):
