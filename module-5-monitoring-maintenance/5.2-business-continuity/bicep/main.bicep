@@ -98,7 +98,7 @@ var varRsvLogCategoriesAndGroups = [
 // 1. Recovery Services Vault - Azure VM backup. The VM backup policy (SkyCraft-Daily-Prod) and the
 //    protected item are created by Deploy-Bicep.ps1, because Azure Backup rejects ARM PUT updates on
 //    an existing policy (docs/bicep-standards.md section 10.4).
-module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.0' = {
+module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.2' = {
   name: 'bcdr-rsv-deployment'
   scope: resourceGroup(varPlatformRgName)
   params: {
@@ -132,7 +132,7 @@ module modRecoveryServicesVault 'br/public:avm/res/recovery-services/vault:0.13.
 
 // 2. Backup Vault - operational blob backup. The blob backup policy (SkyCraft-Blob-Policy) is created by
 //    Deploy-Bicep.ps1 and the backup instance by New-LabBlobBackup.ps1 (section 10.4).
-module modBackupVault 'br/public:avm/res/data-protection/backup-vault:0.13.2' = {
+module modBackupVault 'br/public:avm/res/data-protection/backup-vault:0.13.3' = {
   name: 'bcdr-bv-deployment'
   scope: resourceGroup(varPlatformRgName)
   params: {
@@ -243,7 +243,7 @@ module modAsrResourceGroup 'br/public:avm/res/resources/resource-group:0.4.4' = 
   }
 }
 
-module modAsrVault 'br/public:avm/res/recovery-services/vault:0.13.0' = {
+module modAsrVault 'br/public:avm/res/recovery-services/vault:0.13.2' = {
   name: 'bcdr-asr-rsv-deployment'
   scope: resourceGroup(varAsrRgName)
   dependsOn: [
