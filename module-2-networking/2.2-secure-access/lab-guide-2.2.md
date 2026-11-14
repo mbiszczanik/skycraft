@@ -68,12 +68,19 @@ If you completed Lab 1.3, its policies are still assigned to your subscription a
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
 ```powershell
-Get-AzVirtualNetwork |
-    Where-Object Name -in 'platform-skycraft-swc-vnet', 'dev-skycraft-swc-vnet', 'prod-skycraft-swc-vnet' |
-    Select-Object Name, ResourceGroupName, Location, @{ N = 'Subnets'; E = { $_.Subnets.Name -join ', ' } }
+$vnetSelect = 'Name', 'ResourceGroupName', 'Location', @{ N = 'Subnets'; E = { $_.Subnets.Name -join ', ' } }
+Get-AzVirtualNetwork -Name 'platform-skycraft-swc-vnet' -ResourceGroupName 'platform-skycraft-swc-rg' -ErrorAction Stop | Select-Object $vnetSelect
+Get-AzVirtualNetwork -Name 'dev-skycraft-swc-vnet' -ResourceGroupName 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object $vnetSelect
+Get-AzVirtualNetwork -Name 'prod-skycraft-swc-vnet' -ResourceGroupName 'prod-skycraft-swc-rg' -ErrorAction Stop | Select-Object $vnetSelect
+Get-AzVirtualNetworkPeering -Name 'hub-to-dev' -VirtualNetworkName 'platform-skycraft-swc-vnet' -ResourceGroupName 'platform-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, PeeringState
+Get-AzVirtualNetworkPeering -Name 'hub-to-prod' -VirtualNetworkName 'platform-skycraft-swc-vnet' -ResourceGroupName 'platform-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, PeeringState
+Get-AzVirtualNetworkPeering -Name 'dev-to-hub' -VirtualNetworkName 'dev-skycraft-swc-vnet' -ResourceGroupName 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, PeeringState
+Get-AzVirtualNetworkPeering -Name 'prod-to-hub' -VirtualNetworkName 'prod-skycraft-swc-vnet' -ResourceGroupName 'prod-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, PeeringState
 ```
 
 **Expected Result**: Three virtual networks in `swedencentral`. The hub's subnets include `AzureBastionSubnet`; each spoke's include `AuthSubnet`, `WorldSubnet` and `DatabaseSubnet`.
+
+**If a line stops with an error**: the VNet or peering it names is missing, so the check has failed. Run Lab 2.1 first (VNets in Sections 2 and 3, peerings in Section 4, or `scripts/Deploy-Bicep.ps1` of Lab 2.1), then run this block again. A peering row whose `PeeringState` is not `Connected` also fails the check: finish Section 4 of Lab 2.1.
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 

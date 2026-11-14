@@ -59,6 +59,23 @@ Before starting this lab:
 
 These are the checks `scripts/Deploy-Bicep.ps1` performs before deploying - it exits if no VM or no platform storage account is found.
 
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
+
+```powershell
+# Resource group (Lab 1.2)
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object ResourceGroupName, Location
+
+# The monitored VM, which must be running (Lab 3.2)
+Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg -Status -ErrorAction Stop | Select-Object Name, PowerState
+
+# The storage account that receives the diagnostic setting (Lab 4.1)
+Get-AzStorageAccount -Name platformskycraftswcsa -ResourceGroupName platform-skycraft-swc-rg -ErrorAction Stop | Select-Object StorageAccountName, Location
+```
+
+**Expected Result**: One resource group and one storage account in `swedencentral`, and the VM with `PowerState` `VM running`.
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first (Lab 4.1 with `-All`), then run this block again. `Deploy-Bicep.ps1` needs only one of the two VMs: if you built only the production one, use `prod-skycraft-swc-auth-vm` in `prod-skycraft-swc-rg` for the VM line. If Lab 4.1 had to use another storage account name, use that name.
+
 ---
 
 ## 📖 Section 1: Monitoring Fundamentals (20 min)

@@ -84,10 +84,14 @@ Nothing in this lab uses a virtual machine or a network from Modules 2 and 3.
 **Verify prerequisites**:
 
 ```powershell
-Get-AzResourceGroup -Name platform-skycraft-swc-rg, dev-skycraft-swc-rg, prod-skycraft-swc-rg |
-    Select-Object ResourceGroupName, Location, @{N='Project';E={$_.Tags['Project']}}
+$rgSelect = 'ResourceGroupName', 'Location', @{N='Project';E={$_.Tags['Project']}}
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object $rgSelect
+Get-AzResourceGroup -Name dev-skycraft-swc-rg -ErrorAction Stop | Select-Object $rgSelect
+Get-AzResourceGroup -Name prod-skycraft-swc-rg -ErrorAction Stop | Select-Object $rgSelect
 # Three rows. Project shows 'SkyCraft' if you completed Lab 1.3.
 ```
+
+**If a line stops with an error**: the resource group it names does not exist, so the check has failed. Run Lab 1.2 first (Steps 1.2.1-1.2.3, or `scripts/Deploy-Bicep.ps1` of Lab 1.2), then run this block again.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**

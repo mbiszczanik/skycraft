@@ -73,13 +73,15 @@ If you completed Lab 1.3, its policies are still assigned to your subscription. 
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
 ```powershell
-Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' -ErrorAction Stop |
     Select-Object StorageAccountName, Location, @{ n = 'Sku'; e = { $_.Sku.Name } }, Kind, AccessTier
-Get-AzStorageAccount -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'devskycraftswcsa' |
+Get-AzStorageAccount -ResourceGroupName 'dev-skycraft-swc-rg' -Name 'devskycraftswcsa' -ErrorAction Stop |
     Select-Object StorageAccountName, Location, @{ n = 'Sku'; e = { $_.Sku.Name } }, Kind, AllowBlobPublicAccess
 ```
 
 **Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Standard_GRS`, `StorageV2`, access tier `Hot`; `devskycraftswcsa` in `swedencentral`, `Standard_LRS`, `StorageV2`, `AllowBlobPublicAccess` `False`.
+
+**If a line stops with an error**: the storage account it names is missing, so the check has failed. Run Lab 4.1 first (with `-All` on `scripts/Deploy-Bicep.ps1`, so that it builds the development and the production account), then run this block again.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**

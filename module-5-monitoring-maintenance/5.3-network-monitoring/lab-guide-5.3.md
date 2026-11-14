@@ -60,6 +60,32 @@ These are the same checks `scripts/Deploy-Bicep.ps1` performs before it deploys 
 
 **If you did Lab 1.3**, its policies are still in force. `Enforce-Project-Tag` refuses every resource without `Project` = `SkyCraft`, and this lab makes Azure create resources you cannot tag yourself: on the Portal path the Network Watcher agent (the wizard installs it on the endpoint VMs) and the connection monitor (the wizard has no tags field for either), and on every path the `NWTA-*` data collection endpoint and rule that Azure's documentation says Traffic Analytics creates and manages (none was there 20 minutes after the flow log was created in a lab whose production VNet had no VM traffic). Each one passes only because `Inherit-Project-Tag` (Lab 1.3, Step 1.3.8) copies `Project` from its resource group. Before you start, check that **Policy** → under **Authoring** (expand it if it is collapsed), **Assignments** lists `Inherit-Project-Tag`, and that `dev-skycraft-swc-rg`, `NetworkWatcherRG` and `platform-skycraft-swc-rg` (and `prod-skycraft-swc-rg` if you use the prod VM) carry `Project` = `SkyCraft` on their **Tags** page. See Troubleshooting, Issue 5 if a create is refused.
 
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
+
+```powershell
+# Resource group (Lab 1.2) and the flow log target VNet (Lab 2.1)
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object ResourceGroupName, Location
+Get-AzVirtualNetwork -Name prod-skycraft-swc-vnet -ResourceGroupName prod-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+Get-AzNetworkWatcher -Name NetworkWatcher_swedencentral -ResourceGroupName NetworkWatcherRG -ErrorAction Stop | Select-Object Name, Location
+
+# The NSG IP Flow Verify reads rules from (Lab 2.2)
+Get-AzNetworkSecurityGroup -Name dev-skycraft-swc-world-nsg -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+
+# The two VMs Connection Monitor needs (Lab 3.2)
+Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg -Status -ErrorAction Stop | Select-Object Name, PowerState
+Get-AzVM -Name dev-skycraft-swc-world-vm -ResourceGroupName dev-skycraft-swc-rg -Status -ErrorAction Stop | Select-Object Name, PowerState
+
+# Flow log storage (Lab 4.1 with -All)
+Get-AzStorageAccount -Name platformskycraftswcsa -ResourceGroupName platform-skycraft-swc-rg -ErrorAction Stop | Select-Object StorageAccountName, Location
+
+# Traffic Analytics and Connection Monitor output (Lab 5.1)
+Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law -ErrorAction Stop | Select-Object Name, Location
+```
+
+**Expected Result**: Every line prints one row in `swedencentral`, and both VMs show `PowerState` `VM running`.
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first (Lab 4.1 with `-All`), then run this block again. A missing network watcher is the exception: `Deploy-Bicep.ps1` enables it, and Step 2.1.14 of Lab 2.1 creates it by hand. If Lab 4.1 had to use another storage account name, use that name.
+
 ---
 
 ## 📖 Section 1: Network Watcher Fundamentals (15 min)

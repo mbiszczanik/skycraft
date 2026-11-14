@@ -67,6 +67,29 @@ The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts chec
 
 Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault, which is part of the Az module, and Az.AlertsManagement, which is not: it is not in the Az 16.4.0 dependency list, so install it once with `Install-Module Az.AlertsManagement -Scope CurrentUser` before the Azure PowerShell block of Step 5.2.9 (the scripts and the Portal and Bicep paths do not need it). `Deploy-Bicep.ps1` finishes by running `scripts/Enable-SiteRecovery.ps1` (Az.Network and Az.Storage as well) and waits for the replication, about 45 to 75 minutes; `-SkipSiteRecovery` leaves it for Step 5.2.6. If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
 
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course). Each line stops with an error when its resource is missing (`Get-AzKeyVault` and `Get-AzActionGroup` can return nothing instead of an error, so those two lines stop it themselves):
+
+```powershell
+# Resource group (Lab 1.2)
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object ResourceGroupName, Location
+
+# Log Analytics workspace and action group (Lab 5.1)
+Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law -ErrorAction Stop | Select-Object Name, Location
+(Get-AzActionGroup -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-ops-ag -ErrorAction Stop) ?? $(throw 'Action group skycraft-ops-ag not found') | Select-Object Name, Location
+
+# The VMs the lab protects and the key vault of the auth VM (Lab 3.2)
+Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+Get-AzVM -Name dev-skycraft-swc-world-vm -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+(Get-AzKeyVault -VaultName dev-skycraft-swc-kv -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop) ?? $(throw 'Key vault dev-skycraft-swc-kv not found') | Select-Object VaultName, Location
+
+# The blob backup datasource (Lab 4.1 with -All)
+Get-AzStorageAccount -Name prodskycraftswcsa -ResourceGroupName prod-skycraft-swc-rg -ErrorAction Stop | Select-Object StorageAccountName, Location
+```
+
+**Expected Result**: Every line prints one row in `swedencentral`.
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first (Lab 4.1 with `-All`), then run this block again. If Lab 3.2 or Lab 4.1 had to use another key vault or storage account name, use that name.
+
 ---
 
 ## 📖 Section 1: Backup & Recovery Concepts (15 min)

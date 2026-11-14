@@ -87,22 +87,22 @@ The gates in `scripts/Deploy-Bicep.ps1` are the SSH public key at `$HOME\.ssh\sk
 **Verify prerequisites**:
 
 ```powershell
-# Check resource groups exist
-(Get-AzResourceGroup -Name dev-skycraft-swc-rg).ResourceGroupName
+# Resource group (Lab 2.1 or 3.1)
+(Get-AzResourceGroup -Name dev-skycraft-swc-rg -ErrorAction Stop).ResourceGroupName
 
-# Check VNet exists
-$vnet = Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg
-$vnet.Name
-
-# Check subnets exist
+# VNet and its subnets, which include AuthSubnet and WorldSubnet (Lab 2.1 or 3.1)
+$vnet = Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop
 $vnet.Subnets.Name
 
-# Check the load balancer and its backend pools exist (Lab 2.3 or 3.1)
-(Get-AzLoadBalancer -Name dev-skycraft-swc-lb -ResourceGroupName dev-skycraft-swc-rg).BackendAddressPools.Name
+# Load balancer and its backend pools (Lab 2.3 or 3.1)
+(Get-AzLoadBalancer -Name dev-skycraft-swc-lb -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop).BackendAddressPools.Name
 
-# Check the application security groups exist (Lab 2.2)
-(Get-AzApplicationSecurityGroup -ResourceGroupName dev-skycraft-swc-rg).Name
+# Application security groups (Lab 2.2)
+(Get-AzApplicationSecurityGroup -Name dev-skycraft-swc-asg-auth -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop).Name
+(Get-AzApplicationSecurityGroup -Name dev-skycraft-swc-asg-world -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop).Name
 ```
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first, then run this block again.
 
 ---
 
