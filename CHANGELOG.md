@@ -9,6 +9,29 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0](https://github.com/mbiszczanik/skycraft/compare/v0.20.0...v0.21.0) (2026-11-13)
+
+
+### Features
+
+* **guide-drift:** check each check list on its blade, report every guide screenshot ([#573](https://github.com/mbiszczanik/skycraft/issues/573)) ([1b526e6](https://github.com/mbiszczanik/skycraft/commit/1b526e62afa2099a48dfd62a52961d5ec1611568))
+* **guide-drift:** fewer false stale screenshots, nothing to save when values are in place (Refs [#318](https://github.com/mbiszczanik/skycraft/issues/318), [#209](https://github.com/mbiszczanik/skycraft/issues/209)) ([#567](https://github.com/mbiszczanik/skycraft/issues/567)) ([6b736f2](https://github.com/mbiszczanik/skycraft/commit/6b736f272b01bed9656590b365abeb53c4b602bf))
+* **guide-drift:** sections over all role passes, field test in the locator, no display names in recordings ([#572](https://github.com/mbiszczanik/skycraft/issues/572)) ([ffa3622](https://github.com/mbiszczanik/skycraft/commit/ffa3622f59d8162ff8b98d879c833fb244502b0e))
+* **labs 1.1, 1.2:** take the guest's address as -GuestEmail (Refs [#343](https://github.com/mbiszczanik/skycraft/issues/343)) ([#562](https://github.com/mbiszczanik/skycraft/issues/562)) ([2bcf681](https://github.com/mbiszczanik/skycraft/commit/2bcf6818d799466b4d7e54d998ced75f655036f2))
+
+
+### Bug Fixes
+
+* **guide-drift:** check the name box is editable before the domain is picked (Refs [#213](https://github.com/mbiszczanik/skycraft/issues/213)) ([#568](https://github.com/mbiszczanik/skycraft/issues/568)) ([9905490](https://github.com/mbiszczanik/skycraft/commit/99054903afd7a3b201c5132a470b66eb597ec1b6))
+* **lab-cycle:** deploy Lab 3.4 with -PlanSku P0v3 on the Free Trial (Refs [#543](https://github.com/mbiszczanik/skycraft/issues/543)) ([#549](https://github.com/mbiszczanik/skycraft/issues/549)) ([5c46f18](https://github.com/mbiszczanik/skycraft/commit/5c46f18e2aa0490135dd352c3daf8319be80cacb))
+* **lab-cycle:** skip 3.2 encryption and 5.2 replication, fix 5.1 limit, list unrun checks (Refs [#543](https://github.com/mbiszczanik/skycraft/issues/543)) ([#547](https://github.com/mbiszczanik/skycraft/issues/547)) ([5e422bd](https://github.com/mbiszczanik/skycraft/commit/5e422bd87e8f076b37bf4e3e59fd5a86656546d5))
+
+
+### Documentation
+
+* align documents with the repository state (Refs [#542](https://github.com/mbiszczanik/skycraft/issues/542)) ([#545](https://github.com/mbiszczanik/skycraft/issues/545)) ([0b77d5d](https://github.com/mbiszczanik/skycraft/commit/0b77d5d60b3b8b4acd6c9cfe0ead24ac9a84d5fe))
+* **labs 3.3, 5.1:** follow the Portal of D-8 (Logs Destination start value, tag Value field) ([#558](https://github.com/mbiszczanik/skycraft/issues/558)) ([a6b6b00](https://github.com/mbiszczanik/skycraft/commit/a6b6b00061b0511448e5d8bcb90e0626a42144f6))
+
 ## [0.20.0](https://github.com/mbiszczanik/skycraft/compare/v0.19.3...v0.20.0) (2026-11-08)
 
 

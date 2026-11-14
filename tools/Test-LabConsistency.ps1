@@ -18,6 +18,20 @@
                             ('Lab X.Y') in the Prerequisites section of that lab's guide, and the
                             guide has a Prerequisites section.
       LeavesBehindSection   Every lab guide has a section titled "What This Lab Leaves Behind".
+      ValidatorResourceName A literal resource name (dev-skycraft-swc-rg, platformskycraftswcsa ...)
+                            in a lab's Test-Lab.ps1 appears in that lab's guide or in the guide of
+                            a lab it depends on in the manifest. A name only the Bicep creates
+                            fails a learner who built the lab in the Portal (#363 check 2, #355).
+
+      TimePlanSections      Every "## Section N:" heading of a guide is in its Estimated Time list
+                            ("Section N"), and every "Section N" of the list has a heading (#363
+                            check 3, #357).
+      ObjectiveSection      An objective that cites "(Section N)" cites a section the body has.
+      ChecklistTerm         Warn-only, never fails the gate: a `backticked` name in a guide checklist
+                            or in lab-checklist-*.md that no step names (#363 check 3). Too fuzzy
+                            to fail (placeholders, commands, examples).
+
+    Check 5 of #363 (menu paths name their group) is tests/Guide-Menu-Groups.Tests.ps1.
 
     A finding is allowed only through tools/lab-consistency-allowlist.psd1, where every entry
     names its check, its file, a Match (the evidence line's text, so a moved line stays allowed)
@@ -142,6 +156,92 @@ foreach ($guide in $guides) {
     }
 }
 
+# ValidatorResourceName: a literal resource name a validator looks up must appear in the guide of
+# its lab or in the guide of a lab it depends on (#363 check 2, #355). A name only the Bicep creates
+# fails a learner who built the lab in the Portal.
+$edges = @{}
+foreach ($phase in $phases) { $edges[$phase.Id] = @($phase.DependsOn) }
+$guideById = @{}
+foreach ($guide in $guides) {
+    $idMatch = [regex]::Match($guide, '/(\d\.\d)-[^/]+/lab-guide-')
+    if ($idMatch.Success) { $guideById[$idMatch.Groups[1].Value] = Get-Content -LiteralPath (Join-Path $RepoRoot $guide) -Raw }
+}
+function Get-DependencyClosure {
+    param([string]$Id)
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    $queue.Enqueue($Id)
+    while ($queue.Count) {
+        foreach ($dependency in @($edges[$queue.Dequeue()])) {
+            if ($dependency -and $seen.Add($dependency)) { $queue.Enqueue($dependency) }
+        }
+    }
+    return $seen
+}
+$resourceName = [regex]'["'']([a-z0-9]+(?:-[a-z0-9]+)*-(?:rg|vnet|vm|kv|law|nsg|lb|sa|bas|pip|asg|app\d*|acr|rsv|bv|cm|dcr|ag)[a-z0-9-]*)["'']'
+foreach ($file in $validators) {
+    $idMatch = [regex]::Match($file, '/(\d\.\d)-[^/]+/scripts/')
+    if (-not $idMatch.Success) { continue }
+    $labId = $idMatch.Groups[1].Value
+    $parts = @([string]$guideById[$labId]) + @(@(Get-DependencyClosure -Id $labId) | ForEach-Object { [string]$guideById[$_] })
+    $corpus = $parts -join "`n"
+    $names = @(Get-Content -LiteralPath (Join-Path $RepoRoot $file) | ForEach-Object { $resourceName.Matches($_) } | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    foreach ($name in $names) {
+        if (-not $corpus.Contains($name)) {
+            Add-Finding -Check 'ValidatorResourceName' -File $file -Match $name `
+                -Detail "the validator looks up '$name', which no step of Lab $labId or of a lab it depends on creates or names"
+        }
+    }
+}
+
+# TimePlanSections and ObjectiveSection (#363 check 3, #357): the "## Section N:" headings of a guide
+# and the "Section N" items of its Estimated Time list name the same sections, and an objective that
+# cites "(Section N)" cites a section that exists. Decided from the text alone.
+# ChecklistTerm (warn-only): a `backticked` name in a checklist item that no step names. Placeholders,
+# commands and examples make it too fuzzy to fail the gate; the lines are printed, not counted.
+$warnings = [System.Collections.Generic.List[string]]::new()
+foreach ($guide in $guides) {
+    $text = Get-Content -LiteralPath (Join-Path $RepoRoot $guide) -Raw
+    $planText = [regex]::Match($text, '(?ms)^##\s+\S*\s*Estimated Time[^\r\n]*\r?\n(?<b>.*?)(?=^##\s|\z)').Groups['b'].Value
+    $bodyNumbers = @([regex]::Matches($text, '(?m)^##\s+\S*\s*Section\s+(\d+):') | ForEach-Object { $_.Groups[1].Value })
+    $planNumbers = @([regex]::Matches($planText, '(?m)^\s*[-*]\s+\*{0,2}Section\s+(\d+)') | ForEach-Object { $_.Groups[1].Value })
+    foreach ($n in $bodyNumbers) {
+        if ($n -notin $planNumbers) {
+            Add-Finding -Check 'TimePlanSections' -File $guide -Match "Section $n" -Detail "the body has '## Section ${n}:' and the Estimated Time list does not name Section $n"
+        }
+    }
+    foreach ($n in $planNumbers) {
+        if ($n -notin $bodyNumbers) {
+            Add-Finding -Check 'TimePlanSections' -File $guide -Match "Section $n" -Detail "the Estimated Time list names Section $n and the body has no '## Section ${n}:' heading"
+        }
+    }
+    $objectives = [regex]::Match($text, '(?ms)^##\s+\S*\s*(?:Learning|Lab) Objectives\s*$(?<b>.*?)(?=^##\s|\z)').Groups['b'].Value
+    foreach ($m in [regex]::Matches($objectives, '\(Sections? (\d+)')) {
+        if ($m.Groups[1].Value -notin $bodyNumbers) {
+            Add-Finding -Check 'ObjectiveSection' -File $guide -Match "Section $($m.Groups[1].Value)" -Detail "an objective cites Section $($m.Groups[1].Value) and the body has no such section"
+        }
+    }
+
+    $checklist = [regex]::Match($text, '(?ms)^##\s+\S*\s*Lab Checklist\s*$(?<b>.*?)(?=^##\s|\z)')
+    $steps = if ($checklist.Success) { $text.Replace($checklist.Value, '') } else { $text }
+    $items = [System.Collections.Generic.List[object]]::new()
+    if ($checklist.Success) { $items.Add(@{ Source = $guide; Text = $checklist.Groups['b'].Value; Corpus = $steps }) }
+    $detail = Get-ChildItem -LiteralPath (Join-Path $RepoRoot ([System.IO.Path]::GetDirectoryName($guide))) -Filter 'lab-checklist-*.md' -File | Select-Object -First 1
+    if ($detail) {
+        $items.Add(@{ Source = ([System.IO.Path]::GetRelativePath($RepoRoot, $detail.FullName) -replace '\\', '/'); Text = (Get-Content -LiteralPath $detail.FullName -Raw); Corpus = $text })
+    }
+    foreach ($set in $items) {
+        foreach ($line in ($set.Text -split '\r?\n')) {
+            if ($line -notmatch '^\s*- \[[ xX]\]') { continue }
+            foreach ($m in [regex]::Matches($line, '`([^`]{3,})`')) {
+                if (-not $set.Corpus.Contains($m.Groups[1].Value)) {
+                    $warnings.Add("[ChecklistTerm] $($set.Source): the checklist names '$($m.Groups[1].Value)' and no step of $guide does")
+                }
+            }
+        }
+    }
+}
+
 if ($Update) {
     foreach ($f in $findings) {
         Write-Host ("        @{{ Check = '{0}'; File = '{1}'; Match = '{2}'; Reason = 'TODO' }}" -f $f.Check, $f.File, ($f.Match -replace "'", "''"))
@@ -165,7 +265,8 @@ $stale = @()
 $entries = @($allowlist.Allow)
 for ($i = 0; $i -lt $entries.Count; $i++) { if (-not $used.Contains($i)) { $stale += $entries[$i] } }
 
-Write-Host "Lab consistency check: $($guides.Count) guide(s), $($validators.Count) validator(s), $($phases.Count) manifest phase(s); $($findings.Count) finding(s), $($open.Count) not allowlisted, $($stale.Count) stale allowlist entr(ies)." -ForegroundColor Cyan
+Write-Host "Lab consistency check: $($guides.Count) guide(s), $($validators.Count) validator(s), $($phases.Count) manifest phase(s); $($findings.Count) finding(s), $($open.Count) not allowlisted, $($stale.Count) stale allowlist entr(ies), $($warnings.Count) warning(s)." -ForegroundColor Cyan
+foreach ($w in $warnings) { Write-Host "  [WARN] $w" -ForegroundColor Yellow }
 
 $failed = $false
 if ($guides.Count -eq 0 -or $validators.Count -eq 0 -or $phases.Count -eq 0) {
