@@ -86,6 +86,7 @@ $EnvOverrideRuleCases = @(
     @{ json = '{ "steps": { "1.1.2": { "valueOverrides": { "Password": "${SKYCRAFT_TEST_PASSWORD}" } } } }'; problem = '' }
     @{ json = '{ "steps": { "1.1.4": { "valueOverrides": { "Display name": "${SKYCRAFT_TEST_DISPLAY}" } } } }'; problem = "step 1.1.4 valueOverride 'Display name' reads `${SKYCRAFT_TEST_DISPLAY}, which is neither an address variable nor the tenant prefix, and 'Display name' names no secret: its value is masked or redacted in every run log" }
     @{ json = '{ "placeholders": { "[yourtenant]": "${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}", "[guest]": "${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}" }, "steps": {} }'; problem = '' }
+    @{ json = '{ "steps": { "1.2.3": { "valueOverrides": { "Subscription": "${SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION}" } } } }'; problem = "step 1.2.3 valueOverride 'Subscription' reads `${SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION}, which is neither an address variable nor the tenant prefix, and 'Subscription' names no secret: its value is masked or redacted in every run log" }
     @{ json = '{ "placeholders": { "[password]": "${SKYCRAFT_TEST_PASSWORD}" }, "steps": {} }'; problem = "placeholder '[password]' reads `${SKYCRAFT_TEST_PASSWORD}, which is neither an address variable nor the tenant prefix: a placeholder fills any label, and its value is masked or redacted in every run log" }
 ) | ForEach-Object {
     $file = [System.IO.Path]::GetTempFileName()
@@ -104,10 +105,13 @@ $FieldActionCheck = @'
 import json, os, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from recording import env_names, field_action
+from recording import SUBSCRIPTION_ENV, env_names, field_action
 recording = json.loads(Path(sys.argv[2]).read_bytes())
 steps = json.loads(Path(sys.argv[3]).read_bytes())['steps']
 os.environ.update({name: 'guide-drift-test' for name in env_names(recording)})
+# The run's subscription (#236): every recording inherits the built-in that fills the Subscription
+# field from it, as Invoke-GuideDrift.ps1 sets it. A made-up name.
+os.environ[SUBSCRIPTION_ENV] = 'Fictional Subscription'
 reported = []
 for step in steps:
     for item in step['items']:
