@@ -674,6 +674,20 @@ This lab does not exercise it. On today's Ubuntu 22.04 image the script needs ma
 
 ---
 
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 5.2, but Lab 5.2 changes resources of earlier labs, and some of that outlives its cleanup.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Point-in-time restore (30 days), versioning and the change feed, which blob backup turned on. Soft delete for blobs stays locked at 35 days while the backup exists | `prodskycraftswcsa` (Lab 4.1) | Lab 4.2's `Test-Lab.ps1` expects 7 days and fails; the Data protection page is greyed out; Lab 4.2's and Lab 4.4's Bicep fails with `InvalidValuesForRequestParameters` on `deleteRetentionPolicy.days` until point-in-time restore is off. `scripts/Remove-LabResource.ps1` removes the backup instance but may leave point-in-time restore on, and says so; Lab 4.2's cleanup turns it off |
+| The Key Vault Administrator role of the Microsoft Entra app *Backup Management Service* (only if Lab 3.2's auth VM is encrypted with Azure Disk Encryption; Step 5.2.3a) | `dev-skycraft-swc-kv` (Lab 3.2) | Nothing breaks. The cleanup keeps the role, and says so |
+| The daily VM backup of the two Lab 3.2 VMs (protected-instance fee plus snapshot storage; no price is listed here), the Recovery Services vault `platform-skycraft-swc-rsv` and the Backup vault `platform-skycraft-swc-bv` | `platform-skycraft-swc-rg` | Billed for as long as they exist. `Remove-LabResource.ps1` removes both vaults, the protected items with their data and the instant-restore snapshot group |
+| Site Recovery replication of `dev-skycraft-swc-world-vm` and its target group `platform-skycraft-neu-asr-rg` (replica disks, cache storage account, target VNet; no price is listed here) | North Europe | Billed while it replicates. `Remove-LabResource.ps1` disables the replication and deletes the target group |
+| Diagnostic settings on the two vaults (Step 5.2.8) | `platform-skycraft-swc-rg` | They re-attach to the next vault created with the same id. `Remove-LabResource.ps1` removes them before it deletes each vault |
+
+---
+
 ## ✅ Lab Checklist
 
 - [ ] Vault `platform-skycraft-swc-rsv` deployed in Sweden Central, locally-redundant, tagged

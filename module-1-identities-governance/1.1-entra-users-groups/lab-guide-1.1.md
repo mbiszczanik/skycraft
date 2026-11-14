@@ -298,6 +298,20 @@ The blade only lists licenses: assignments are added and removed in the Microsof
 
 ---
 
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` does not build Lab 1.1, but every later lab uses what it creates: Lab 1.2 gives these users and groups their roles, and its `Test-Lab.ps1` and cleanup look them up. All of them are Microsoft Entra ID objects, not Azure resources, so none adds an Azure charge.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Users `malfurion.stormrage`, `khadgar.archmage` and `chromie.timewalker` on the tenant's initial `*.onmicrosoft.com` domain | Microsoft Entra ID | Lab 1.2 assigns Malfurion Owner on the subscription; its `Test-Lab.ps1` looks the users up on the initial domain. Deleting them first leaves role assignments pointing at nothing |
+| Groups `SkyCraft-Admins`, `SkyCraft-Developers` and `SkyCraft-Testers` | Microsoft Entra ID | Lab 1.2 gives Developers Contributor and Testers Reader on the resource groups |
+| The guest invitation to `istormrage@illidari.com` (or the address you pass as `-GuestEmail`) | Microsoft Entra ID | Lab 1.2 gives the guest Reader on `platform-skycraft-swc-rg`. An address that cannot accept the invitation leaves it pending |
+
+`scripts/Remove-LabResource.ps1` deletes the users, the guest and the groups. Run it after the later labs are cleaned up, not before: Lab 1.2's role assignments name these principals.
+
+---
+
 ## ✅ Lab Checklist
 
 Complete this checklist to verify you've successfully completed the lab:
