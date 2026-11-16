@@ -586,6 +586,14 @@
             @{ Kind = 'DataProtectionBackupVault'; Name = 'platform-skycraft-swc-bv'; ResourceGroup = 'platform-skycraft-swc-rg' }
         )
 
+        # Subscription-scope budgets that must be gone once teardown has run (#526). Lab is the lab
+        # of origin. KeptByDesign, when present, is the reason the budget is kept: it is reported
+        # as kept and does not fail. The budget at resource group scope is deleted with its group,
+        # which ResourceGroups below already asserts.
+        AssertAbsentBudgets = @(
+            @{ Name = 'SkyCraft-Monthly-Budget'; Lab = '1.3' }
+        )
+
         # Deleted last, after every lab teardown has run against them. Emptied by the per-lab
         # scripts; removed here so the subscription is left as the cycle found it.
         #
