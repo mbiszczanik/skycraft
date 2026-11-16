@@ -581,6 +581,14 @@ function Write-LabCycleReport {
     .PARAMETER DryRun
         The run planned only.
 
+    .PARAMETER Idempotence
+        One finding per phase the -IdempotencePass reran: Id, Lab, Status (Idempotent or
+        NotIdempotent), DeployExitCode and TestExitCode of the second run (#525).
+
+    .PARAMETER IdempotencePass
+        The run had -IdempotencePass on. Adds the Idempotence section, which says so even when no
+        phase was eligible, so an empty section is not read as a pass nobody ran.
+
     .EXAMPLE
         Write-LabCycleReport -Path ./tools/lab-cycle-report.md -SubscriptionId $id -Phases $results
 
@@ -600,7 +608,9 @@ function Write-LabCycleReport {
         [Parameter()]$Coverage,
         [Parameter()][AllowEmptyCollection()]$LivePhases = @(),
         [Parameter()][string]$LogDirectory,
-        [Parameter()][switch]$DryRun
+        [Parameter()][switch]$DryRun,
+        [Parameter()][AllowEmptyCollection()]$Idempotence = @(),
+        [Parameter()][switch]$IdempotencePass
     )
 
     if (-not $PSCmdlet.ShouldProcess($Path, 'write lab cycle report')) { return }
@@ -745,6 +755,26 @@ function Write-LabCycleReport {
         }
     }
     $lines.Add('')
+
+    # Only when the pass was asked for, so a report without it reads as it always did. A finding sits
+    # beside the phase's own status and does not change it (#525).
+    if ($IdempotencePass) {
+        $lines.Add('## Idempotence')
+        $lines.Add('')
+        if (@($Idempotence).Count -eq 0) { $lines.Add('-IdempotencePass was on, but no phase succeeded on its first run, so none was rerun.') }
+        else {
+            $notIdempotent = @($Idempotence | Where-Object { $_.Status -eq 'NotIdempotent' })
+            $lines.Add("Deploy and Test run a second time after a first run that fully succeeded. Idempotent: $(@($Idempotence).Count - $notIdempotent.Count). NotIdempotent: $($notIdempotent.Count). A finding does not change the phase's status or the exit code.")
+            $lines.Add('')
+            $lines.Add('| Phase | Lab | Result | Second Deploy exit | Second Test exit |')
+            $lines.Add('| --- | --- | --- | --- | --- |')
+            foreach ($finding in $Idempotence) {
+                $testExit = if ($null -ne $finding.TestExitCode) { $finding.TestExitCode } else { '-' }
+                $lines.Add("| $($finding.Id) | $($finding.Lab) | $($finding.Status) | $($finding.DeployExitCode) | $testExit |")
+            }
+        }
+        $lines.Add('')
+    }
 
     $lines.Add('## Teardown')
     $lines.Add('')
