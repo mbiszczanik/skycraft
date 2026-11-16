@@ -27,11 +27,17 @@
       6. A SkyCraft-Blob-Policy with a vaulted rule (one made in the Portal) stops the run with
          [ERROR] and exit 1 before any role is touched.
       7. -PolicyOnly ends after the policy: no role, no wait, no backup instance.
+      8. The backup instance is created through Invoke-LabRoleRetry only when a role was assigned
+         in this run (issue #301): UserErrorMissingRequiredPermissions, which the module's own
+         pattern does not match, is retried (one [WAIT] line per try) until the call succeeds or
+         600 seconds have passed, then [ERROR] and exit 1; any other error stops at once with
+         no wait; with every role already held, or with -WhatIf, there is no wait; no fixed
+         360-second sleep remains.
 
     No subscription is needed, and none is used: the script runs through
     tests/Support/LabScriptStub.psm1 (issue #112), which aborts the child with exit 99 unless
-    every stubbed command resolves to the stub. Start-Sleep is stubbed too, so the 360-second
-    wait is recorded instead of waited.
+    every stubbed command resolves to the stub. Start-Sleep is stubbed too, so the retry
+    waits are recorded instead of waited.
 
 .EXAMPLE
     Invoke-Pester -Path .\New-LabBlobBackup.Tests.ps1
@@ -39,7 +45,7 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Issue: #397, #306
+    Issue: #397, #306, #301
 #>
 
 #Requires -Version 7.0
@@ -79,6 +85,11 @@ BeforeAll {
     #   SKYCRAFT_STUB_CREATEFAIL       '1' refuses every role assignment create (HTTP 403)
     #   SKYCRAFT_STUB_POLICY           'operational' (default, the script's own), 'vaulted' (the
     #                                  Portal's) or 'none'
+    #   SKYCRAFT_STUB_INSTANCE         'existing' (default, the account is already protected),
+    #                                  'ok' (none yet, the create succeeds), 'permission-then-ok'
+    #                                  (UserErrorMissingRequiredPermissions twice, then success),
+    #                                  'authorization-then-ok' (AuthorizationFailed twice, then
+    #                                  success), 'permission-always' or 'other' (a different error)
     $script:StubBody = @'
 $script:LogPath = $env:SKYCRAFT_STUB_LOG
 $script:VaultPrincipal = '11111111-1111-1111-1111-111111111111'
@@ -171,6 +182,7 @@ function Get-AzDataProtectionBackupInstance {
     [CmdletBinding()]
     param($ResourceGroupName, $VaultName)
     Write-StubCall -Name 'Get-AzDataProtectionBackupInstance'
+    if ($env:SKYCRAFT_STUB_INSTANCE -and $env:SKYCRAFT_STUB_INSTANCE -ne 'existing') { return }
     [pscustomobject]@{ Property = [pscustomobject]@{ DataSourceInfo = [pscustomobject]@{ ResourceId = $script:StorageId } } }
 }
 
@@ -183,7 +195,15 @@ function Initialize-AzDataProtectionBackupInstance {
 function New-AzDataProtectionBackupInstance {
     [CmdletBinding()]
     param([Parameter(ValueFromRemainingArguments)]$Rest)
+    $script:InstanceTries++
     Write-StubCall -Name 'New-AzDataProtectionBackupInstance'
+    $permission = 'UserErrorMissingRequiredPermissions: The vault identity does not have the required permissions on the datasource.'
+    switch ($env:SKYCRAFT_STUB_INSTANCE) {
+        'permission-then-ok' { if ($script:InstanceTries -le 2) { throw $permission } }
+        'authorization-then-ok' { if ($script:InstanceTries -le 2) { throw 'AuthorizationFailed: the client does not have authorization to perform the action.' } }
+        'permission-always' { throw $permission }
+        'other' { throw 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid.' }
+    }
 }
 
 function Start-Sleep {
@@ -227,7 +247,7 @@ function New-StubRoleAssignment {
 '@
 
     function Invoke-BlobBackupScript {
-        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail, [string]$Policy = 'operational', [string[]]$ArgumentList = @())
+        param([string]$Roles = 'none', [switch]$RoleLookupFail, [switch]$CreateFail, [string]$Policy = 'operational', [string]$Instance = 'existing', [string[]]$ArgumentList = @())
 
         $logPath = Join-Path $script:Stub.Directory 'calls.log'
         Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
@@ -235,6 +255,7 @@ function New-StubRoleAssignment {
         $run = Invoke-LabScriptWithStub -Stub $script:Stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
             SKYCRAFT_STUB_POLICY         = $Policy
             SKYCRAFT_STUB_ROLES          = $Roles
+            SKYCRAFT_STUB_INSTANCE       = $Instance
             SKYCRAFT_STUB_ROLELOOKUPFAIL = if ($RoleLookupFail) { '1' } else { '0' }
             SKYCRAFT_STUB_CREATEFAIL     = if ($CreateFail) { '1' } else { '0' }
             SKYCRAFT_STUB_LOG            = $logPath
@@ -266,7 +287,14 @@ function New-StubRoleAssignment {
     $script:NewPolicy  = Invoke-BlobBackupScript -Policy 'none' -Roles 'above'
     $script:Vaulted    = Invoke-BlobBackupScript -Policy 'vaulted'
     $script:PolicyOnly = Invoke-BlobBackupScript -Policy 'none' -ArgumentList '-PolicyOnly'
-    $script:AllRuns    = @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail, $script:NewPolicy, $script:Vaulted, $script:PolicyOnly)
+    $script:Retried     = Invoke-BlobBackupScript -Instance 'permission-then-ok'
+    $script:RetriedAuth = Invoke-BlobBackupScript -Instance 'authorization-then-ok'
+    $script:TimedOut    = Invoke-BlobBackupScript -Instance 'permission-always'
+    $script:OtherError  = Invoke-BlobBackupScript -Instance 'other'
+    $script:RolesHeld   = Invoke-BlobBackupScript -Roles 'above' -Instance 'ok'
+    $script:DryRun      = Invoke-BlobBackupScript -Instance 'ok' -ArgumentList '-WhatIf'
+    $script:AllRuns     = @($script:Fresh, $script:HeldAbove, $script:HeldBelow, $script:ReadFails, $script:CreateFail, $script:NewPolicy, $script:Vaulted, $script:PolicyOnly,
+        $script:Retried, $script:RetriedAuth, $script:TimedOut, $script:OtherError, $script:RolesHeld, $script:DryRun)
 }
 
 AfterAll {
@@ -284,7 +312,7 @@ Describe 'Lab 5.2 New-LabBlobBackup.ps1 - test harness' {
 
 Describe 'Lab 5.2 New-LabBlobBackup.ps1 - the vault identity''s roles through the ARM API (#397)' {
 
-    It 'creates both roles on the storage account for a ServicePrincipal, then waits and checks the backup instance' {
+    It 'creates both roles on the storage account for a ServicePrincipal, then checks the backup instance without a fixed wait' {
         $run = $script:Fresh
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:*' }) | Should -Be @(
@@ -292,7 +320,8 @@ Describe 'Lab 5.2 New-LabBlobBackup.ps1 - the vault identity''s roles through th
             "New-RoleAssignment:$script:Vault|ServicePrincipal|$script:BackupRole|$script:StorageId"
         )
         @($run.Calls | Where-Object { $_ -eq "Get-RoleAssignment|$script:StorageId|$script:Vault" }).Count | Should -Be 2
-        $run.Calls | Should -Contain 'Start-Sleep:360'
+        $run.Calls | Should -Not -Contain 'Start-Sleep:360'
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' }) | Should -BeNullOrEmpty
         $run.Calls | Should -Contain 'Get-AzDataProtectionBackupInstance'
     }
 
@@ -370,5 +399,62 @@ Describe 'Lab 5.2 New-LabBlobBackup.ps1 - SkyCraft-Blob-Policy, operational only
         $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
         @($run.Calls | Where-Object { $_ -like 'New-AzDataProtectionBackupPolicy:SkyCraft-Blob-Policy|*' }).Count | Should -Be 1
         @($run.Calls | Where-Object { $_ -like '*RoleAssignment*' -or $_ -like 'Start-Sleep:*' -or $_ -like '*BackupInstance' }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Lab 5.2 New-LabBlobBackup.ps1 - the backup instance waits for the role, not for a fixed time (#301)' {
+
+    It 'has no fixed 360-second sleep' {
+        (Get-Content -LiteralPath $script:ScriptPath -Raw) | Should -Not -Match 'Start-Sleep\s+-Seconds\s+360'
+    }
+
+    It 'retries UserErrorMissingRequiredPermissions after a role was assigned, printing a [WAIT] line per retry, until the call succeeds' {
+        $run = $script:Retried
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:*' }).Count | Should -Be 2
+        @($run.Calls | Where-Object { $_ -eq 'New-AzDataProtectionBackupInstance' }).Count | Should -Be 3
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' }) | Should -Be @('Start-Sleep:15', 'Start-Sleep:15')
+        @([regex]::Matches($run.Output, '\[WAIT\]')).Count | Should -Be 2
+        $run.Output | Should -Match 'Blob backup instance created for prodskycraftswcsa'
+    }
+
+    It 'retries an error that Invoke-LabRoleRetry already treats as a role not yet in effect' {
+        $run = $script:RetriedAuth
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -eq 'New-AzDataProtectionBackupInstance' }).Count | Should -Be 3
+        @([regex]::Matches($run.Output, '\[WAIT\]')).Count | Should -Be 2
+    }
+
+    It 'stops with [ERROR] and the last error, exit 1, after 600 seconds of retries' {
+        $run = $script:TimedOut
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' }).Count | Should -Be 40
+        @($run.Calls | Where-Object { $_ -eq 'New-AzDataProtectionBackupInstance' }).Count | Should -Be 41
+        @([regex]::Matches($run.Output, '\[WAIT\]')).Count | Should -Be 40
+        $run.Output | Should -Match '\[ERROR\] Failed to create blob backup instance:[^\r\n]*UserErrorMissingRequiredPermissions'
+    }
+
+    It 'stops at once on any other error: [ERROR], exit 1, no retry and no wait' {
+        $run = $script:OtherError
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -eq 'New-AzDataProtectionBackupInstance' }).Count | Should -Be 1
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' }) | Should -BeNullOrEmpty
+        $run.Output | Should -Not -Match '\[WAIT\]'
+        $run.Output | Should -Match '\[ERROR\] Failed to create blob backup instance:[^\r\n]*UserErrorInvalidRequestParameter'
+    }
+
+    It 'does not wait when every role was already held at the start' {
+        $run = $script:RolesHeld
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -like 'New-RoleAssignment:*' }) | Should -BeNullOrEmpty
+        @($run.Calls | Where-Object { $_ -eq 'New-AzDataProtectionBackupInstance' }).Count | Should -Be 1
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'neither waits nor creates the backup instance with -WhatIf' {
+        $run = $script:DryRun
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        @($run.Calls | Where-Object { $_ -like 'Start-Sleep:*' -or $_ -like 'New-RoleAssignment:*' -or $_ -eq 'New-AzDataProtectionBackupInstance' }) | Should -BeNullOrEmpty
+        $run.Output | Should -Match 'Would create blob backup instance'
     }
 }

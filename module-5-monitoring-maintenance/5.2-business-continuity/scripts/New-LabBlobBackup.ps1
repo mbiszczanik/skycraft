@@ -16,7 +16,9 @@
          - Storage Blob Data Owner
          - Storage Account Backup Contributor
     3. Creates the blob backup protection instance (backup instance) connecting
-       prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy.
+       prodskycraftswcsa to the SkyCraft-Blob-Policy backup policy. When step 2 assigned a role
+       in this run, the call is retried for up to 600 seconds while the role takes effect
+       (Invoke-LabRoleRetry); when every role was already held, it is called once, with no wait.
 
     Requires Owner or User Access Administrator role at storage account scope
     to create role assignments. The role assignments are read and created
@@ -47,8 +49,8 @@
 .NOTES
     Project: SkyCraft
     Lab: 5.2 - Business Continuity & Disaster Recovery
-    Version: 1.1.0
-    Date: 2026-10-28
+    Version: 1.2.0
+    Date: 2026-11-16
 #>
 
 #Requires -Version 7.0
@@ -219,6 +221,7 @@ $coversAccount = {
     $Scope -eq $storageId -or $storageId -like "$Scope/*" -or $Scope -eq '/' -or
         $Scope -like '/providers/Microsoft.Management/managementGroups/*'
 }
+$roleAssigned = $false
 foreach ($role in $requiredRoles) {
     Write-Host "  Checking: $($role.Name)..." -ForegroundColor Gray
     try {
@@ -241,6 +244,7 @@ foreach ($role in $requiredRoles) {
                 -RoleDefinitionId $role.RoleId `
                 -PrincipalId $bvPrincipalId `
                 -PrincipalType 'ServicePrincipal' | Out-Null
+            $roleAssigned = $true
             Write-Host "  ✓ Assigned: $($role.Name)" -ForegroundColor Green
         } catch {
             Write-Host "  [ERROR] Failed to assign '$($role.Name)': $_" -ForegroundColor Red
@@ -248,11 +252,6 @@ foreach ($role in $requiredRoles) {
             Exit-Lab -FailureCount 1
         }
     }
-}
-
-if (-not $WhatIf) {
-    Write-Host "`n  Waiting 360 seconds for RBAC propagation (Azure Backup requires 5-10 min)..." -ForegroundColor Gray
-    Start-Sleep -Seconds 360
 }
 
 # ── [5/5] Create blob backup instance ────────────────────────────────────
@@ -275,23 +274,40 @@ if ($existingInstance) {
         # 'UserErrorInvalidRequestParameter: Parameter NO_PARAM in request is invalid'.
         # -ErrorAction Stop is required because the autorest DataProtection cmdlets emit
         # non-terminating errors, which previously printed a false "created" success.
-        $backupInstance = Initialize-AzDataProtectionBackupInstance `
-            -DatasourceType AzureBlob `
-            -DatasourceLocation $location `
-            -DatasourceId $storageId `
-            -PolicyId $policyId `
-            -ErrorAction Stop
+        $createInstance = {
+            try {
+                $backupInstance = Initialize-AzDataProtectionBackupInstance `
+                    -DatasourceType AzureBlob `
+                    -DatasourceLocation $location `
+                    -DatasourceId $storageId `
+                    -PolicyId $policyId `
+                    -ErrorAction Stop
 
-        New-AzDataProtectionBackupInstance `
-            -ResourceGroupName $platformRg `
-            -VaultName $bvName `
-            -BackupInstance $backupInstance `
-            -ErrorAction Stop | Out-Null
+                New-AzDataProtectionBackupInstance `
+                    -ResourceGroupName $platformRg `
+                    -VaultName $bvName `
+                    -BackupInstance $backupInstance `
+                    -ErrorAction Stop | Out-Null
+            } catch {
+                # Invoke-LabRoleRetry does not know this code: name it as the role-not-yet-effective case.
+                if ("$($_.Exception.Message) $($_.FullyQualifiedErrorId)" -match 'UserErrorMissingRequiredPermissions') {
+                    throw "AuthorizationFailed: $($_.Exception.Message)"
+                }
+                throw
+            }
+        }
+        if ($roleAssigned) {
+            # Azure Backup needs 5-10 minutes to see a role given moments ago; -Sleep keeps the caller's Start-Sleep.
+            Invoke-LabRoleRetry -Script $createInstance -Description 'The blob backup instance' -TimeoutSeconds 600 `
+                -Sleep { param($Seconds) Start-Sleep -Seconds $Seconds } | Out-Null
+        } else {
+            & $createInstance
+        }
 
         Write-Host "  ✓ Blob backup instance created for $storageAccount" -ForegroundColor Green
     } catch {
         Write-Host "  [ERROR] Failed to create blob backup instance: $_" -ForegroundColor Red
-        Write-Host "  If the error is 'UserErrorMissingRequiredPermissions', wait 5-10 minutes and retry." -ForegroundColor Yellow
+        Write-Host "  If the error is 'UserErrorMissingRequiredPermissions', the role is not in effect yet: run the script again in a few minutes." -ForegroundColor Yellow
         Exit-Lab -FailureCount 1
     }
 }
