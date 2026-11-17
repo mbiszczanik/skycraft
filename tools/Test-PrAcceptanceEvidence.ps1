@@ -83,7 +83,9 @@ function Get-PrAcceptanceVerdict {
             if (-not $sha) {
                 return [pscustomobject]@{ Pass = $false; Reason = 'Acceptance-head names no commit (7 to 40 hex characters). See docs/lab-acceptance.md.' }
             }
-            if (-not $HeadSha.StartsWith($sha, [System.StringComparison]::OrdinalIgnoreCase) -and $headValue -notmatch '(?i)later changes?:[ \t]*\S') {
+            $why = [regex]::Match($headValue, '(?i)later changes?:[ \t]*(?<why>.*)$').Groups['why'].Value.Trim()
+            $explained = $why -match '[\p{L}\p{N}]' -and $why -notmatch '(?i)^(<.*|tbd|tba|todo|n/?a|none|unknown|see above|[-.?]+|…)\.?$'
+            if (-not $HeadSha.StartsWith($sha, [System.StringComparison]::OrdinalIgnoreCase) -and -not $explained) {
                 return [pscustomobject]@{ Pass = $false; Reason = "Acceptance-head $sha is not the PR head $($HeadSha.Substring(0, [Math]::Min(12, $HeadSha.Length))). Rerun on the head, or add 'later changes: <why they cannot affect the result>'. See docs/lab-acceptance.md." }
             }
         }

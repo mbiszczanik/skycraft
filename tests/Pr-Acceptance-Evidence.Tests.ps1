@@ -113,6 +113,16 @@ Describe 'Acceptance-head against the PR head' {
         (Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha 'fedcba9876543210fedcba9876543210fedcba98').Pass | Should -BeTrue
     }
 
+    It 'rejects a stale commit whose later-changes note is a placeholder: <note> (review finding)' -ForEach @(
+        @{ note = '<why they cannot affect the result>' }, @{ note = 'TBD' }, @{ note = 'todo' }, @{ note = 'n/a' },
+        @{ note = 'none' }, @{ note = '...' }, @{ note = '' }
+    ) {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', "Acceptance-head: 0123456789abcdef, later changes: $note"
+        $v = Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha 'fedcba9876543210fedcba9876543210fedcba98'
+        $v.Pass | Should -BeFalse
+        $v.Reason | Should -Match 'Acceptance-head 0123456789abcdef is not the PR head'
+    }
+
     It 'rejects an entry that names no commit' {
         $body = $script:Record -replace '(?m)^Acceptance-head:.*', 'Acceptance-head: the current branch'
         $v = Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha $script:Head
