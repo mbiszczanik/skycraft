@@ -114,9 +114,10 @@ function Get-LabCostEstimate {
     foreach ($item in $Resource) {
         $type = [string]$item.Type
         $qty  = if ($null -ne $item.Quantity) { [decimal]$item.Quantity } else { [decimal]1 }
+        if ($qty -lt 0) { throw "Get-LabCostEstimate: resource '$($item.Name)' has a negative quantity." }
         $row  = [ordered]@{
             Name = $item.Name; Type = $type; Sku = $item.Sku; Quantity = $qty
-            Region = $item.Region; Status = 'unknown'; MonthlyCost = $null
+            Region = $item.Region; Status = 'unknown'; MonthlyCost = $null; UnpricedMeters = 0
         }
 
         if ($script:NoChargeTypes -contains $type.ToLowerInvariant()) {
@@ -127,19 +128,27 @@ function Get-LabCostEstimate {
 
         $service = $script:ServiceByType[$type.ToLowerInvariant()]
         $best = $null
+        $skipped = 0
         foreach ($price in $PriceList) {
             if ([string]$price.skuName -ne [string]$item.Sku) { continue }
             if ([string]$price.armRegionName -ne [string]$item.Region) { continue }
             if ($service -and [string]$price.serviceName -ne $service) { continue }
+            # A missing, non-numeric or negative amount is no price: it must not become zero.
+            $amount = [decimal]0
+            $numeric = [decimal]::TryParse([string]$price.retailPrice, [System.Globalization.NumberStyles]::Float,
+                [cultureinfo]::InvariantCulture, [ref]$amount)
+            if (-not $numeric -or $amount -lt 0) { continue }
             $factor = ConvertTo-MonthlyFactor -UnitOfMeasure ([string]$price.unitOfMeasure)
-            if ($null -eq $factor) { continue }
-            $monthly = [decimal]$price.retailPrice * [decimal]$factor
+            if ($null -eq $factor) { $skipped++; continue }
+            $monthly = $amount * [decimal]$factor
             if ($null -eq $best -or $monthly -gt $best) { $best = $monthly }
         }
 
         if ($null -ne $best) {
             $row.Status = 'priced'
             $row.MonthlyCost = [math]::Round($best * $qty, 2)
+            # Meters of this resource that bill in a unit the estimate cannot convert (per 10K, per GB).
+            $row.UnpricedMeters = $skipped
         }
         [pscustomobject]$row
     }
@@ -180,8 +189,10 @@ function Compare-LabCostEstimate {
 
     $known = [decimal]0
     $unknown = 0
+    $partial = 0
     foreach ($row in $Estimate) {
         if ($null -eq $row.MonthlyCost) { $unknown++ } else { $known += [decimal]$row.MonthlyCost }
+        if ($row.PSObject.Properties['UnpricedMeters'] -and [int]$row.UnpricedMeters -gt 0) { $partial++ }
     }
 
     # Cents: a double literal bound to [decimal] carries float noise that would flip an exact boundary.
@@ -189,6 +200,7 @@ function Compare-LabCostEstimate {
     $verdict = if ($known -le $limit) { 'within' } else { 'exceeds' }
     $message = "$verdict`: known total $known against stated $StatedCost (limit $limit)"
     if ($unknown -gt 0) { $message += "; $unknown resource(s) have no price, so the total is incomplete" }
+    if ($partial -gt 0) { $message += "; $partial resource(s) have meters in a unit the estimate cannot convert, so the total is incomplete" }
 
     [pscustomobject]@{
         Verdict      = $verdict
@@ -196,7 +208,8 @@ function Compare-LabCostEstimate {
         StatedCost   = $StatedCost
         Limit        = $limit
         UnknownCount = $unknown
-        Clean        = ($verdict -eq 'within' -and $unknown -eq 0)
+        PartialCount = $partial
+        Clean        = ($verdict -eq 'within' -and $unknown -eq 0 -and $partial -eq 0)
         Message      = $message
     }
 }
