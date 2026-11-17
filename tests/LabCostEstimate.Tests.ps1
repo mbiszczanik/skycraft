@@ -77,6 +77,29 @@ Describe 'Get-LabCostEstimate' {
         $row.MonthlyCost | Should -Be 0
     }
 
+    It 'does not turn a missing, null, text or negative retailPrice into a zero price (review finding)' -ForEach @(
+        @{ label = 'missing'; item = [pscustomobject]@{ serviceName = 'Virtual Machines'; skuName = 'D2s v5'; armRegionName = 'swedencentral'; unitOfMeasure = '1 Hour' } }
+        @{ label = 'null'; item = [pscustomobject]@{ serviceName = 'Virtual Machines'; skuName = 'D2s v5'; armRegionName = 'swedencentral'; unitOfMeasure = '1 Hour'; retailPrice = $null } }
+        @{ label = 'text'; item = [pscustomobject]@{ serviceName = 'Virtual Machines'; skuName = 'D2s v5'; armRegionName = 'swedencentral'; unitOfMeasure = '1 Hour'; retailPrice = 'n/a' } }
+        @{ label = 'negative'; item = [pscustomobject]@{ serviceName = 'Virtual Machines'; skuName = 'D2s v5'; armRegionName = 'swedencentral'; unitOfMeasure = '1 Hour'; retailPrice = -1 } }
+    ) {
+        $row = Get-LabCostEstimate -Resource @($script:Vm) -PriceList @($item)
+        $row.Status | Should -Be 'unknown'
+        $row.MonthlyCost | Should -BeNullOrEmpty
+    }
+
+    It 'throws and names a resource with a negative quantity (review finding)' {
+        $neg = @{ Name = 'vm-neg'; Type = 'Microsoft.Compute/virtualMachines'; Sku = 'D2s v5'; Quantity = -1; Region = 'swedencentral' }
+        { Get-LabCostEstimate -Resource @($script:Vm, $neg) -PriceList $script:Prices } | Should -Throw "*'vm-neg' has a negative quantity*"
+    }
+
+    It 'counts the meters it cannot convert on a priced row (review finding)' {
+        $storage = @{ Name = 'st1'; Type = 'Microsoft.Storage/storageAccounts'; Sku = 'Standard LRS'; Quantity = 100; Region = 'swedencentral' }
+        $row = Get-LabCostEstimate -Resource @($storage) -PriceList $script:Prices
+        $row.UnpricedMeters | Should -Be 1
+        (Get-LabCostEstimate -Resource @($script:Vm) -PriceList $script:Prices).UnpricedMeters | Should -Be 0
+    }
+
     It 'does not price a resource from another region' {
         $other = @{ Name = 'vm2'; Type = 'Microsoft.Compute/virtualMachines'; Sku = 'D2s v5'; Quantity = 1; Region = 'northeurope' }
         (Get-LabCostEstimate -Resource @($other) -PriceList $script:Prices).Status | Should -Be 'unknown'
@@ -127,6 +150,16 @@ Describe 'Compare-LabCostEstimate' {
 
     It 'throws and names the estimate when it is empty' {
         { Compare-LabCostEstimate -Estimate @() -StatedCost 10 } | Should -Throw '*estimate is empty*'
+    }
+
+    It 'says next to the verdict that a meter was not priced and is not a clean pass (review finding)' {
+        $storage = @{ Name = 'st1'; Type = 'Microsoft.Storage/storageAccounts'; Sku = 'Standard LRS'; Quantity = 100; Region = 'swedencentral' }
+        $rows = @(Get-LabCostEstimate -Resource @($storage) -PriceList $script:Prices)   # 2.00, one 10K meter skipped
+        $r = Compare-LabCostEstimate -Estimate $rows -StatedCost 1000
+        $r.Verdict | Should -Be 'within'
+        $r.PartialCount | Should -Be 1
+        $r.Clean | Should -BeFalse
+        $r.Message | Should -Match 'meters in a unit the estimate cannot convert'
     }
 
     It 'treats an all-unknown estimate as incomplete, not as free' {
