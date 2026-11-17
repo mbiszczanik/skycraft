@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0](https://github.com/mbiszczanik/skycraft/compare/v0.23.0...v0.24.0) (2026-11-17)
+
+
+### Features
+
+* **labs:** every validator prints one RESULT line (Refs [#363](https://github.com/mbiszczanik/skycraft/issues/363)) ([#580](https://github.com/mbiszczanik/skycraft/issues/580)) ([6f82b9d](https://github.com/mbiszczanik/skycraft/commit/6f82b9df87d32de7e637bdad58948f98ae3c0fd2))
+
 ## [0.23.0](https://github.com/mbiszczanik/skycraft/compare/v0.22.0...v0.23.0) (2026-11-17)
 
 
