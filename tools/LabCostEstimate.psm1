@@ -133,13 +133,13 @@ function Get-LabCostEstimate {
             if ([string]$price.skuName -ne [string]$item.Sku) { continue }
             if ([string]$price.armRegionName -ne [string]$item.Region) { continue }
             if ($service -and [string]$price.serviceName -ne $service) { continue }
-            # A missing, non-numeric or negative amount is no price: it must not become zero.
+            # A missing, non-numeric or negative amount is no price (never zero); both that and a unit
+            # the estimate cannot convert leave a matching meter unpriced, which is counted below.
             $amount = [decimal]0
             $numeric = [decimal]::TryParse([string]$price.retailPrice, [System.Globalization.NumberStyles]::Float,
                 [cultureinfo]::InvariantCulture, [ref]$amount)
-            if (-not $numeric -or $amount -lt 0) { continue }
             $factor = ConvertTo-MonthlyFactor -UnitOfMeasure ([string]$price.unitOfMeasure)
-            if ($null -eq $factor) { $skipped++; continue }
+            if (-not $numeric -or $amount -lt 0 -or $null -eq $factor) { $skipped++; continue }
             $monthly = $amount * [decimal]$factor
             if ($null -eq $best -or $monthly -gt $best) { $best = $monthly }
         }
@@ -147,7 +147,7 @@ function Get-LabCostEstimate {
         if ($null -ne $best) {
             $row.Status = 'priced'
             $row.MonthlyCost = [math]::Round($best * $qty, 2)
-            # Meters of this resource that bill in a unit the estimate cannot convert (per 10K, per GB).
+            # Matching meters it could not price: no valid amount, or a unit it cannot convert (per 10K, per GB).
             $row.UnpricedMeters = $skipped
         }
         [pscustomobject]$row
@@ -200,7 +200,7 @@ function Compare-LabCostEstimate {
     $verdict = if ($known -le $limit) { 'within' } else { 'exceeds' }
     $message = "$verdict`: known total $known against stated $StatedCost (limit $limit)"
     if ($unknown -gt 0) { $message += "; $unknown resource(s) have no price, so the total is incomplete" }
-    if ($partial -gt 0) { $message += "; $partial resource(s) have meters in a unit the estimate cannot convert, so the total is incomplete" }
+    if ($partial -gt 0) { $message += "; $partial resource(s) have a meter the estimate could not price (no valid amount or an unsupported unit), so the total is incomplete" }
 
     [pscustomobject]@{
         Verdict      = $verdict

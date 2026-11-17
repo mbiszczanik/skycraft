@@ -93,6 +93,19 @@ Describe 'Get-LabCostEstimate' {
         { Get-LabCostEstimate -Resource @($script:Vm, $neg) -PriceList $script:Prices } | Should -Throw "*'vm-neg' has a negative quantity*"
     }
 
+    It 'counts a matching meter with an invalid price as unpriced next to a valid one (second review finding)' -ForEach @(
+        @{ label = 'null price, unsupported unit'; bad = [pscustomobject]@{ serviceName = 'Storage'; skuName = 'Standard LRS'; armRegionName = 'swedencentral'; unitOfMeasure = '10K'; retailPrice = $null } }
+        @{ label = 'null price, convertible unit'; bad = [pscustomobject]@{ serviceName = 'Storage'; skuName = 'Standard LRS'; armRegionName = 'swedencentral'; unitOfMeasure = '1 GB/Month'; retailPrice = $null } }
+        @{ label = 'negative price'; bad = [pscustomobject]@{ serviceName = 'Storage'; skuName = 'Standard LRS'; armRegionName = 'swedencentral'; unitOfMeasure = '1 GB/Month'; retailPrice = -5 } }
+    ) {
+        $good = [pscustomobject]@{ serviceName = 'Storage'; skuName = 'Standard LRS'; armRegionName = 'swedencentral'; unitOfMeasure = '1 GB/Month'; retailPrice = 0.02 }
+        $storage = @{ Name = 'st1'; Type = 'Microsoft.Storage/storageAccounts'; Sku = 'Standard LRS'; Quantity = 100; Region = 'swedencentral' }
+        $row = Get-LabCostEstimate -Resource @($storage) -PriceList @($good, $bad)
+        $row.Status | Should -Be 'priced'
+        $row.UnpricedMeters | Should -Be 1
+        (Compare-LabCostEstimate -Estimate @($row) -StatedCost 1000).Clean | Should -BeFalse
+    }
+
     It 'counts the meters it cannot convert on a priced row (review finding)' {
         $storage = @{ Name = 'st1'; Type = 'Microsoft.Storage/storageAccounts'; Sku = 'Standard LRS'; Quantity = 100; Region = 'swedencentral' }
         $row = Get-LabCostEstimate -Resource @($storage) -PriceList $script:Prices
@@ -159,7 +172,7 @@ Describe 'Compare-LabCostEstimate' {
         $r.Verdict | Should -Be 'within'
         $r.PartialCount | Should -Be 1
         $r.Clean | Should -BeFalse
-        $r.Message | Should -Match 'meters in a unit the estimate cannot convert'
+        $r.Message | Should -Match 'a meter the estimate could not price'
     }
 
     It 'treats an all-unknown estimate as incomplete, not as free' {
