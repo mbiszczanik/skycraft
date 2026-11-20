@@ -38,12 +38,17 @@ BeforeAll {
     # machine without Az (the CI runner).
     function Get-AzAccessToken { param([string]$ResourceUrl, [string]$ResourceTypeName) $null = $ResourceUrl; $null = $ResourceTypeName }
     function Get-LabArmRoleAssignment { param([string]$Scope, [string]$PrincipalId) $null = $Scope, $PrincipalId }
+    function Get-AzStorageBlobServiceProperty { param([string]$ResourceGroupName, [string]$StorageAccountName) $null = $ResourceGroupName, $StorageAccountName }
 
     # The script's own $dataRoleName and its functions, as the script defines them.
     $roleAssignment = $script:Ast.Find({ param($n)
             $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$dataRoleName' }, $true)
     . ([scriptblock]::Create($roleAssignment.Extent.Text))
-    foreach ($name in 'Get-LabSignedInObjectId', 'Test-LabDataRoleAssigned', 'Resolve-LabDataPrincipalId') {
+    $daysAssignment = $script:Ast.Find({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$blobSoftDeleteDays' }, $true)
+    $daysAssignment | Should -Not -BeNullOrEmpty -Because 'Deploy-Bicep.ps1 keeps the soft delete days in $blobSoftDeleteDays'
+    . ([scriptblock]::Create($daysAssignment.Extent.Text))
+    foreach ($name in 'Get-LabSignedInObjectId', 'Test-LabDataRoleAssigned', 'Resolve-LabDataPrincipalId', 'Test-LabBlobRestoreConflict') {
         $definition = $script:Ast.Find({ param($n)
                 $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         $definition | Should -Not -BeNullOrEmpty -Because "Deploy-Bicep.ps1 defines $name"
@@ -172,5 +177,73 @@ Describe 'Lab 4.4 Deploy-Bicep.ps1 - the principal reaches the template' {
         $bicepText  | Should -Match "param parDataContributorPrincipalId string = ''"
         $bicepText  | Should -Match "roleAssignments: empty\(parDataContributorPrincipalId\) \? \[\] :"
         $bicepText  | Should -Match "roleDefinitionIdOrName: 'Storage Blob Data Contributor'"
+    }
+}
+
+Describe 'Lab 4.4 Deploy-Bicep.ps1 - Lab 5.2 point-in-time restore against the template soft delete days' {
+
+    BeforeEach {
+        Mock Write-Host { }
+    }
+
+    It 'keeps the soft delete days equal to the default of parBlobSoftDeleteDays in main.bicep' {
+        $bicepText = Get-Content -Raw -LiteralPath $script:BicepPath
+        $bicepText -match 'param parBlobSoftDeleteDays int = (\d+)' | Should -BeTrue
+        $blobSoftDeleteDays | Should -Be ([int]$Matches[1])
+    }
+
+    It 'passes the days variable to the template as parBlobSoftDeleteDays' {
+        (Get-Content -Raw -LiteralPath $script:ScriptPath) | Should -Match 'parBlobSoftDeleteDays\s*=\s*\$blobSoftDeleteDays'
+    }
+
+    It 'stops before the deployment: the guard runs before New-AzSubscriptionDeployment and exits through Exit-Lab' {
+        $scriptText = Get-Content -Raw -LiteralPath $script:ScriptPath
+        $guard = [regex]::Match($scriptText, '(?s)if \(Test-LabBlobRestoreConflict [^
+]*\{\s*Exit-Lab -FailureCount 1\s*\}')
+        $guard.Success | Should -BeTrue
+        $guard.Index | Should -BeLessThan $scriptText.IndexOf('New-AzSubscriptionDeployment @deployParams')
+        $guard.Index | Should -BeLessThan $scriptText.IndexOf('Get-AzSubscriptionDeploymentWhatIfResult @deployParams')
+    }
+
+    It 'answers stop with an [ERROR] naming the setting, both day counts and Lab 5.2 when restore is on with more days' {
+        Mock Get-AzStorageBlobServiceProperty { [pscustomobject]@{ RestorePolicy = [pscustomobject]@{ Enabled = $true; Days = 30 } } }
+        Test-LabBlobRestoreConflict -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -SoftDeleteDays $blobSoftDeleteDays | Should -BeTrue
+        Should -Invoke Write-Host -Times 1 -ParameterFilter {
+            "$Object" -match '\[ERROR\]' -and "$Object" -match 'Blob soft delete retention' -and
+            "$Object" -match "\($blobSoftDeleteDays days\)" -and "$Object" -match '\(30 days\)' -and "$Object" -match "Lab 5\.2's blob backup" }
+    }
+
+    It 'warns with the same text and answers go on under -WhatIf' {
+        Mock Get-AzStorageBlobServiceProperty { [pscustomobject]@{ RestorePolicy = [pscustomobject]@{ Enabled = $true; Days = 30 } } }
+        Test-LabBlobRestoreConflict -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -SoftDeleteDays $blobSoftDeleteDays -WhatIfMode | Should -BeFalse
+        Should -Invoke Write-Host -Times 1 -ParameterFilter {
+            "$Object" -match '\[WARNING\]' -and "$Object" -notmatch '\[ERROR\]' -and "$Object" -match 'Blob soft delete retention' -and
+            "$Object" -match "\($blobSoftDeleteDays days\)" -and "$Object" -match '\(30 days\)' -and "$Object" -match "Lab 5\.2's blob backup" }
+    }
+
+    It 'prints nothing and goes on when <case>' -ForEach @(
+        @{ case = 'restore is off'; restore = @{ Enabled = $false; Days = 30 } }
+        @{ case = 'there is no restore policy'; restore = $null }
+        @{ case = 'the restore days equal the soft delete days'; restore = @{ Enabled = $true; Days = 7 } }
+        @{ case = 'the restore days are below the soft delete days'; restore = @{ Enabled = $true; Days = 3 } }
+    ) {
+        $policy = if ($restore) { [pscustomobject]$restore } else { $null }
+        Mock Get-AzStorageBlobServiceProperty { [pscustomobject]@{ RestorePolicy = $policy } }
+        Test-LabBlobRestoreConflict -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -SoftDeleteDays $blobSoftDeleteDays | Should -BeFalse
+        Should -Invoke Write-Host -Times 0
+    }
+
+    It 'prints nothing, and does not look up the account, when it does not exist yet' {
+        Mock Get-AzStorageBlobServiceProperty { throw 'stub: must not be called' }
+        Test-LabBlobRestoreConflict -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -SoftDeleteDays $blobSoftDeleteDays -AccountExists $false | Should -BeFalse
+        Should -Invoke Get-AzStorageBlobServiceProperty -Times 0
+        Should -Invoke Write-Host -Times 0
+    }
+
+    It 'warns with the error text and goes on when the lookup throws' {
+        Mock Get-AzStorageBlobServiceProperty { throw 'stub: lookup failed' }
+        Test-LabBlobRestoreConflict -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -SoftDeleteDays $blobSoftDeleteDays | Should -BeFalse
+        Should -Invoke Write-Host -ParameterFilter { "$Object" -match '\[WARNING\]' -and "$Object" -match 'stub: lookup failed' }
+        Should -Invoke Write-Host -Times 0 -ParameterFilter { "$Object" -match '\[ERROR\]' }
     }
 }
