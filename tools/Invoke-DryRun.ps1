@@ -8,6 +8,7 @@
     without an Azure sign-in and without any deployed Azure resources:
 
       Parse       Every *.ps1 / *.psm1 / *.psd1 is parsed with the PowerShell parser.
+                  An empty discovery fails the check.
                   A syntax error is invisible to PSScriptAnalyzer, so this runs first.
       Analyzer    Invoke-ScriptAnalyzer over the repository with PSScriptAnalyzerSettings.psd1.
                   Only 'Error' severity fails the gate; warnings are counted and listed.
@@ -418,6 +419,10 @@ try {
                 $psFiles = @(Get-DryRunFile -Root $RepoRoot -Extension '.ps1', '.psm1', '.psd1' -ExcludeName $ExcludeDirectory)
                 $itemCount = $psFiles.Count
                 Write-Host "Parsing $($psFiles.Count) PowerShell file(s)..." -ForegroundColor Yellow
+
+                if ($psFiles.Count -eq 0) {
+                    $failures.Add("No PowerShell file was found under $RepoRoot - the discovery is broken, not the code.")
+                }
 
                 foreach ($file in $psFiles) {
                     $parseErrors = $null

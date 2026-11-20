@@ -40,6 +40,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $script:failCount = 0
+$script:passCount = 0
 
 Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -47,7 +48,7 @@ Write-Host "=== Lab 2.1 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
@@ -57,7 +58,7 @@ Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 function Test-PrivateSubnet {
     param($Subnet)
     if ($Subnet.DefaultOutboundAccess -eq $false) {
-        Write-Host "    - [OK] Subnet $($Subnet.Name) is private (DefaultOutboundAccess: False)." -ForegroundColor Green
+        Write-Host "    - [OK] Subnet $($Subnet.Name) is private (DefaultOutboundAccess: False)." -ForegroundColor Green; $script:passCount++
     }
     else {
         $actual = if ($null -eq $Subnet.DefaultOutboundAccess) { 'not set' } else { $Subnet.DefaultOutboundAccess }
@@ -77,7 +78,7 @@ $hubExpectedSubnets = @{
 
 try {
     $hubVnet = Get-AzVirtualNetwork -Name $hubVnetName -ResourceGroupName $hubRgName -ErrorAction Stop
-    Write-Host "[OK] Hub VNet found: $hubVnetName" -ForegroundColor Green
+    Write-Host "[OK] Hub VNet found: $hubVnetName" -ForegroundColor Green; $script:passCount++
 
     if ($hubVnet.AddressSpace.AddressPrefixes -contains "10.0.0.0/16") {
         Write-Host "  - Address Space 10.0.0.0/16 verified." -ForegroundColor Green
@@ -91,7 +92,7 @@ try {
         $subnet = $hubVnet.Subnets | Where-Object { $_.Name -eq $subnetName }
         if ($subnet) {
             if ($subnet.AddressPrefix -eq $hubExpectedSubnets[$subnetName]) {
-                Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green
+                Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green; $script:passCount++
             }
             else {
                 Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($hubExpectedSubnets[$subnetName]))" -ForegroundColor Red
@@ -116,7 +117,7 @@ function Test-AppServiceDelegation {
     param($Subnet)
     $service = 'Microsoft.Web/serverFarms'
     if (@($Subnet.Delegations.ServiceName) -contains $service) {
-        Write-Host "    - [OK] Subnet $($Subnet.Name) is delegated to $service." -ForegroundColor Green
+        Write-Host "    - [OK] Subnet $($Subnet.Name) is delegated to $service." -ForegroundColor Green; $script:passCount++
     }
     else {
         $actual = @($Subnet.Delegations.ServiceName | Where-Object { $_ })
@@ -131,7 +132,7 @@ function Test-SpokeVNet {
     Write-Host "`n=== Validating VNet: $VnetName ===" -ForegroundColor Cyan
     try {
         $vnet = Get-AzVirtualNetwork -Name $VnetName -ResourceGroupName $RgName -ErrorAction Stop
-        Write-Host "[OK] VNet found: $VnetName" -ForegroundColor Green
+        Write-Host "[OK] VNet found: $VnetName" -ForegroundColor Green; $script:passCount++
 
         if ($vnet.AddressSpace.AddressPrefixes -contains $Prefix) {
             Write-Host "  - Address Space $Prefix verified." -ForegroundColor Green
@@ -144,7 +145,7 @@ function Test-SpokeVNet {
             $subnet = $vnet.Subnets | Where-Object { $_.Name -eq $subnetName }
             if ($subnet) {
                 if ($subnet.AddressPrefix -eq $ExpectedSubnets[$subnetName]) {
-                    Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green
+                    Write-Host "  - [OK] Subnet $subnetName ($($subnet.AddressPrefix)) verified." -ForegroundColor Green; $script:passCount++
                 } else {
                     Write-Host "  - [FAIL] Subnet $subnetName found but address range is $($subnet.AddressPrefix) (Expected: $($ExpectedSubnets[$subnetName]))" -ForegroundColor Red
                     $script:failCount++
@@ -190,14 +191,14 @@ function Test-Peering {
         $peering = Get-AzVirtualNetworkPeering -VirtualNetworkName $VnetName -ResourceGroupName $RgName -Name $PeeringName -ErrorAction SilentlyContinue
         if ($peering) {
             if ($peering.PeeringState -eq "Connected") {
-                Write-Host "[OK] $PeeringName on $VnetName (Status: $($peering.PeeringState))" -ForegroundColor Green
+                Write-Host "[OK] $PeeringName on $VnetName (Status: $($peering.PeeringState))" -ForegroundColor Green; $script:passCount++
             } else {
                 Write-Host "[FAIL] $PeeringName on $VnetName Status is $($peering.PeeringState)" -ForegroundColor Red
                 $script:failCount++
             }
-            if ($peering.AllowVirtualNetworkAccess) { Write-Host "  - [OK] AllowVirtualNetworkAccess" -ForegroundColor Green }
+            if ($peering.AllowVirtualNetworkAccess) { Write-Host "  - [OK] AllowVirtualNetworkAccess" -ForegroundColor Green; $script:passCount++ }
             else { Write-Host "  - [FAIL] AllowVirtualNetworkAccess is False" -ForegroundColor Red; $script:failCount++ }
-            if ($peering.AllowForwardedTraffic) { Write-Host "  - [OK] AllowForwardedTraffic" -ForegroundColor Green }
+            if ($peering.AllowForwardedTraffic) { Write-Host "  - [OK] AllowForwardedTraffic" -ForegroundColor Green; $script:passCount++ }
             else { Write-Host "  - [FAIL] AllowForwardedTraffic is False" -ForegroundColor Red; $script:failCount++ }
         } else {
             Write-Host "[FAIL] Peering $PeeringName not found on $VnetName." -ForegroundColor Red
@@ -222,10 +223,10 @@ function Test-PIP {
     try {
         $pip = Get-AzPublicIpAddress -Name $Name -ResourceGroupName $RgName -ErrorAction SilentlyContinue
         if ($pip) {
-            Write-Host "[OK] PIP found: $Name" -ForegroundColor Green
-            if ($pip.Sku.Name -eq "Standard") { Write-Host "  - [OK] SKU Standard" -ForegroundColor Green }
+            Write-Host "[OK] PIP found: $Name" -ForegroundColor Green; $script:passCount++
+            if ($pip.Sku.Name -eq "Standard") { Write-Host "  - [OK] SKU Standard" -ForegroundColor Green; $script:passCount++ }
             else { Write-Host "  - [FAIL] SKU is $($pip.Sku.Name)" -ForegroundColor Red; $script:failCount++ }
-            if ($pip.PublicIpAllocationMethod -eq "Static") { Write-Host "  - [OK] Allocation Static" -ForegroundColor Green }
+            if ($pip.PublicIpAllocationMethod -eq "Static") { Write-Host "  - [OK] Allocation Static" -ForegroundColor Green; $script:passCount++ }
             else { Write-Host "  - [FAIL] Allocation is $($pip.PublicIpAllocationMethod)" -ForegroundColor Red; $script:failCount++ }
         } else {
             Write-Host "[FAIL] PIP $Name not found." -ForegroundColor Red
@@ -242,4 +243,4 @@ Test-PIP -Name "prod-skycraft-swc-lb-pip" -RgName "prod-skycraft-swc-rg"
 
 Write-Host "`n=== Validation Summary ===" -ForegroundColor Cyan
 Write-Host "Lab 2.1 validation complete. Failures: $($script:failCount)" -ForegroundColor $(if ($script:failCount -eq 0) { 'Green' } else { 'Red' })
-Exit-Lab -FailureCount $script:failCount
+Exit-Lab -FailureCount $script:failCount -PassCount $script:passCount
