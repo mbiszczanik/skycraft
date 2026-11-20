@@ -64,6 +64,7 @@ Describe 'Test-GatedPath: which changed files put a PR under the gate' {
         @{ path = 'tools/lab-cycle-manifest.psd1';                                             gated = $true }
         @{ path = 'tools/Invoke-LabCycle.ps1';                                                 gated = $true }
         @{ path = 'tools/LabCycle.psm1';                                                       gated = $true }
+        @{ path = 'tools/LabCommon.psm1';                                                      gated = $true }
         # A lab-local Pester suite stubs Az and runs in CI (lint.yml) - nothing about it can be
         # verified live, so it is out of scope like tests/ (issue #156). Its lab's scripts are not.
         @{ path = 'module-5-monitoring-maintenance/5.2-business-continuity/tests/Remove-LabResource.Tests.ps1';  gated = $false }
