@@ -64,6 +64,8 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $script:failCount = 0
+$script:passCount = 0
+$script:skipCount = 0
 
 $resourceGroupName  = "$Environment-skycraft-swc-rg"
 $expectedSku        = ($Environment -eq 'prod' -or $Environment -eq 'platform') ? 'Standard_GRS' : 'Standard_LRS'
@@ -94,6 +96,7 @@ function Write-LabCheck {
 
     if ($Passed) {
         Write-Host "  [PASS] $Check" -ForegroundColor Green
+        $script:passCount++
     }
     else {
         $script:failCount++
@@ -106,7 +109,7 @@ Write-Host "=== Lab 4.3: Validating Azure Files Environment ===" -ForegroundColo
 
 # 1. Verify Connection
 if (-not (Get-AzContext)) {
-    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1
+    Write-Host " [ERROR] Not logged in. Please run Connect-AzAccount." -ForegroundColor Red; Exit-Lab -FailureCount 1 -PassCount 0
 }
 
 # 2. Storage account: without it nothing else can be checked.
@@ -118,7 +121,7 @@ try {
 catch {
     Write-LabCheck -Check "Storage account '$storageAccountName' readable" -Passed $false -Detail "$_"
     Write-Host "`nValidation Complete. Failures: $script:failCount" -ForegroundColor Red
-    Exit-Lab -FailureCount $script:failCount
+    Exit-Lab -FailureCount $script:failCount -PassCount $script:passCount -SkipCount $script:skipCount
 }
 
 Write-LabCheck -Check 'Provisioning state is Succeeded' -Passed ($sa.ProvisioningState -eq 'Succeeded') `
@@ -222,6 +225,7 @@ try {
     }
     else {
         Write-Host "  [SKIP] $backupCheck - $unreadableVaults vault(s) could not be read (counted above)" -ForegroundColor Yellow
+        $script:skipCount++
     }
 }
 catch {
@@ -229,4 +233,4 @@ catch {
 }
 
 Write-Host "`nValidation Complete. Failures: $script:failCount" -ForegroundColor $(if ($script:failCount -eq 0) { 'Cyan' } else { 'Red' })
-Exit-Lab -FailureCount $script:failCount
+Exit-Lab -FailureCount $script:failCount -PassCount $script:passCount -SkipCount $script:skipCount
