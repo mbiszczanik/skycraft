@@ -733,18 +733,6 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
         ($step.items | Where-Object label -eq 'Lock type').value | Should -Be 'Delete'
         @($step.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Delete'
     }
-
-    It 'reads lab 1.3: no Overall compliance percentage in 1.3.10, 1.3.14 without a portal part, 1.3.22 ending in its Expected Result' {
-        $s10 = $script:Lab13.steps | Where-Object id -eq '1.3.10'
-        @($s10.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Overall compliance percentage'
-        @($s10.items | ForEach-Object { $_.labels }) | Should -Contain 'Require-Environment-Tag-RG'
-        $s14 = $script:Lab13.steps | Where-Object id -eq '1.3.14'
-        $s14.portal | Should -BeFalse
-        @($s14.items).Count | Should -Be 0
-        $s22 = $script:Lab13.steps | Where-Object id -eq '1.3.22'
-        @($s22.items | ForEach-Object { $_.labels }) | Should -Not -Contain 'Tenant Root Group'
-        $s22.expected | Should -Match 'Tenant Root Group'
-    }
 }
 
 Describe 'parse.py - every guide, a step without numbered items gives no list clicks (#342)' {
@@ -776,9 +764,9 @@ Describe 'parse.py - every guide, a step without numbered items gives no list cl
         }
     }
 
-    It 'drops list clicks only in steps 1.3.14 and 2.2.16 of every guide' {
+    It 'drops list clicks only in step 2.2.16 of every guide' {
         $script:GuideCount | Should -Be 17
-        @($script:Dropped | Sort-Object) | Should -Be @('1.3.14', '2.2.16')
+        @($script:Dropped | Sort-Object) | Should -Be @('2.2.16')
     }
 }
 

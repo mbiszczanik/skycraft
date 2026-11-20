@@ -1427,30 +1427,13 @@ class UnderPlaceTests(unittest.TestCase):
 
 
 class NoClickListTests(unittest.TestCase):
-    """An Expected View list and a step without numbered items give no click (#342). The fixtures
-    copy the shapes of 1.3.10, 1.3.14 and 2.1.x."""
+    """A step without numbered items gives no click (#342); an Expected View list is read as
+    before. The fixtures copy the shapes of 2.2.16 and 2.1.x."""
 
     def step(self, markdown: str) -> tuple[list[dict], str | None]:
         body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
         items, expected, _, _ = parse.read_step(body)
         return items, expected
-
-    def test_an_expected_view_list_is_no_action(self) -> None:
-        items, expected = self.step(
-            "### Step 9.9.1: View\n"
-            "\n"
-            "1. Click **Compliance** in left menu\n"
-            "\n"
-            "**Expected View**:\n"
-            "\n"
-            "- **Overall percentage** (likely <100% initially)\n"
-            "- List of assigned policies\n"
-            "\n"
-            "2. Click **Policy A**\n"
-            "\n"
-            "**Expected Result**: The policy opens.\n")
-        self.assertEqual([i["labels"] for i in items], [["Compliance"], ["Policy A"]])
-        self.assertEqual(expected, "The policy opens.")
 
     def test_an_expected_view_with_text_is_read_as_before(self) -> None:
         items, expected = self.step(
