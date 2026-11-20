@@ -59,13 +59,15 @@ Before starting this lab:
 **Verify prerequisites**:
 
 ```powershell
-Get-AzResourceGroup -Name dev-skycraft-swc-rg
-Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg |
-    Get-AzVirtualNetworkSubnetConfig -Name AppServiceSubnet |
+Get-AzResourceGroup -Name dev-skycraft-swc-rg -ErrorAction Stop
+Get-AzVirtualNetwork -Name dev-skycraft-swc-vnet -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop |
+    Get-AzVirtualNetworkSubnetConfig -Name AppServiceSubnet -ErrorAction Stop |
     Select-Object Name, AddressPrefix, @{N='Delegation';E={$_.Delegations.ServiceName}}
 # 'SkyCraft' if you completed Lab 1.3
-(Get-AzResourceGroup -Name dev-skycraft-swc-rg).Tags['Project']
+(Get-AzResourceGroup -Name dev-skycraft-swc-rg -ErrorAction Stop).Tags['Project']
 ```
+
+**If a line stops with an error**: the resource group or the VNet it names is missing, so the check has failed. Run Lab 2.1 first (or `scripts/Deploy-Bicep.ps1` of Lab 2.1), then run this block again.
 
 ---
 

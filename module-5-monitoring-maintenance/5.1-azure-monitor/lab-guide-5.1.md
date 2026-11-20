@@ -44,6 +44,8 @@ By completing this lab, you will:
 - **Section 6**: Route Storage Diagnostics to the Workspace (10 min)
 - **Section 7**: Alert on a Missing Heartbeat (15 min)
 
+> **Platform wait**: after the agent install in Step 5.1.2, the first `Heartbeat` row takes 13 to 85 minutes to reach a new workspace (live timings of 2026-11-01 and 2026-11-02, `main` `c940f10`; Step 5.1.3 shows it). The wait is Azure's, not your work: plan for it apart from the section times. Start it by finishing Step 5.1.2 first, then do Steps 5.1.5 and 5.1.7 while it runs: neither needs agent data. Steps 5.1.3, 5.1.4 and 5.1.6 do.
+
 ---
 
 ## ✅ Prerequisites
@@ -56,6 +58,23 @@ Before starting this lab:
 - [ ] `Contributor` role at the subscription level
 
 These are the checks `scripts/Deploy-Bicep.ps1` performs before deploying - it exits if no VM or no platform storage account is found.
+
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
+
+```powershell
+# Resource group (Lab 1.2)
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object ResourceGroupName, Location
+
+# The monitored VM, which must be running (Lab 3.2)
+Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg -Status -ErrorAction Stop | Select-Object Name, PowerState
+
+# The storage account that receives the diagnostic setting (Lab 4.1)
+Get-AzStorageAccount -Name platformskycraftswcsa -ResourceGroupName platform-skycraft-swc-rg -ErrorAction Stop | Select-Object StorageAccountName, Location
+```
+
+**Expected Result**: One resource group and one storage account in `swedencentral`, and the VM with `PowerState` `VM running`.
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first (Lab 4.1 with `-All`), then run this block again. `Deploy-Bicep.ps1` needs only one of the two VMs: if you built only the production one, use `prod-skycraft-swc-auth-vm` in `prod-skycraft-swc-rg` for the VM line. If Lab 4.1 had to use another storage account name, use that name.
 
 ---
 
@@ -497,6 +516,19 @@ module modHeartbeatAlert 'br/public:avm/res/insights/scheduled-query-rule:0.6.0'
 ```
 
 The data collection rule, the action group and the tagged Azure Monitor Agent (`avm/res/compute/virtual-machine/extension`, installed on the VM the rule is associated with) follow the same pattern. The storage diagnostic setting is the one resource without an AVM module and lives in `bicep/modules/storage-blob-diagnostics.bicep` (see `ARCHITECTURE.md` §5).
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists Lab 5.2 and Lab 5.3 as depending on this lab: both need the workspace.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Log Analytics workspace `platform-skycraft-swc-law`. It bills for the data it ingests; no price is listed here | `platform-skycraft-swc-rg` | Lab 5.2 (backup reports) and Lab 5.3 (Traffic Analytics) send data to it. Deleting it first breaks them. A deleted workspace is soft-deleted and its name stays reserved for 14 days: recover or purge it before you build the lab again (Step 5.1.1, Troubleshooting Issue 6) |
+| The `AzureMonitorLinuxAgent` extension | `dev-skycraft-swc-auth-vm` | `Remove-LabResource.ps1` does not remove it, because other labs share the VM. It stays installed after the cleanup. Remove it with the command under Clean Up |
+| The private dashboard `SkyCraft-Ops` (Step 5.1.6) | Azure portal dashboards | Nothing. Delete it under **Dashboard** |
+| Lab 1.3's delete lock on the platform resource group | `platform-skycraft-swc-rg` | A manual delete of the alert rules, the data collection rule or the action group fails with `ScopeLocked`. `Remove-LabResource.ps1` lifts the lock for its deletes and puts it back with the same name and level |
 
 ---
 

@@ -91,7 +91,7 @@ function Test-GatedPath {
 
     $normalized = $Path -replace '\\', '/'
     if ($normalized -match '^module-\d[^/]*/(?:[^/]+/)*tests/') { return $false }
-    return [bool]($normalized -match '^(module-\d[^/]*/|scripts/|tools/(Invoke-LabCycle\.ps1|Remove-LabCycle\.ps1|Invoke-LabScript\.ps1|LabCycle\.psm1|lab-cycle-manifest\.psd1)$)')
+    return [bool]($normalized -match '^(module-\d[^/]*/|scripts/|tools/(Invoke-LabCycle\.ps1|Remove-LabCycle\.ps1|Invoke-LabScript\.ps1|LabCommon\.psm1|LabCycle\.psm1|lab-cycle-manifest\.psd1)$)')
 }
 
 function Get-PrGateVerdict {

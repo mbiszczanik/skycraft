@@ -244,12 +244,17 @@ function Get-AzRecoveryServicesBackupJob {
     if ($JobId) {
         # The first SKYCRAFT_STUB_JOBNULL reads by id find nothing: a job not readable yet (#468).
         $script:JobReads++
-        # SKYCRAFT_STUB_JOBLIST set: the read by id never returns the job (#535).
+        # SKYCRAFT_STUB_JOBLIST set: the read by id never returns the job (#535). 'listed' and 'none'
+        # return nothing, 'throws' and 'throwsall' fail with an error.
+        if ($env:SKYCRAFT_STUB_JOBLIST -in 'throws', 'throwsall') { throw 'stub: the read by id failed' }
         if ($env:SKYCRAFT_STUB_JOBLIST) { return }
         if ($script:JobReads -le [int]$env:SKYCRAFT_STUB_JOBNULL) { return }
         [pscustomobject]@{ JobId = $JobId; Status = 'Completed'; WorkloadName = 'stub' }
     }
-    elseif ($env:SKYCRAFT_STUB_JOBLIST -eq 'listed' -and -not $Status) {
+    elseif ($env:SKYCRAFT_STUB_JOBLIST -eq 'throwsall' -and -not $Status) {
+        throw 'stub: the job list failed'
+    }
+    elseif ($env:SKYCRAFT_STUB_JOBLIST -in 'listed', 'throws' -and -not $Status) {
         # The vault's job list shows each VM's backup job although the read by id does not (#535).
         foreach ($listedVm in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
             [pscustomobject]@{ JobId = "listed-$listedVm"; Status = 'Completed'; WorkloadName = $listedVm; StartTime = (Get-Date) }
@@ -295,6 +300,9 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $script:JobLate     = Invoke-DeployScript -ListAfter 1 -JobNull 3 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
         $script:NeverListed = Invoke-DeployScript -ListAfter 999 -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '0'
         $script:JobListed   = Invoke-DeployScript -ListAfter 1 -JobList 'listed' -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:JobThrows   = Invoke-DeployScript -ListAfter 1 -JobList 'throws' -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:JobLost     = Invoke-DeployScript -ListAfter 1 -JobList 'none' -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
+        $script:JobAllThrow = Invoke-DeployScript -ListAfter 1 -JobList 'throwsall' -ArgumentList '-Force', '-SkipSiteRecovery', '-BackupItemPollSeconds', '0', '-BackupItemWaitMinutes', '5'
     }
 
     AfterAll {
@@ -302,7 +310,7 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
     }
 
     It 'shadows the real Az commands instead of touching a subscription' {
-        foreach ($run in $script:Listed, $script:ListedLate, $script:JobLate, $script:NeverListed) {
+        foreach ($run in $script:Listed, $script:ListedLate, $script:JobLate, $script:NeverListed, $script:JobListed, $script:JobThrows, $script:JobLost, $script:JobAllThrow) {
             $run.Refused | Should -BeFalse -Because "the harness must never fall through to the real Az commands (exit $($run.ExitCode)): $($run.Output)"
         }
     }
@@ -349,12 +357,39 @@ function Start-Sleep { [CmdletBinding()] param([int]$Seconds) Write-StubCall "Sl
         $run.Output | Should -Match 'Take Snapshot completed for dev-skycraft-swc-world-vm'
     }
 
-    It 'keeps the error of the read by id and prints the Az context when neither it nor the job list shows the job (#535)' {
-        # A run cannot show this: the stubbed Start-Sleep does not move the clock the 120 second wait is counted on.
-        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
-        $text | Should -Match '-ErrorAction SilentlyContinue -ErrorVariable jobReadError'
-        $text | Should -Match 'Last error of the read: \$lastJobReadError'
-        $text | Should -Match 'Az context: account \$\(\$azContextNow\.Account\.Id\)'
+    It 'prints the error of a read by id that throws, once per VM, finds the job in the job list and exits 0 (#535)' {
+        $run = $script:JobThrows
+        $run.ExitCode | Should -Be 0 -Because "output was:`n$($run.Output)"
+        $text = $run.Output | Out-String
+        foreach ($vm in 'dev-skycraft-swc-auth-vm', 'dev-skycraft-swc-world-vm') {
+            $shown = [regex]::Matches($text, "Get-AzRecoveryServicesBackupJob -JobId backup-$vm failed: stub: the read by id failed")
+            $shown.Count | Should -Be 1 -Because "output was:`n$text"
+            $text | Should -Match "Take Snapshot completed for $vm"
+        }
+        $text | Should -Not -Match 'returned nothing for job'
+    }
+
+    It 'reports the job as lost with the Az context and exits 1 when neither the read by id nor the job list shows it (#535)' {
+        $run = $script:JobLost
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $run.Output | Should -Match '\[ERROR\] Get-AzRecoveryServicesBackupJob returned nothing for job backup-dev-skycraft-swc-auth-vm for 120 seconds'
+        $run.Output | Should -Match '\[ERROR\] Get-AzRecoveryServicesBackupJob returned nothing for job backup-dev-skycraft-swc-world-vm for 120 seconds'
+        $run.Output | Should -Match 'Az context: account stub-account'
+        $run.Output | Should -Not -Match 'Last error of the read'
+        # The wait is counted in the seconds slept: 12 sleeps of 10 seconds for each VM.
+        @($run.Calls | Where-Object { $_ -eq 'Sleep:10' }).Count | Should -Be 24
+        $run.Output | Should -Match 'Deployment finished with 2 failure\(s\)'
+    }
+
+    It 'prints the error of both lookups, each once per VM, when both throw, and exits 1 (#535)' {
+        $run = $script:JobAllThrow
+        $run.ExitCode | Should -Be 1 -Because "output was:`n$($run.Output)"
+        $text = $run.Output | Out-String
+        [regex]::Matches($text, 'Get-AzRecoveryServicesBackupJob -JobId backup-dev-skycraft-swc-auth-vm failed: stub: the read by id failed').Count | Should -Be 1 -Because "output was:`n$text"
+        # Once per VM as its own line; the line of the lost job repeats it after 'Last error of the read'.
+        [regex]::Matches($text, '(?<!Last error of the read: )Get-AzRecoveryServicesBackupJob -VaultId \(the vault''s job list\) failed: stub: the job list failed').Count | Should -Be 2
+        $text | Should -Match 'Last error of the read: Get-AzRecoveryServicesBackupJob -VaultId \(the vault''s job list\) failed: stub: the job list failed'
+        $text | Should -Match 'Deployment finished with 2 failure\(s\)'
     }
 
     It 'names the failing call and the wait when the vault never returns the job (#468)' {

@@ -84,12 +84,14 @@ If you completed Lab 1.3, its policies are still assigned to your subscription. 
 Check the prerequisites with Az PowerShell:
 
 ```powershell
-Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' -ErrorAction Stop |
     Select-Object StorageAccountName, Location, @{ n = 'Sku'; e = { $_.Sku.Name } }, Kind, ProvisioningState
-(Get-AzStorageFileServiceProperty -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa').ShareDeleteRetentionPolicy
+(Get-AzStorageFileServiceProperty -ResourceGroupName 'prod-skycraft-swc-rg' -StorageAccountName 'prodskycraftswcsa' -ErrorAction Stop).ShareDeleteRetentionPolicy
 ```
 
 **Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Standard_GRS`, `StorageV2`, `Succeeded`; file share soft delete `Enabled` `True` with `Days` `7` if Lab 4.1's Portal wizard or Bicep built the account. If the account was built another way, `Enabled` may read `False`; Step 4.3.3 turns it on. `Days` reads 14 if you ran this lab before.
+
+**If a line stops with an error**: `prodskycraftswcsa` is missing, so the check has failed. Run Lab 4.1 first (with `-All` on `scripts/Deploy-Bicep.ps1`, so that it builds the production account), then run this block again.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**

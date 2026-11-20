@@ -9,6 +9,54 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0](https://github.com/mbiszczanik/skycraft/compare/v0.22.0...v0.23.0) (2026-11-17)
+
+
+### Features
+
+* **guide-drift:** a confidence gate for a model decider and an offline scorer for deciders (Refs [#190](https://github.com/mbiszczanik/skycraft/issues/190)) ([#594](https://github.com/mbiszczanik/skycraft/issues/594)) ([9dc9f21](https://github.com/mbiszczanik/skycraft/commit/9dc9f21fd6fb38f8d86869e796e2ce70d3d6d663))
+* **screenshot-age:** report which Module 1 and 4 screenshots predate their guide (Refs [#486](https://github.com/mbiszczanik/skycraft/issues/486)) ([#591](https://github.com/mbiszczanik/skycraft/issues/591)) ([b44d909](https://github.com/mbiszczanik/skycraft/commit/b44d909dc314672b7266e94d58ebd95bcbe6e123))
+* **tools:** offline lab cost estimate and comparison with the stated cost (Refs [#528](https://github.com/mbiszczanik/skycraft/issues/528)) ([#598](https://github.com/mbiszczanik/skycraft/issues/598)) ([1e01ee7](https://github.com/mbiszczanik/skycraft/commit/1e01ee768408161eced62adb64b8a44f961028a7))
+* **tools:** report lab PNGs no file mentions and guide images that do not exist (Refs [#487](https://github.com/mbiszczanik/skycraft/issues/487)) ([#590](https://github.com/mbiszczanik/skycraft/issues/590)) ([38426f3](https://github.com/mbiszczanik/skycraft/commit/38426f32fea26e364e2a116b2ae16cf8fc344d75))
+
+
+### Bug Fixes
+
+* **dry-run:** the Parse check fails when it discovers no PowerShell file (Closes [#559](https://github.com/mbiszczanik/skycraft/issues/559)) ([#583](https://github.com/mbiszczanik/skycraft/issues/583)) ([990518e](https://github.com/mbiszczanik/skycraft/commit/990518ef9372e5cf3e51909bcf841e0931e8edaf))
+* **gate:** a later-changes note must not be a placeholder (Refs agents-config[#91](https://github.com/mbiszczanik/skycraft/issues/91)) ([#604](https://github.com/mbiszczanik/skycraft/issues/604)) ([17ded43](https://github.com/mbiszczanik/skycraft/commit/17ded43e3329c3be5849769cf6f1a6c4d2cc0afb))
+* **gate:** compare Acceptance-head with the PR head, or require a later-changes note (Refs agents-config[#91](https://github.com/mbiszczanik/skycraft/issues/91)) ([#602](https://github.com/mbiszczanik/skycraft/issues/602)) ([5ef8836](https://github.com/mbiszczanik/skycraft/commit/5ef88360455fc194a46f64ceba2ab916909c1abf))
+* **gate:** treat tools/LabCommon.psm1 as lab content for the live verification gate (Refs agents-config[#91](https://github.com/mbiszczanik/skycraft/issues/91)) ([#601](https://github.com/mbiszczanik/skycraft/issues/601)) ([21dd8d4](https://github.com/mbiszczanik/skycraft/commit/21dd8d4dce78c55d690aa46ec8df781ace967810))
+* **tools:** a meter with an invalid price counts as unpriced next to a valid one (Refs [#528](https://github.com/mbiszczanik/skycraft/issues/528)) ([#605](https://github.com/mbiszczanik/skycraft/issues/605)) ([9ea9fda](https://github.com/mbiszczanik/skycraft/commit/9ea9fda0a1633516349fd36c1dd2c417e118da03))
+* **tools:** the cost estimate rejects bad prices and quantities and flags unconverted meters (Refs [#528](https://github.com/mbiszczanik/skycraft/issues/528)) ([#603](https://github.com/mbiszczanik/skycraft/issues/603)) ([32c39d6](https://github.com/mbiszczanik/skycraft/commit/32c39d6d87ca91a300055e23b738a016bf0e232c))
+
+
+### Documentation
+
+* add AGENTS.md with the rules every contributor needs first ([#582](https://github.com/mbiszczanik/skycraft/issues/582)) ([96a7629](https://github.com/mbiszczanik/skycraft/commit/96a7629017d1f3e19f50d2ac921e508d3d0348f1))
+* add the procedure for a guide drift campaign over Labs 1.2 to 5.3 (Refs [#204](https://github.com/mbiszczanik/skycraft/issues/204)) ([#595](https://github.com/mbiszczanik/skycraft/issues/595)) ([42ff436](https://github.com/mbiszczanik/skycraft/commit/42ff436a05f9a9e8b29cb7749fe7eebfdaa8d736))
+* **module-1:** a script path pass procedure and a table of each guide's script blocks (Refs [#335](https://github.com/mbiszczanik/skycraft/issues/335)) ([#599](https://github.com/mbiszczanik/skycraft/issues/599)) ([4480e5a](https://github.com/mbiszczanik/skycraft/commit/4480e5a72d9840554d070e21a6ea2de2ad81821e))
+* one reference of the known gaps between the Portal, script and Bicep paths (Refs [#362](https://github.com/mbiszczanik/skycraft/issues/362)) ([#581](https://github.com/mbiszczanik/skycraft/issues/581)) ([30f7837](https://github.com/mbiszczanik/skycraft/commit/30f78375cd0a53c41122357aed1d87fb5a25f2cc))
+
+## [0.22.0](https://github.com/mbiszczanik/skycraft/compare/v0.21.0...v0.22.0) (2026-11-14)
+
+
+### Features
+
+* **guide-drift:** fill the Subscription field from the run's subscription (Refs [#236](https://github.com/mbiszczanik/skycraft/issues/236)) ([#576](https://github.com/mbiszczanik/skycraft/issues/576)) ([56195f6](https://github.com/mbiszczanik/skycraft/commit/56195f60ed159efc7ac4b8eadaa137475014c6eb))
+* **lab-common:** shared check helpers, SKIPPED for token-less checks, cycle names them (Refs [#301](https://github.com/mbiszczanik/skycraft/issues/301), [#530](https://github.com/mbiszczanik/skycraft/issues/530), [#550](https://github.com/mbiszczanik/skycraft/issues/550)) ([#566](https://github.com/mbiszczanik/skycraft/issues/566)) ([6c2e509](https://github.com/mbiszczanik/skycraft/commit/6c2e509bfc26f81da8e8b9e3637df1f33bd4c6fd))
+
+
+### Bug Fixes
+
+* **lab-5.2:** print the error of a backup job lookup, test the lost-job case (Refs [#535](https://github.com/mbiszczanik/skycraft/issues/535)) ([#578](https://github.com/mbiszczanik/skycraft/issues/578)) ([5916e0d](https://github.com/mbiszczanik/skycraft/commit/5916e0d893015de1747d8d97299039177ef04491))
+
+
+### Documentation
+
+* **labs 1.1, 2.1, 3.1, 5.1-5.3:** prerequisites and what each lab leaves behind (Refs [#364](https://github.com/mbiszczanik/skycraft/issues/364)) ([#565](https://github.com/mbiszczanik/skycraft/issues/565)) ([29c57f7](https://github.com/mbiszczanik/skycraft/commit/29c57f7c9e408b94805e3cc0343daaefc1c9c00c))
+* **labs 5.1, 5.2:** name the platform waits next to the Estimated Time (Refs [#477](https://github.com/mbiszczanik/skycraft/issues/477)) ([#561](https://github.com/mbiszczanik/skycraft/issues/561)) ([48f261a](https://github.com/mbiszczanik/skycraft/commit/48f261a2a262316aad2e39c20445d481b948369c))
+* **labs:** check the prerequisites with one Get-Az line per resource (Refs [#364](https://github.com/mbiszczanik/skycraft/issues/364)) ([#577](https://github.com/mbiszczanik/skycraft/issues/577)) ([3393a01](https://github.com/mbiszczanik/skycraft/commit/3393a011e47b4d01347a6170bb4e1fa0306cb9fc))
+
 ## [0.21.0](https://github.com/mbiszczanik/skycraft/compare/v0.20.0...v0.21.0) (2026-11-13)
 
 
