@@ -45,13 +45,15 @@ BeforeAll {
 Nothing.
 '@
     $script:GoodValidator = 'if (-not $sa.AllowBlobPublicAccess) { "ok" }'
+    $script:ExitLine = 'Exit-Lab -FailureCount 0 -PassCount 1'
 
     function Initialize-LabFixture {
-        param([string]$Guide = $script:GoodGuide, [string]$Validator = $script:GoodValidator, [string]$Manifest, [switch]$NoLab)
+        param([string]$Guide = $script:GoodGuide, [string]$Validator = $script:GoodValidator, [string]$Manifest, [switch]$NoLab, [switch]$NoResult)
         $dir = Join-Path $script:Fixture ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $dir 'tools') | Out-Null
         if (-not $Manifest) { $Manifest = "@{ Phases = @( @{ Id = '1.2'; Lab = 'module-1-x/1.2-a'; DependsOn = @('1.1') } ) }" }
         Set-Content -LiteralPath (Join-Path $dir 'tools' 'lab-cycle-manifest.psd1') -Value $Manifest
+        if (-not $NoResult) { $Validator = $Validator + "`n" + $script:ExitLine }
         if (-not $NoLab) {
             $lab = Join-Path $dir 'module-1-x' '1.2-a'
             New-Item -ItemType Directory -Path (Join-Path $lab 'scripts') -Force | Out-Null
@@ -95,6 +97,35 @@ Describe 'Test-LabConsistency.ps1 - findings' {
     It 'does not flag -eq $true or a plain variable' {
         $run = Invoke-Gate -Repo (Initialize-LabFixture -Validator 'if ($x.Enabled -eq $true -or $flag -eq $false) { "ok" }')
         $run.ExitCode | Should -Be 0 -Because $run.Output
+    }
+
+    It 'fails when the last Exit-Lab call of a validator has no -PassCount' {
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -NoResult -Validator "`$failCount = 0`nExit-Lab -FailureCount `$failCount")
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[ResultLine\].*Test-Lab\.ps1.*no -PassCount'
+    }
+
+    It 'fails when a validator never calls Exit-Lab' {
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -NoResult -Validator 'Write-Host "Tests Passed: 3"')
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[ResultLine\].*never calls Exit-Lab'
+    }
+
+    It 'passes when the last Exit-Lab call has -PassCount, whatever an earlier or trap call does' {
+        $validator = "trap { Exit-Lab -FailureCount 1 }`nExit-Lab -FailureCount 1`nExit-Lab -FailureCount `$f -PassCount `$p -SkipCount 2"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -NoResult -Validator $validator)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+    }
+
+    It 'passes when the validator prints the RESULT line itself' {
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -NoResult -Validator 'Write-Host "RESULT passed=$p failed=$f"')
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+    }
+
+    It 'ignores an Exit-Lab call that is only in a comment' {
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -NoResult -Validator '# Exit-Lab -FailureCount 0 -PassCount 1')
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match '\[ResultLine\]'
     }
 
     It 'fails when the Prerequisites section does not name a manifest dependency' {
@@ -170,6 +201,21 @@ Describe 'Test-LabConsistency.ps1 - findings' {
         $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
         $run.ExitCode | Should -Be 0 -Because $run.Output
         $run.Output | Should -Match '0 warning\(s\)'
+    }
+
+    It 'warns about a step that changes Azure with no Az PowerShell block, without failing the gate' {
+        $guide = $script:GoodGuide + "`n### Step 1.2.1: Make it`n`nSelect **Create**.`n`n### Step 1.2.2: Make more`n`nSelect **Save**.`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Match '\[WARN\] \[ChangeStepCommand\].*2 step\(s\).*Step 1\.2\.1, 1\.2\.2'
+    }
+
+    It 'does not warn when the step has a PowerShell block, a Portal only marker or changes nothing' {
+        $fence = '```'
+        $guide = $script:GoodGuide + "`n### Step 1.2.1: Make it`n`nSelect **Create**.`n`n${fence}powershell`nNew-AzResourceGroup`n${fence}`n`n### Step 1.2.2: Demo`n`nPortal only. Select **Save**.`n`n### Step 1.2.3: Look`n`nOpen the blade.`n"
+        $run = Invoke-Gate -Repo (Initialize-LabFixture -Guide $guide)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Not -Match 'ChangeStepCommand'
     }
 
     It 'fails when the guide has no Leaves Behind section' {
