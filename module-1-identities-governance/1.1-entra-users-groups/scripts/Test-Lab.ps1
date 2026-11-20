@@ -462,7 +462,7 @@ $labModule = @(
     'Microsoft.Graph.Groups'
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
-if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 }
+if (-not (Import-LabModule -Name $labModule)) { Exit-Lab -FailureCount 1 -PassCount 0 }
 
 Write-Host "=== Lab 1.1 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -488,7 +488,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 
 # Resolve the users' domain: the tenant's initial *.onmicrosoft.com domain (Select-LabInitialDomain
@@ -500,7 +500,7 @@ try {
 }
 catch {
     Write-Host "  -> [ERROR] Could not determine the tenant's initial *.onmicrosoft.com domain: $_" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 
 # The guest New-LabUser.ps1 invites (step 1.1.5): the guide's address unless -GuestEmail says otherwise.
@@ -640,8 +640,8 @@ Write-Host "  Failed: $failCount" -ForegroundColor $(if ($failCount -gt 0) { 'Re
 
 if ($failCount -gt 0) {
     Write-Host "`nLab 1.1 validation failed: $failCount check(s) failed. See the [FAIL] lines above." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount $passCount
 }
 
 Write-Host "`nLab 1.1 validation passed: all $passCount checks passed." -ForegroundColor Green
-Exit-Lab -FailureCount 0
+Exit-Lab -FailureCount 0 -PassCount $passCount
