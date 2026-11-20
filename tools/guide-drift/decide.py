@@ -29,8 +29,9 @@ plain use, recorded and replayed as such (a recording made before #244 that hold
 drift replays as use too). 'w' still makes it a workaround. The same words on another role are
 another element (a button 'X information *', a link 'Select row X') and stay drift.
 
-A model-based decider is a third implementation of the same signature (the Decider protocol);
-it is out of scope here and tracked in issue #190. Every decision the runner acts on, except a
+A model-based decider is a third implementation of the same signature (the Decider protocol),
+tracked in issue #190. ConfidenceGate wraps a model callable and is in no default decider list:
+nothing here wires a model into a run, and evaluate.py measures any decider offline. Every decision the runner acts on, except a
 workaround, is written back to the recording by run.py, with the rejected candidates, so
 supervised runs build the reference set. A person's pick whose name the recording cannot keep (an
 id, an address outside the tenant or a secret: scrub would mask it, and replay would never find the
@@ -109,6 +110,7 @@ class Decision:
     reason: str | None = None     # unknown only
     decided_by: str = "human"     # "exact" | "replay" | "human" | "none"
     workaround: bool = False      # drift only: used, but not as the guide's element ('w', #211)
+    confidence: float | None = None   # a model's confidence in the pick (#190); None for the rest
 
     def as_workaround(self) -> Decision:
         """This pick of an element as a workaround, as 'w <number>' makes it (#211): drift of the
@@ -128,14 +130,77 @@ class Decision:
             decision = "gone"
         else:
             decision = "use"      # use, or a misleading/cosmetic drift that names its element
-        return {"decision": decision, "role": self.role, "name": self.name,
-                "severity": self.severity, "rejected": rejected,
-                "decidedBy": self.decided_by, "at": at}
+        entry = {"decision": decision, "role": self.role, "name": self.name,
+                 "severity": self.severity, "rejected": rejected,
+                 "decidedBy": self.decided_by, "at": at}
+        if self.confidence is not None:
+            entry["confidence"] = self.confidence     # a drop on an unchanged step is early drift
+        return entry
 
 
 class Decider(Protocol):
     def __call__(self, step: dict, item: dict, label: str,
                  candidates: list[Candidate]) -> Decision | None: ...
+
+
+# Confidence a model needs to decide alone (#190); below it the person is asked. Assumptions the
+# maintainer may change. A step that deletes is never decided by a model, whatever the confidence.
+READ_ONLY_THRESHOLD = 0.90
+CHANGE_THRESHOLD = 0.97
+DELETE_WORDS = ("delete", "remove", "detach")
+CHANGE_WORDS = ("create", "add", "save", "assign", "invite", "update", "apply", "register")
+
+
+def step_risk(step: dict, item: dict, label: str) -> str:
+    """'delete', 'change' or 'read': a keyword check on the first word of the step title, of the
+    item's text and of the label. Delete wins over change."""
+    texts = [step.get("title"), item.get("text"), label]
+    firsts = [t.split(None, 1)[0].casefold().strip(":.,") for t in texts if isinstance(t, str) and t.strip()]
+    if any(w in DELETE_WORDS for w in firsts):
+        return "delete"
+    if any(w in CHANGE_WORDS for w in firsts):
+        return "change"
+    return "read"
+
+
+class ConfidenceGate:
+    """Wraps a model callable (step, item, label, candidates) -> (candidate, confidence) or None
+    and decides only when the confidence reaches the step's threshold; otherwise returns None so
+    the next decider, the person, is asked (#190). Never calls the model for a step that deletes,
+    and never raises: a model that fails, answers badly or is unavailable means 'ask'."""
+
+    def __init__(self, model: Callable[[dict, dict, str, list[Candidate]], tuple[Candidate, float] | None],
+                 read_only_threshold: float = READ_ONLY_THRESHOLD,
+                 change_threshold: float = CHANGE_THRESHOLD) -> None:
+        self.model = model
+        self.read_only_threshold = read_only_threshold
+        self.change_threshold = change_threshold
+
+    def __call__(self, step: dict, item: dict, label: str,
+                 candidates: list[Candidate]) -> Decision | None:
+        risk = step_risk(step, item, label)
+        if risk == "delete":
+            return None
+        try:
+            answer = self.model(step, item, label, candidates)
+            if answer is None:
+                return None
+            chosen, confidence = answer
+            if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                return None
+            confidence = float(confidence)
+            if not 0.0 <= confidence <= 1.0:      # also rejects NaN
+                return None
+            threshold = self.change_threshold if risk == "change" else self.read_only_threshold
+            if confidence < threshold:
+                return None
+            match = next((c for c in candidates if c.role == chosen.role and c.name == chosen.name), None)
+            if match is None or match.count > 1:  # not on screen, or the runner would refuse the click
+                return None
+            return replace(HumanDecider._pick(match, label, cosmetic=False),
+                           decided_by="model", confidence=confidence)
+        except Exception:
+            return None
 
 
 class ReplayDecider:
