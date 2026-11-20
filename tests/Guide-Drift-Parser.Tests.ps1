@@ -735,10 +735,11 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
     }
 }
 
-Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#224)' {
+Describe 'parse.py - labs 2.2, 2.3 and 4.1, lists to verify are checks, not fields (#224)' {
     BeforeAll {
         $script:CheckLabs = @{}
         foreach ($guide in 'module-2-networking/2.2-secure-access/lab-guide-2.2.md',
+                           'module-2-networking/2.3-name-resolution/lab-guide-2.3.md',
                            'module-4-storage/4.1-storage-accounts/lab-guide-4.1.md') {
             $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
             $out = Join-Path $TestDrive "checks-$lab.json"
@@ -764,6 +765,30 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
+        $step.expected | Should -Be $expected
+    }
+
+    It 'checks the Verify list of step <id> on the blade it opens, before the step moves on (#292)' -ForEach @(
+        # The zone's Overview is checked before Recordsets; the record table after 'Verify records exist:' is informational.
+        @{ id = '2.3.19'; labels = @('Private DNS zones', 'skycraft.internal', 'Overview', 'Recordsets')
+           order = @('navigation', 'action', 'check', 'action')
+           checks = @('Recordsets: 3 (the SOA record at @, which the Portal counts, and the two records you created: dev-db, prod-db); ' +
+                      'Virtual Network Links: 3 (hub, dev, prod); Virtual Network Links With Registration: 2 (dev, prod)')
+           expected = 'Private DNS configured for internal name resolution.' }
+        # The dev load balancer is checked before the step opens prod.
+        @{ id = '2.3.20'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Overview', 'prod-skycraft-swc-lb')
+           order = @('navigation', 'action', 'check', 'action')
+           checks = @('Frontend IP: 1 (dev-skycraft-swc-lb-frontend with public IP); Backend pools: 3 (world, auth, outbound); ' +
+                      'Load balancing rules: 2 (port 8085, port 3724); Health probes: 2 (world, auth); ' +
+                      'Outbound rules: 1 (dev-skycraft-swc-lb-outbound for the outbound pool; listed under Settings (expand it if it is collapsed) ' +
+                      [char]0x2192 + ' Outbound rules)')
+           expected = 'Both load balancers fully configured and ready to distribute traffic (VMs will be added in Module 3).' }
+    ) {
+        $step = $script:CheckLabs['2.3'].steps | Where-Object id -eq $id
+        @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | ForEach-Object { $_.kind }) | Should -Be $order
         @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
         @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
         $step.expected | Should -Be $expected
