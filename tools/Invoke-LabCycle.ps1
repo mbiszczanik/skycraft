@@ -135,7 +135,9 @@
 .PARAMETER PhaseRunner
     A scriptblock invoked once per step, receiving one hashtable and returning an exit code:
 
-        @{ Phase = <manifest phase>; Kind = 'Deploy'|'PostDeploy'|'Test'; Arguments = <hashtable>; TimeoutMs = <int> }
+        @{ Phase = <manifest phase>; Kind = 'Deploy'|'PostDeploy'|'Test'; Arguments = <hashtable>; TimeoutMs = <int>; Pass = 1|2 }
+
+    Pass is 2 for the Deploy and Test of an -IdempotencePass rerun.
 
     Injectable so the ordering and failure-propagation tests can substitute a fake and stay
     offline. The default is the real process runner, so the tested path is the shipped path.
@@ -187,6 +189,15 @@
 .PARAMETER Resume
     Continue a previous run rather than starting one.
 
+.PARAMETER IdempotencePass
+    After a phase's Deploy, PostDeploy and Test all exit 0, run its Deploy a second time with the
+    same arguments and then its Test, through the same PhaseRunner (issue #525). Both exit codes
+    go to the results file (Kind 'Idempotence') and to the report. A non-zero code records the lab
+    as NotIdempotent: a finding next to the phase's first-run result, so the phase status, its
+    dependents and the exit code stay as they are. PostDeploy is not repeated. Nothing runs under
+    -DryRun, and a phase whose first run failed gets no second run. The rerun costs about as much
+    as the first run, so use it in a confirming run, not in an extra cycle.
+
 .EXAMPLE
     .\Invoke-LabCycle.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -DryRun
 
@@ -223,11 +234,11 @@
 
 #Requires -Version 7.0
 
-# Read inside GetNewClosure scriptblocks, which PSScriptAnalyzer cannot correlate with the
+# Read inside scriptblocks, which PSScriptAnalyzer cannot correlate with the
 # parameter block. Targeted at one name each so a genuinely unused parameter added later still
 # surfaces.
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'LabRoot', Justification = 'False positive: read inside the default PhaseRunner closure.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'ResultsPath', Justification = 'False positive: read inside the $recordResult closure.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SleepRunner', Justification = 'False positive: read inside the $runStep scriptblock.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'MaxAttempts', Justification = 'False positive: read inside the $runStep scriptblock.')]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -299,7 +310,10 @@ param(
     [switch]$SkipCleanup,
 
     [Parameter()]
-    [switch]$Resume
+    [switch]$Resume,
+
+    [Parameter()]
+    [switch]$IdempotencePass
 )
 
 $ErrorActionPreference = 'Stop'
@@ -334,7 +348,7 @@ if (-not $PhaseRunner) {
             -Arguments $Invocation.Arguments `
             -WorkingDirectory $scriptsDir `
             -TimeoutMs $Invocation.TimeoutMs `
-            -TranscriptPath (Join-Path $LogDirectory "$safeId.$($Invocation.Kind.ToLowerInvariant()).log") `
+            -TranscriptPath (Join-Path $LogDirectory "$safeId.$($Invocation.Kind.ToLowerInvariant())$(if ($Invocation.Pass -eq 2) { '.rerun' }).log") `
             -StdinAnswers @($Invocation.StdinAnswers)
 
         # Returned whole rather than as a bare exit code. A timeout must stay distinguishable from
@@ -414,6 +428,9 @@ $results = [System.Collections.Generic.List[hashtable]]::new()
 $skippedChecks = [System.Collections.Generic.List[hashtable]]::new()
 $status  = @{}
 $cause   = @{}
+# One finding per phase the -IdempotencePass reran (#525); kept apart from $results so a phase's
+# first-run status, the counts and the exit code do not see it.
+$idempotence = [System.Collections.Generic.List[hashtable]]::new()
 
 # Teardown results are kept apart from phase results all the way to the report, because they
 # answer a different question and a reader who conflates them debugs the wrong thing.
@@ -559,6 +576,53 @@ if (-not $Yes) {
 
 if (-not $DryRun) { New-LabCycleLock -LockPath $LockPath }
 
+# One step through the PhaseRunner, with the bounded retry. Shared by the first run and the
+# idempotence rerun so both go through the same runner and the same rule.
+#
+# RETRY, BOUNDED, AND ONLY FOR WHAT THE PLATFORM ASKED US TO WAIT OUT. A single transient 429 on a
+# root phase would otherwise cascade into every phase below it and the run produces nothing
+# usable. Retrying anything else turns one clear failure into three.
+$runStep = {
+    param($Phase, $Step, $Pass)
+
+    $invocation = @{
+        Phase        = $Phase
+        Kind         = $Step.Kind
+        Script       = $Step.Script
+        Arguments    = $Step.Arguments
+        # Same guard, for the same reason: only the Deploy step carries answers, and the
+        # PostDeploy and Test steps must not inherit a one-element array holding $null.
+        StdinAnswers = if ($null -ne $Step.StdinAnswers) { @($Step.StdinAnswers) } else { @() }
+        TimeoutMs    = $Phase.TimeoutMs
+        Pass         = $Pass
+    }
+
+    $attempt = 1
+    while ($true) {
+        $outcome = & $PhaseRunner $invocation
+
+        # A runner may hand back a bare exit code or a full outcome. The offline fakes return
+        # an integer and the real runner returns an object, so the shape is normalised here
+        # rather than at each call site.
+        $code   = if ($outcome -is [int]) { $outcome } else { [int]$outcome.ExitCode }
+        $killed = if ($outcome -is [int]) { $false } else { [bool]$outcome.TimedOut }
+        $text   = if ($outcome -is [int]) { '' } else { [string]$outcome.Output }
+
+        if ($code -eq 0) { break }
+
+        $class = Get-LabCycleFailureClass -Text $text -TimedOut:$killed
+        if (-not $class.Retryable -or $attempt -ge $MaxAttempts) { break }
+
+        # Azure's own Retry-After when it named one, otherwise exponential: 30s, 60s, 120s.
+        $wait = if ($class.RetryAfterSeconds) { [int]$class.RetryAfterSeconds } else { [int](30 * [Math]::Pow(2, $attempt - 1)) }
+        Write-Host "  [WAIT] $($Phase.Id) $($Step.Kind) attempt $attempt of $MaxAttempts - $($class.Reason); retrying in ${wait}s" -ForegroundColor Yellow
+        & $SleepRunner $wait
+        $attempt++
+    }
+
+    [pscustomobject]@{ ExitCode = $code; TimedOut = $killed; Output = $text; Attempts = $attempt }
+}
+
 try {
 
 foreach ($id in $order) {
@@ -689,48 +753,16 @@ foreach ($id in $order) {
     & $stateWriter
 
     foreach ($step in $steps) {
-        $invocation = @{
-            Phase        = $phase
-            Kind         = $step.Kind
-            Script       = $step.Script
-            Arguments    = $step.Arguments
-            # Same guard, for the same reason: only the Deploy step carries answers, and the
-            # PostDeploy and Test steps must not inherit a one-element array holding $null.
-            StdinAnswers = if ($null -ne $step.StdinAnswers) { @($step.StdinAnswers) } else { @() }
-            TimeoutMs    = $phase.TimeoutMs
-        }
-
-        # RETRY, BOUNDED, AND ONLY FOR WHAT THE PLATFORM ASKED US TO WAIT OUT. A single transient
-        # 429 on a root phase would otherwise cascade into every phase below it and the run
-        # produces nothing usable. Retrying anything else turns one clear failure into three.
         # Recorded before the step runs, not after, so the file names the step that is in flight
         # rather than the last one that finished. That is the fact an interruption needs.
         $stepInFlight[$id] = $step.Kind
         & $stateWriter
 
-        $attempt = 1
-        while ($true) {
-            $outcome = & $PhaseRunner $invocation
-
-            # A runner may hand back a bare exit code or a full outcome. The offline fakes return
-            # an integer and the real runner returns an object, so the shape is normalised here
-            # rather than at each call site.
-            $exitCode = if ($outcome -is [int]) { $outcome } else { [int]$outcome.ExitCode }
-            $timedOut = if ($outcome -is [int]) { $false } else { [bool]$outcome.TimedOut }
-            $output   = if ($outcome -is [int]) { '' } else { [string]$outcome.Output }
-
-            if ($exitCode -eq 0) { break }
-
-            $class = Get-LabCycleFailureClass -Text $output -TimedOut:$timedOut
-            if (-not $class.Retryable -or $attempt -ge $MaxAttempts) { break }
-
-            # Azure's own Retry-After when it named one, otherwise exponential: 30s, 60s, 120s.
-            $wait = if ($class.RetryAfterSeconds) { [int]$class.RetryAfterSeconds } else { [int](30 * [Math]::Pow(2, $attempt - 1)) }
-            Write-Host "  [WAIT] $id $($step.Kind) attempt $attempt of $MaxAttempts - $($class.Reason); retrying in ${wait}s" -ForegroundColor Yellow
-            & $SleepRunner $wait
-            $attempt++
-            if ($attempt -gt $phaseAttempts) { $phaseAttempts = $attempt }
-        }
+        $ran = & $runStep $phase $step 1
+        $exitCode = $ran.ExitCode
+        $timedOut = $ran.TimedOut
+        $output   = $ran.Output
+        if ($ran.Attempts -gt $phaseAttempts) { $phaseAttempts = $ran.Attempts }
 
         # After every step, not every phase.
         & $stateWriter
@@ -752,6 +784,40 @@ foreach ($id in $order) {
         $results.Add($record)
         & $recordResult $record
         Write-Host "  [ OK ] $id" -ForegroundColor Green
+
+        # Only after a first run that fully succeeded. Deploy then Test again; both always run so
+        # each exit code is known. PostDeploy is not repeated. The finding changes nothing above:
+        # not the phase status, not its dependents, not the exit code (#525).
+        if ($IdempotencePass) {
+            $deployStep = $steps | Where-Object { $_.Kind -eq 'Deploy' } | Select-Object -First 1
+            $testStep   = $steps | Where-Object { $_.Kind -eq 'Test' } | Select-Object -First 1
+
+            $stepInFlight[$id] = 'Deploy(rerun)'
+            & $stateWriter
+            $secondDeploy = & $runStep $phase $deployStep 2
+
+            $secondTest = $null
+            if ($testStep) {
+                $stepInFlight[$id] = 'Test(rerun)'
+                & $stateWriter
+                $secondTest = & $runStep $phase $testStep 2
+            }
+
+            $testCode = if ($secondTest) { $secondTest.ExitCode } else { $null }
+            $isIdempotent = ($secondDeploy.ExitCode -eq 0) -and ($null -eq $testCode -or $testCode -eq 0)
+            $finding = @{
+                Id = $id; Lab = $phase.Lab; Kind = 'Idempotence'
+                Status = if ($isIdempotent) { 'Idempotent' } else { 'NotIdempotent' }
+                DeployExitCode = $secondDeploy.ExitCode; TestExitCode = $testCode
+            }
+            $idempotence.Add($finding)
+            & $recordResult $finding
+            if ($isIdempotent) { Write-Host "  [ OK ] $id idempotent: second Deploy and Test exited 0" -ForegroundColor Green }
+            else {
+                $testText = if ($null -ne $testCode) { "$testCode" } else { 'not run' }
+                Write-Host "  [FIND] $id NotIdempotent - second Deploy exited $($secondDeploy.ExitCode), second Test $testText; the phase result is unchanged" -ForegroundColor Yellow
+            }
+        }
     }
     else {
         # A killed phase and a failed one are different facts and send an operator to different
@@ -886,7 +952,8 @@ Write-Host ''
 Write-LabCycleReport -Path $ReportPath -SubscriptionId $SubscriptionId -ManifestPath $ManifestPath `
     -Phases $results -Teardowns $teardownResults -Assertions $teardownAssertions `
     -LeftBehind $leftBehind -NotRun $notRun -Coverage $coverage `
-    -LivePhases $live -LogDirectory $LogDirectory -DryRun:$DryRun
+    -LivePhases $live -LogDirectory $LogDirectory -DryRun:$DryRun `
+    -Idempotence @($idempotence) -IdempotencePass:($IdempotencePass -and -not $DryRun)
 Write-Host "  Report:  $ReportPath" -ForegroundColor Gray
 if (-not $DryRun) { Write-Host "  Results: $ResultsPath" -ForegroundColor Gray }
 Write-Host ''
@@ -907,6 +974,8 @@ Write-Host ''
     Assertions            = $teardownAssertions
     AssertionFailedCount  = @($teardownAssertions | Where-Object { -not $_.Ok }).Count
     LeftBehind            = $leftBehind
+    # One finding per rerun phase (-IdempotencePass); empty otherwise.
+    Idempotence           = $idempotence
 }
 
 # THE LAST STATEMENT, AND THE POINT OF THE WHOLE PROJECT. A run that reports success while phases
