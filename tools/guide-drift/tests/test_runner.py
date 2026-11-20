@@ -471,9 +471,16 @@ class FakePage:
         self.main_frame = Screen()       # an empty screen unless a test patches run.all_frames
         self.frames = [self.main_frame]
         self.now = 0.0                   # seconds; only waits move it (FindOnScreenTests' clock)
+        self.reloads = 0
+        self.on_reload = None            # what a reload changes on screen
 
     def is_closed(self) -> bool:
         return self.closed
+
+    def reload(self, wait_until=None) -> None:
+        self.reloads += 1
+        if self.on_reload:
+            self.on_reload()
 
     def goto(self, url, wait_until=None) -> None:
         self.visited.append(url)
@@ -3340,7 +3347,8 @@ class DeploymentStateTests(unittest.TestCase):
                 self.assertEqual(run.snapshot_text(line), text)
 
     def test_a_running_deployment_is_read_from_the_overview_or_a_notification(self) -> None:
-        for text in ("Deployment is in progress", "Deployment in progress...", "deployment is in progress"):
+        for text in ("Deployment is in progress", "Deployment in progress...", "deployment is in progress",
+                     "Initializing deployment..."):
             with self.subTest(text=text):
                 self.assertEqual(run.deployment_state(["Home", text, "Deployment name: x"]), (text, []))
 
@@ -3492,6 +3500,90 @@ class DeploymentWaitTests(RunnerTestCase):
         self.assertIn("The deployment has ended after 55 s: looking for 'Go to resource' again.", self.said(printed))
         self.assertGreaterEqual(page.now, 60 + run.FIND_TIMEOUT_MS / 1000)
         self.assertLess(page.now, 60 + run.DEPLOYMENT_POLL_MS / 1000 + run.FIND_TIMEOUT_MS / 1000 + 1)
+
+    def stuck_overview(self) -> tuple[Screen, ScreenNode, ScreenNode]:
+        """An overview that keeps 'Deployment is in progress' until its Refresh is clicked, as the
+        Bastion overview did on 2026-10-15: the screen, the Refresh button and 'Go to resource'."""
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+
+        def complete() -> None:
+            screen.tree = self.COMPLETE
+            screen.add(("button", "Go to resource", go))
+
+        refresh = ScreenNode(on_click=complete)
+        screen.add(("button", "Refresh", refresh))
+        return screen, refresh, go
+
+    def test_an_overview_that_lags_is_refreshed_between_polls(self) -> None:
+        screen, refresh, go = self.stuck_overview()
+        page = FakePage()
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, refresh.clicked, page.reloads, r.ask.prompts),
+                         ("match", 1, 1, 0, []))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(page.now, start + run.DEPLOYMENT_REFRESH_S)
+        self.assertLess(page.now, start + run.DEPLOYMENT_REFRESH_S + run.DEPLOYMENT_POLL_MS / 1000
+                        + run.SETTLE_MS / 1000 + 1)
+        self.assertIn("The overview still says the deployment is in progress: clicked its Refresh, "
+                      f"and again every {run.DEPLOYMENT_REFRESH_S} s while it does.", self.said(printed))
+
+    def test_an_overview_is_refreshed_every_interval_and_said_once(self) -> None:
+        refresh = ScreenNode()                                            # the overview never catches up
+        screen = Screen(("button", "Refresh", refresh), tree=self.RUNNING)
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(deployment_timeout_minutes=2), ask=Answers())
+        with mock.patch("builtins.print") as printed:
+            record, _ = self.act(screen, self.GO, "Go to resource", runner=r)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertEqual((refresh.clicked, r.page.reloads), (120 // run.DEPLOYMENT_REFRESH_S - 1, 0))
+        self.assertEqual(len([line for line in self.said(printed) if "clicked its Refresh" in line]), 1)
+
+    def test_the_newest_refresh_button_is_clicked(self) -> None:
+        screen, refresh, go = self.stuck_overview()
+        older = ScreenNode()                                              # a blade behind the overview
+        screen.entries.insert(0, ("button", "Refresh", older))
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.GO, "Go to resource")
+        self.assertEqual((record["outcome"], older.clicked, refresh.clicked), ("match", 0, 1))
+
+    def test_an_overview_without_a_refresh_button_is_reloaded(self) -> None:
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+        page = FakePage()
+
+        def complete() -> None:
+            screen.tree = self.COMPLETE
+            screen.add(("button", "Go to resource", go))
+
+        page.on_reload = complete
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, page.reloads, r.ask.prompts), ("match", 1, 1, []))
+        self.assertTrue(any("reloaded the page" in line for line in self.said(printed)))
+
+    def test_a_refresh_that_fails_does_not_end_the_wait(self) -> None:
+        refresh = ScreenNode()
+        refresh.fail = run.PlaywrightError("Element is not attached to the DOM")
+        screen = Screen(("button", "Refresh", refresh), tree=self.RUNNING)
+        page = self.ending(screen, 100, self.COMPLETE, ("button", "Go to resource", ScreenNode()))
+        with mock.patch("builtins.print") as printed:
+            record, _ = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], page.reloads), ("match", 0))
+        self.assertGreaterEqual(refresh.calls.count("click"), 1)
+        self.assertFalse([line for line in self.said(printed) if "overview still says" in line])
+
+    def test_a_running_notification_alone_is_waited_for_without_a_refresh(self) -> None:
+        # 'Initializing deployment...' is a notification, which updates by itself: no click, no reload.
+        notification = self.TOP_BAR + "- text: Initializing deployment...\n"
+        other = ScreenNode()                                              # the blade under the pane
+        screen = Screen(("button", "Refresh", other), tree=notification)
+        page = self.ending(screen, 100, self.COMPLETE, ("button", "Go to resource", ScreenNode()))
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], other.clicked, page.reloads, r.ask.prompts), ("match", 0, 0, []))
+        self.assertGreaterEqual(page.now, 100)
+        self.assertEqual(len([line for line in self.said(printed) if "deployment is still running" in line]), 1)
 
     def on(self, screen: Screen, r: run.Runner, call):
         """`call()` with `screen` as the page's only frame and the page's clock for time."""
