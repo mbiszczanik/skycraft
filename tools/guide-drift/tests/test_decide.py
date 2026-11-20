@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from decide import (DECORATIONS, Candidate, Decision, HumanDecider, ReplayDecider, decide,  # noqa: E402
-                    decoration_of)
+from decide import (DECORATIONS, READ_ONLY_THRESHOLD, Candidate, ConfidenceGate, Decision,  # noqa: E402
+                    HumanDecider, ReplayDecider, decide, decoration_of)
 
 STEP = {"id": "1.1.6", "title": "Create First Group"}
 ITEM = {"kind": "action", "line": 155, "labels": ["+ New group"]}
@@ -389,6 +389,83 @@ class Decorations(unittest.TestCase):
         replayed = ReplayDecider(recording)(STEP, FIELD, "Group name", candidates)
         self.assertEqual((replayed.kind, replayed.severity, replayed.name),
                          ("drift", "misleading", "Group name information *"))
+
+
+class ConfidenceGateTests(unittest.TestCase):
+    """ConfidenceGate (issue #190) with stub models: no model library, no network."""
+
+    CANDS = [Candidate("link", "Groups"), Candidate("link", "Users")]
+    READ = {"id": "1.1.5", "title": "Open Groups"}
+
+    @staticmethod
+    def model(confidence, name="Groups", calls=None):
+        def stub(step, item, label, candidates):
+            if calls is not None:
+                calls.append(step["id"])
+            return Candidate("link", name), confidence
+        return stub
+
+    def run_gate(self, step, model, label="Groups"):
+        return ConfidenceGate(model)(step, {"kind": "action", "line": 1}, label, self.CANDS)
+
+    def test_is_in_no_default_decider_list(self):
+        import run
+        self.assertNotIn("ConfidenceGate", Path(run.__file__).read_text(encoding="utf-8"))
+
+    def test_below_the_read_only_threshold_asks_the_next_decider(self):
+        self.assertIsNone(self.run_gate(self.READ, self.model(READ_ONLY_THRESHOLD - 0.01)))
+        person = Decision(kind="use", name="Groups", decided_by="human")
+        decision = decide(self.READ, {}, "Groups", self.CANDS,
+                          [ConfidenceGate(self.model(0.5)), lambda *args: person])
+        self.assertEqual("human", decision.decided_by)
+
+    def test_at_the_read_only_threshold_it_decides_as_model_with_confidence(self):
+        decision = self.run_gate(self.READ, self.model(READ_ONLY_THRESHOLD))
+        self.assertEqual(("use", "Groups", "model", READ_ONLY_THRESHOLD),
+                         (decision.kind, decision.name, decision.decided_by, decision.confidence))
+
+    def test_a_step_that_changes_something_needs_the_higher_threshold(self):
+        for title in ("Create First Group", "Add a member", "Save the form", "Assign the role",
+                      "Invite the user", "Update the tag", "Apply the policy", "Register the app"):
+            step = {"id": "1", "title": title}
+            self.assertIsNone(self.run_gate(step, self.model(0.95)), title)
+            self.assertEqual(0.97, self.run_gate(step, self.model(0.97)).confidence, title)
+
+    def test_a_step_that_deletes_is_never_decided_whatever_the_confidence(self):
+        for title in ("Delete the test group", "Remove the lock", "Detach the disk"):
+            calls = []
+            step = {"id": "1", "title": title}
+            self.assertIsNone(self.run_gate(step, self.model(1.0, calls=calls)), title)
+            self.assertEqual([], calls, "the model is not even asked")
+
+    def test_a_delete_in_the_item_text_counts_too(self):
+        calls = []
+        gate = ConfidenceGate(self.model(1.0, calls=calls))
+        self.assertIsNone(gate(self.READ, {"kind": "action", "text": "Remove the lock"}, "Groups", self.CANDS))
+        self.assertEqual([], calls)
+
+    def test_a_failing_or_unavailable_model_asks_and_does_not_raise(self):
+        def boom(*args):
+            raise ConnectionError("unavailable")
+        self.assertIsNone(self.run_gate(self.READ, boom))
+        self.assertIsNone(self.run_gate(self.READ, lambda *args: None))
+
+    def test_a_bad_answer_asks(self):
+        for answer in ((Candidate("link", "Nowhere"), 1.0), (Candidate("link", "Groups"), "high"),
+                       (Candidate("link", "Groups"), 1.5), (Candidate("link", "Groups"), float("nan")),
+                       "not a pair", (None, 1.0)):
+            self.assertIsNone(self.run_gate(self.READ, lambda *args, answer=answer: answer), answer)
+
+    def test_a_renamed_pick_is_misleading_drift_like_a_human_pick(self):
+        decision = self.run_gate(self.READ, self.model(0.99, name="Users"), label="Groups")
+        self.assertEqual(("drift", "misleading", "model"), (decision.kind, decision.severity, decision.decided_by))
+
+    def test_the_recording_carries_the_confidence(self):
+        entry = self.run_gate(self.READ, self.model(0.93)).to_recording(["button \"Help\""], AT)
+        self.assertEqual((0.93, "model"), (entry["confidence"], entry["decidedBy"]))
+
+    def test_a_human_decision_records_no_confidence(self):
+        self.assertNotIn("confidence", Decision(kind="use", name="Groups").to_recording([], AT))
 
 
 if __name__ == "__main__":

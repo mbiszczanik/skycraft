@@ -92,6 +92,7 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 # A terminating error under Stop ends the script through Exit-Lab, so a re-run at the prompt sees exit 1 (#398).
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 $failCount = 0
+$script:passCount = 0
 
 Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -BackgroundColor Black
 
@@ -99,7 +100,7 @@ Write-Host "=== Lab 3.3 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 Write-Host "Environment: $Environment (resource group $ResourceGroupName)" -ForegroundColor Gray
@@ -111,7 +112,7 @@ $imageTag = "v1"
 
 $acr = Get-AzContainerRegistry -ResourceGroupName $ResourceGroupName -Name $AcrName -ErrorAction SilentlyContinue
 if ($acr) {
-    Write-Host "[OK] ACR found: $AcrName" -ForegroundColor Green
+    Write-Host "[OK] ACR found: $AcrName" -ForegroundColor Green; $script:passCount++
 
     # A registry whose create failed still shows up by name (#371).
     if ("$($acr.ProvisioningState)" -eq 'Succeeded') {
@@ -138,7 +139,7 @@ if ($acr) {
     # Check Image
     $repos = Get-AzContainerRegistryRepository -RegistryName $AcrName -ErrorAction SilentlyContinue
     if ($repos -contains $imageName) {
-        Write-Host "  - [OK] Repository '$imageName' found" -ForegroundColor Green
+        Write-Host "  - [OK] Repository '$imageName' found" -ForegroundColor Green; $script:passCount++
     } else {
         Write-Host "  - [FAIL] Repository '$imageName' not found" -ForegroundColor Red
         $failCount++
@@ -153,7 +154,7 @@ Write-Host "`n=== 2. Validating Azure Container Instance ===" -ForegroundColor C
 
 try {
     $aci = Get-AzContainerGroup -ResourceGroupName $ResourceGroupName -Name $AciName -ErrorAction Stop
-    Write-Host "[OK] ACI found: $AciName" -ForegroundColor Green
+    Write-Host "[OK] ACI found: $AciName" -ForegroundColor Green; $script:passCount++
 
     if ($aci.ProvisioningState -eq "Succeeded") {
         Write-Host "  - Provisioning State: Succeeded" -ForegroundColor Green
@@ -234,7 +235,7 @@ if ($acaLookupError) {
     Write-Host "[FAIL] ACA $AcaName could not be looked up: $acaLookupError" -ForegroundColor Red
     $failCount++
 } elseif ($aca) {
-    Write-Host "[OK] ACA found: $AcaName" -ForegroundColor Green
+    Write-Host "[OK] ACA found: $AcaName" -ForegroundColor Green; $script:passCount++
     $props = $aca.Properties
 
     if ($props.provisioningState -eq "Succeeded") {
@@ -350,7 +351,7 @@ try {
     $autoWorkspaces = @(Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.OperationalInsights/workspaces' -ErrorAction Stop |
         Where-Object { $_.Name -match $autoWorkspacePattern })
     if ($autoWorkspaces.Count -eq 0) {
-        Write-Host "[OK] No auto-created Log Analytics workspace in $ResourceGroupName" -ForegroundColor Green
+        Write-Host "[OK] No auto-created Log Analytics workspace in $ResourceGroupName" -ForegroundColor Green; $script:passCount++
     } else {
         foreach ($workspace in $autoWorkspaces) {
             Write-Host "[FAIL] Log Analytics workspace '$($workspace.Name)' in $ResourceGroupName was created by the Portal's default (Step 3.3.6 chooses Azure Monitor). Module 5 wizards would offer it as their default; run Remove-LabResource.ps1 or delete it." -ForegroundColor Red
@@ -412,4 +413,4 @@ if ($failCount -eq 0) {
     Write-Host "Lab 3.3 validation found $failCount issue(s)." -ForegroundColor Red
 }
 
-Exit-Lab -FailureCount $failCount
+Exit-Lab -FailureCount $failCount -PassCount $script:passCount

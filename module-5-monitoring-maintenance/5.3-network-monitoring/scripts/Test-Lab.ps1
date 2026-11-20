@@ -135,7 +135,7 @@ Write-Host ""
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "  [ERROR] Not logged into Azure. Run 'Connect-AzAccount' first." -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "  Account: $($context.Account.Id)" -ForegroundColor Gray
 
@@ -308,4 +308,4 @@ if ($failCount -gt 0) {
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-Exit-Lab -FailureCount $failCount
+Exit-Lab -FailureCount $failCount -PassCount $passCount

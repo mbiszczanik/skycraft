@@ -223,6 +223,14 @@ function Exit-Lab {
         How many checks, steps or preconditions failed. Above zero exits 1, zero exits 0. The count
         is never the exit code itself, which would wrap at 256.
 
+    .PARAMETER PassCount
+        How many checks passed. A validator passes it so that Exit-Lab prints the one machine-readable
+        last line `RESULT passed=<n> failed=<n>` (#363). Without it nothing is printed.
+
+    .PARAMETER SkipCount
+        How many checks were skipped, not run and not counted. Adds ` skipped=<n>` to the RESULT
+        line; used only with -PassCount.
+
     .EXAMPLE
         Exit-Lab -FailureCount $failCount
 
@@ -236,7 +244,13 @@ function Exit-Lab {
     param(
         [Parameter(Mandatory)]
         [ValidateRange(0, [int]::MaxValue)]
-        [int]$FailureCount
+        [int]$FailureCount,
+
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$PassCount,
+
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$SkipCount
     )
 
     $code   = if ($FailureCount -gt 0) { 1 } else { 0 }
@@ -245,6 +259,11 @@ function Exit-Lab {
     if (-not $caller) {
         Write-Warning "Exit-Lab ends a lab script; typed at the prompt it does nothing (it would have exited $code)."
         return
+    }
+
+    if ($PSBoundParameters.ContainsKey('PassCount')) {
+        $skipped = if ($PSBoundParameters.ContainsKey('SkipCount')) { " skipped=$SkipCount" } else { '' }
+        Write-Host "RESULT passed=$PassCount failed=$FailureCount$skipped"
     }
 
     $stack     = @(Get-PSCallStack)
