@@ -51,6 +51,15 @@ You'll deploy this three-VNet hub-spoke architecture:
 
 ---
 
+## ✅ Prerequisites
+
+Before starting this lab:
+
+- [ ] Completed **Lab 1.2: RBAC**: the resource groups `dev-skycraft-swc-rg`, `prod-skycraft-swc-rg` and `platform-skycraft-swc-rg` exist. Check: `Get-AzResourceGroup -Name 'dev-skycraft-swc-rg', 'prod-skycraft-swc-rg', 'platform-skycraft-swc-rg'`
+- [ ] `Contributor` role on those resource groups
+
+---
+
 ## 🛠️ Portal, PowerShell and Bicep Paths
 
 You can build this lab in the Portal by following this guide, with the Az PowerShell blocks under the steps, or with Bicep. The three paths end in the same state, and `scripts/Test-Lab.ps1` accepts it whichever path built it:

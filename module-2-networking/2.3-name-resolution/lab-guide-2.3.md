@@ -73,11 +73,16 @@ If you completed Lab 1.3, its policies are still assigned to your subscription a
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
 ```powershell
-Get-AzVirtualNetwork | Where-Object Name -like '*-skycraft-swc-vnet' | Select-Object Name, ResourceGroupName
-Get-AzPublicIpAddress | Where-Object Name -like '*-skycraft-swc-lb-pip' | Select-Object Name, ResourceGroupName, IpAddress
+Get-AzVirtualNetwork -Name 'platform-skycraft-swc-vnet' -ResourceGroupName 'platform-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, ResourceGroupName
+Get-AzVirtualNetwork -Name 'dev-skycraft-swc-vnet' -ResourceGroupName 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, ResourceGroupName
+Get-AzVirtualNetwork -Name 'prod-skycraft-swc-vnet' -ResourceGroupName 'prod-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, ResourceGroupName
+Get-AzPublicIpAddress -Name 'dev-skycraft-swc-lb-pip' -ResourceGroupName 'dev-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, ResourceGroupName, IpAddress
+Get-AzPublicIpAddress -Name 'prod-skycraft-swc-lb-pip' -ResourceGroupName 'prod-skycraft-swc-rg' -ErrorAction Stop | Select-Object Name, ResourceGroupName, IpAddress
 ```
 
 **Expected Result**: Three virtual networks (platform, dev, prod) and two public IP addresses (dev and prod load balancer), each with an IP address.
+
+**If a line stops with an error**: the VNet or public IP address it names is missing, so the check has failed. Run Lab 2.1 first (VNets in Sections 2 and 3, public IP addresses in Section 5, or `scripts/Deploy-Bicep.ps1` of Lab 2.1), then run this block again.
 
 ## 🛠️ Portal, PowerShell and Bicep Paths
 

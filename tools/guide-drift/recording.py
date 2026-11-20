@@ -75,6 +75,15 @@ ENV_REF = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)(?P<upn>\|upn)?\}")
 # tests/Guide-Drift-Recording.Tests.ps1).
 TENANT_PREFIX_ENV = "SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX"
 ADDRESS_ENV = frozenset({"SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL", "SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL"})
+# The name of the run's subscription (#236), set by Invoke-GuideDrift.ps1 in subscription mode. Every
+# recording inherits it for the Subscription field (SUBSCRIPTION_VALUE). Its value is identifying
+# and no recording may read it: it is no ADDRESS_ENV or the tenant prefix, so env_override_problems
+# refuses a placeholder or valueOverride that does, and typed_secrets masks it in every run log
+# whether or not the recording refers to it.
+SUBSCRIPTION_ENV = "SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION"
+# The guides' spellings of the field's value: '[Your subscription]', '[Your Subscription]' and a
+# bare 'Your subscription'; the whole value, in any case.
+SUBSCRIPTION_VALUE = re.compile(r"\s*(?:\[\s*your subscription\s*\]|your subscription)\s*", re.IGNORECASE)
 
 
 def env_names(recording: dict) -> set[str]:
@@ -501,11 +510,22 @@ def value_override(recording: dict, step: dict, label: str) -> str | None:
     return recording["steps"].get(step["id"], {}).get("valueOverrides", {}).get(label)
 
 
+def subscription_name(text: str) -> str | None:
+    """The run's subscription name (SUBSCRIPTION_ENV) when `text`, the value of a field once the
+    recording's placeholders are applied, is the guides' Subscription value (SUBSCRIPTION_VALUE);
+    None otherwise, and when the variable is not set or blank (tenant mode): the value is then
+    left as the guide gives it."""
+    name = os.environ.get(SUBSCRIPTION_ENV, "")
+    return name if name.strip() and SUBSCRIPTION_VALUE.fullmatch(text) else None
+
+
 def resolve_value(recording: dict, step: dict, label: str, value: str) -> str:
     override = value_override(recording, step, label)
     if override is not None:
         return expand_env(override)
-    return fill_placeholders(recording, value)
+    filled = fill_placeholders(recording, value)
+    name = subscription_name(filled)
+    return filled if name is None else name
 
 
 def fill_placeholders(recording: dict, text: str) -> str:
@@ -569,6 +589,8 @@ def field_action(recording: dict, step: dict, item: dict) -> tuple[str, str]:
     value = resolve_value(recording, step, item["label"], item["value"])
     if (item.get("literal", True) is False and value_override(recording, step, item["label"]) is None
             and not value_is_literal(value)):
+        if subscription_name(fill_placeholders(recording, item["value"])) is not None:
+            return "type", value        # the subscription's name, whatever it looks like
         return ("unresolved" if BRACKET_TOKEN.search(value) else "instruction"), value
     return value_action(value), value
 
@@ -611,6 +633,9 @@ def prompt_value(recording: dict, step: dict, item: dict) -> str:
                 references.append(replacement)
                 text = text.replace(placeholder, replacement)
         source = "the guide's, with the recording's placeholders" if references else ""
+        if subscription_name(text) is not None:
+            references.append("${" + SUBSCRIPTION_ENV + "}")
+            source = source or "the guide's, with the built-in subscription placeholder"
     names = sorted({m.group("name") for reference in references for m in ENV_REF.finditer(reference)})
     if names:
         source += f"; environment variable{'s' if len(names) > 1 else ''} {', '.join(names)}"
@@ -713,7 +738,9 @@ def typed_secrets(recording: dict, steps: dict) -> set[str]:
             secrets |= {value for value in values
                         if value.strip() and value_action(value) == "type" and not only_checkbox_state(value)}
     shown = {token[2:-1] for token in env_secrets(recording)} | {TENANT_PREFIX_ENV}
-    secrets |= {os.environ[name] for name in env_names(recording) - shown if os.environ.get(name, "").strip()}
+    # The subscription's name is masked even when no recording refers to it: the built-in does.
+    secrets |= {os.environ[name] for name in (env_names(recording) | {SUBSCRIPTION_ENV}) - shown
+                if os.environ.get(name, "").strip()}
     return secrets
 
 

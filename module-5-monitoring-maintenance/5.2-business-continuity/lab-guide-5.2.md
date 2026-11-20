@@ -48,6 +48,8 @@ By completing this lab, you will:
 - **Section 5**: Reports & Alerts (15 min)
 - **Section 6**: Recovery Simulation (15 min)
 
+> **Platform wait**: the Site Recovery replication of Step 5.2.6 runs on its own and took 45 to 70 minutes in live runs (a scripted deploy with Site Recovery took about 70 minutes in all; timings of 2026-11-01 and 2026-11-02, `main` `c940f10`). The wait is Azure's, not your work: plan for it apart from the section times. Start Step 5.2.6 right after the vault is ready and the prerequisites hold, then do Steps 5.2.8 and 5.2.9 while it replicates; Step 5.2.7 (test failover) needs it finished.
+
 ---
 
 ## ✅ Prerequisites
@@ -64,6 +66,29 @@ Before starting this lab:
 The Lab 5.1, Lab 3.2, Lab 4.1 and resource group items are what the scripts check: `scripts/Deploy-Bicep.ps1` stops on a missing resource group, workspace or action group, and only warns about a missing key vault (step [2/7]) or VM (step [7/7]); `scripts/New-LabBlobBackup.ps1` stops on a missing Backup vault or storage account. The shortest chain that also satisfies the gates of the labs it runs is 1.2 → 2.1 → 2.3 → 3.2 (dev, needs `~/.ssh/skycraft-dev.pub`) → 4.1 `-All` → 5.1 → 5.2 (see `tools/lab-cycle-manifest.psd1`).
 
 Both scripts also need PowerShell 7 with Az.Accounts, Az.Resources, Az.RecoveryServices, Az.DataProtection, Az.Compute, Az.OperationalInsights and Az.Storage, a signed-in `Connect-AzAccount` context, permission to register the `Microsoft.RecoveryServices` and `Microsoft.DataProtection` resource providers (`Deploy-Bicep.ps1` registers them if needed), and **Owner** or **User Access Administrator** on `prodskycraftswcsa` (`New-LabBlobBackup.ps1` assigns the Backup Vault identity two roles there). `Deploy-Bicep.ps1` and `Test-Lab.ps1` find the *Backup Management Service* app with `Get-AzADServicePrincipal`, which needs a Microsoft Graph token in your Az sign-in: if they report `MicrosoftGraphEndpointResourceId`, see [TROUBLESHOOTING.md](../../TROUBLESHOOTING.md). The guide's own blocks for Steps 5.2.3 and 5.2.9 also use Az.KeyVault, which is part of the Az module, and Az.AlertsManagement, which is not: it is not in the Az 16.4.0 dependency list, so install it once with `Install-Module Az.AlertsManagement -Scope CurrentUser` before the Azure PowerShell block of Step 5.2.9 (the scripts and the Portal and Bicep paths do not need it). `Deploy-Bicep.ps1` finishes by running `scripts/Enable-SiteRecovery.ps1` (Az.Network and Az.Storage as well) and waits for the replication, about 45 to 75 minutes; `-SkipSiteRecovery` leaves it for Step 5.2.6. If Lab 4.1 had to use another name than `prodskycraftswcsa` (storage account names are unique across Azure), pass it to `New-LabBlobBackup.ps1`, `Test-Lab.ps1` and `Remove-LabResource.ps1` as `-ProdSaName`.
+
+Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course). Each line stops with an error when its resource is missing (`Get-AzKeyVault` and `Get-AzActionGroup` can return nothing instead of an error, so those two lines stop it themselves):
+
+```powershell
+# Resource group (Lab 1.2)
+Get-AzResourceGroup -Name platform-skycraft-swc-rg -ErrorAction Stop | Select-Object ResourceGroupName, Location
+
+# Log Analytics workspace and action group (Lab 5.1)
+Get-AzOperationalInsightsWorkspace -ResourceGroupName platform-skycraft-swc-rg -Name platform-skycraft-swc-law -ErrorAction Stop | Select-Object Name, Location
+(Get-AzActionGroup -ResourceGroupName platform-skycraft-swc-rg -Name skycraft-ops-ag -ErrorAction Stop) ?? $(throw 'Action group skycraft-ops-ag not found') | Select-Object Name, Location
+
+# The VMs the lab protects and the key vault of the auth VM (Lab 3.2)
+Get-AzVM -Name dev-skycraft-swc-auth-vm -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+Get-AzVM -Name dev-skycraft-swc-world-vm -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop | Select-Object Name, Location
+(Get-AzKeyVault -VaultName dev-skycraft-swc-kv -ResourceGroupName dev-skycraft-swc-rg -ErrorAction Stop) ?? $(throw 'Key vault dev-skycraft-swc-kv not found') | Select-Object VaultName, Location
+
+# The blob backup datasource (Lab 4.1 with -All)
+Get-AzStorageAccount -Name prodskycraftswcsa -ResourceGroupName prod-skycraft-swc-rg -ErrorAction Stop | Select-Object StorageAccountName, Location
+```
+
+**Expected Result**: Every line prints one row in `swedencentral`.
+
+**If a line stops with an error**: the resource it names is missing, so the check has failed. The comment above each line names the lab that creates it; run that lab first (Lab 4.1 with `-All`), then run this block again. If Lab 3.2 or Lab 4.1 had to use another key vault or storage account name, use that name.
 
 ---
 
@@ -669,6 +694,20 @@ module modAlertProcessingRule 'br/public:avm/res/alerts-management/action-rule:0
 Azure Backup can restore single files from a recovery point without restoring the whole VM. In the vault, under **Protected items** (expand it if it is collapsed), open **Backup items** → **Azure Virtual Machine** → the VM → **File Recovery**, select a recovery point and click **Download Script**. The script mounts the recovery point's disks on the machine where it runs, and **Unmount Disks** on the same pane closes the connection. It does not work on an ADE-encrypted VM such as the auth VM.
 
 This lab does not exercise it. On today's Ubuntu 22.04 image the script needs manual workarounds (the multipath service holds the disk copy, and an unformatted data disk makes the script ask a question it cannot get answered from Run command), and the result does not repay the time. The supported procedure is in the Microsoft Learn article under Additional Resources.
+
+---
+
+## 📦 What This Lab Leaves Behind
+
+`tools/lab-cycle-manifest.psd1` lists no lab that depends on Lab 5.2, but Lab 5.2 changes resources of earlier labs, and some of that outlives its cleanup.
+
+| Left behind | Where | What it does in later labs |
+| --- | --- | --- |
+| Point-in-time restore (30 days), versioning and the change feed, which blob backup turned on. Soft delete for blobs stays locked at 35 days while the backup exists | `prodskycraftswcsa` (Lab 4.1) | Lab 4.2's `Test-Lab.ps1` expects 7 days and fails; the Data protection page is greyed out; Lab 4.2's and Lab 4.4's Bicep fails with `InvalidValuesForRequestParameters` on `deleteRetentionPolicy.days` until point-in-time restore is off. `scripts/Remove-LabResource.ps1` removes the backup instance but may leave point-in-time restore on, and says so; Lab 4.2's cleanup turns it off |
+| The Key Vault Administrator role of the Microsoft Entra app *Backup Management Service* (only if Lab 3.2's auth VM is encrypted with Azure Disk Encryption; Step 5.2.3a) | `dev-skycraft-swc-kv` (Lab 3.2) | Nothing breaks. The cleanup keeps the role, and says so |
+| The daily VM backup of the two Lab 3.2 VMs (protected-instance fee plus snapshot storage; no price is listed here), the Recovery Services vault `platform-skycraft-swc-rsv` and the Backup vault `platform-skycraft-swc-bv` | `platform-skycraft-swc-rg` | Billed for as long as they exist. `Remove-LabResource.ps1` removes both vaults, the protected items with their data and the instant-restore snapshot group |
+| Site Recovery replication of `dev-skycraft-swc-world-vm` and its target group `platform-skycraft-neu-asr-rg` (replica disks, cache storage account, target VNet; no price is listed here) | North Europe | Billed while it replicates. `Remove-LabResource.ps1` disables the replication and deletes the target group |
+| Diagnostic settings on the two vaults (Step 5.2.8) | `platform-skycraft-swc-rg` | They re-attach to the next vault created with the same id. `Remove-LabResource.ps1` removes them before it deletes each vault |
 
 ---
 

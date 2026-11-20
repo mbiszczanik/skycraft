@@ -78,13 +78,15 @@ If you completed Lab 1.3, its policies are still assigned to your subscription. 
 Check the prerequisites with Az PowerShell (signed in with `Connect-AzAccount` to the subscription you use for the course):
 
 ```powershell
-Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' |
+Get-AzStorageAccount -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prodskycraftswcsa' -ErrorAction Stop |
     Select-Object StorageAccountName, Location, ProvisioningState, @{ n = 'DefaultAction'; e = { $_.NetworkRuleSet.DefaultAction } }
-(Get-AzVirtualNetwork -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-vnet').Subnets |
+(Get-AzVirtualNetwork -ResourceGroupName 'prod-skycraft-swc-rg' -Name 'prod-skycraft-swc-vnet' -ErrorAction Stop).Subnets |
     Where-Object Name -eq 'WorldSubnet' | Select-Object Name, @{ n = 'ServiceEndpoints'; e = { $_.ServiceEndpoints.Service -join ', ' } }
 ```
 
 **Expected Result**: `prodskycraftswcsa` in `swedencentral`, `Succeeded`, default action `Allow` (Labs 4.1-4.3 leave the firewall open); `WorldSubnet` with `Microsoft.Storage` among its service endpoints.
+
+**If a line stops with an error**: the storage account or the VNet it names is missing, so the check has failed. Run Lab 4.1 (with `-All` on `scripts/Deploy-Bicep.ps1`) for the account and Lab 2.1 for the VNet, then run this block again. If `WorldSubnet` shows no `Microsoft.Storage` service endpoint, the VNet is there but Lab 2.2 has not run: run it first.
 
 > [!IMPORTANT]
 > **Run the Module 4 labs in order (4.1 → 4.2 → 4.3 → 4.4).** All four configure the **same**

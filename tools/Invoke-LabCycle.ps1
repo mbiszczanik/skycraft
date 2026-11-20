@@ -410,6 +410,8 @@ $byId = @{}
 foreach ($phase in $live) { $byId[$phase.Id] = $phase }
 
 $results = [System.Collections.Generic.List[hashtable]]::new()
+# Checks a validator reported as SKIPPED (a token the session cannot get, #530, #550).
+$skippedChecks = [System.Collections.Generic.List[hashtable]]::new()
 $status  = @{}
 $cause   = @{}
 
@@ -735,6 +737,13 @@ foreach ($id in $order) {
         if ($exitCode -ne 0) { $failedStep = $step.Kind; break }
     }
 
+    # A validator that skipped a check did not prove it: name each one for the summary, whatever the exit code.
+    if ($step.Kind -eq 'Test') {
+        foreach ($skipped in @(Get-LabCycleSkippedCheck -Text $output)) {
+            $skippedChecks.Add(@{ Name = "$id check: $($skipped.Name)"; Reason = "skipped, not proven: $($skipped.Reason)" })
+        }
+    }
+
     $durationMs = [int]([datetime]::UtcNow - $started).TotalMilliseconds
 
     if ($exitCode -eq 0) {
@@ -867,7 +876,7 @@ Write-Host "  Coverage: $($coverage.Live) deployed and validated, $($coverage.De
 
 # Checks skipped by design (#543). An entry bound to a Phase counts only when that phase ran.
 $ranPhaseIds = @($results | Where-Object { $_.Status -like 'Succeeded*' -or $_.Status -like 'Failed*' } | ForEach-Object { $_.Id })
-$notRun = @($manifest.NotRun | Where-Object { $_ -and (-not $_.Phase -or $_.Phase -in $ranPhaseIds) })
+$notRun = @($manifest.NotRun | Where-Object { $_ -and (-not $_.Phase -or $_.Phase -in $ranPhaseIds) }) + @($skippedChecks)
 if ($notRun.Count -gt 0) {
     Write-Host "  Not run (a green cycle does not cover these): $($notRun.Count)" -ForegroundColor Yellow
     foreach ($item in $notRun) { Write-Host "    - $($item.Name) - $($item.Reason)" -ForegroundColor Yellow }

@@ -106,7 +106,11 @@
     VALUES THAT MUST NOT BE LITERAL. Step 1.1.5 invites a guest; the recording overrides that
     address with ${SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL}, and '[yourtenant]' with
     ${SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX}, which this script sets from the tenant's initial
-    *.onmicrosoft.com domain (and restores afterwards). Set SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL to an
+    *.onmicrosoft.com domain (and restores afterwards). A create blade's Subscription field
+    ('[Your subscription]', '[Your Subscription]', 'Your subscription') is filled with the name of
+    the -SubscriptionId subscription, which this script sets in SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION
+    (restored afterwards, not set in tenant mode) and which shows as [secret] in every run log;
+    a recording needs no placeholder for it (issue #236). Set SKYCRAFT_GUIDE_DRIFT_GUEST_EMAIL to an
     address you control before running lab 1.1. Steps 1.3.16 and 1.3.17 send budget alerts to
     ${SKYCRAFT_GUIDE_DRIFT_ALERT_EMAIL}: set it to an address you read before running lab 1.3.
 
@@ -503,9 +507,14 @@ Write-Host "  Run:          $runId -> $LogDirectory" -ForegroundColor Gray
 
 # The environment is the script's to borrow, not to keep: restored in the finally below.
 $savedPrefix      = $env:SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX
+$savedSubscription = $env:SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION
 $savedGraphTenant = $env:SKYCRAFT_GRAPH_TENANT_ID
 try {
     $env:SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX = ($domain -split '\.')[0]
+    # The Subscription field's value (#236): the name of the context's subscription, which
+    # Test-LabCycleSubscription has just matched to -SubscriptionId by id. Tenant mode has none, and a
+    # value left over from the caller's session must not be typed into a field.
+    $env:SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION = if ($tenantMode) { $null } else { [string](Get-AzContext).Subscription.Name }
 
     # --- Parse, then run -----------------------------------------------------------------------
     $runDir = Join-Path $LogDirectory $runId
@@ -619,5 +628,6 @@ try {
 }
 finally {
     $env:SKYCRAFT_GUIDE_DRIFT_TENANT_PREFIX = $savedPrefix
+    $env:SKYCRAFT_GUIDE_DRIFT_SUBSCRIPTION  = $savedSubscription
     $env:SKYCRAFT_GRAPH_TENANT_ID           = $savedGraphTenant
 }

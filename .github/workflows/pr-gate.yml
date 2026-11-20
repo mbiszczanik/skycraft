@@ -48,6 +48,8 @@ jobs:
       # `pwsh -command` step); the explicit check below is belt and braces.
       - name: Check the declaration
         shell: pwsh
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           ./tools/Test-PrLiveVerification.ps1 `
             -BodyPath "$env:RUNNER_TEMP/pr-body.md" `
@@ -59,7 +61,8 @@ jobs:
           }
           ./tools/Test-PrAcceptanceEvidence.ps1 `
             -BodyPath "$env:RUNNER_TEMP/pr-body.md" `
-            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt"
+            -ChangedFilePath "$env:RUNNER_TEMP/pr-files.txt" `
+            -HeadSha "$env:PR_HEAD_SHA"
           if ($LASTEXITCODE -ne 0) {
               $Host.SetShouldExit($LASTEXITCODE)
               exit $LASTEXITCODE

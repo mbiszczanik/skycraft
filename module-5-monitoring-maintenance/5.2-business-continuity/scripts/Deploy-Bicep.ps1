@@ -582,28 +582,49 @@ if ($WhatIf) {
                         $snapshotStatus = ''
                         $detail = $null
                         $jobReadError = $null
+                        $jobReadErrorsShown = @()
                         Write-Host "  Watching the Take Snapshot phase of job $jobId (up to $snapshotWatchMinutes minutes)..." -ForegroundColor Gray
-                        $lostSince = $null
+                        # Counted in seconds waited, not on the clock: the lookups themselves do not use up the grace.
+                        $lostSeconds = 0
                         while ($true) {
-                            $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue -ErrorVariable jobReadError
+                            # -ErrorAction Stop inside try: an error of a lookup is printed, once per text, not hidden (#535).
+                            $job = $null
+                            try {
+                                $job = Get-AzRecoveryServicesBackupJob -JobId $jobId -VaultId $vault.ID -ErrorAction Stop
+                            } catch {
+                                $jobReadError = "Get-AzRecoveryServicesBackupJob -JobId $jobId failed: $($_.Exception.Message)"
+                                if ($jobReadError -notin $jobReadErrorsShown) {
+                                    $jobReadErrorsShown += $jobReadError
+                                    Write-Host "  $jobReadError" -ForegroundColor DarkYellow
+                                }
+                            }
                             if (-not $job) {
                                 # The read by id returned nothing for the second VM's job in two runs (#535) while
                                 # the vault listed it (az backup job list): look in the vault's job list as well.
-                                $listedJobs = @(Get-AzRecoveryServicesBackupJob -VaultId $vault.ID -BackupManagementType AzureVM -Operation Backup -ErrorAction SilentlyContinue |
-                                    Where-Object { $_.JobId -eq $jobId -or ($_.WorkloadName -eq $vmName -and ([datetime]$_.StartTime).ToUniversalTime() -ge $jobListedAfter) })
+                                $listedJobs = @()
+                                try {
+                                    $listedJobs = @(Get-AzRecoveryServicesBackupJob -VaultId $vault.ID -BackupManagementType AzureVM -Operation Backup -ErrorAction Stop |
+                                        Where-Object { $_.JobId -eq $jobId -or ($_.WorkloadName -eq $vmName -and ([datetime]$_.StartTime).ToUniversalTime() -ge $jobListedAfter) })
+                                } catch {
+                                    $jobReadError = "Get-AzRecoveryServicesBackupJob -VaultId (the vault's job list) failed: $($_.Exception.Message)"
+                                    if ($jobReadError -notin $jobReadErrorsShown) {
+                                        $jobReadErrorsShown += $jobReadError
+                                        Write-Host "  $jobReadError" -ForegroundColor DarkYellow
+                                    }
+                                }
                                 if ($listedJobs.Count -gt 0) {
                                     $job = @($listedJobs | Sort-Object -Property StartTime -Descending)[0]
                                     $jobId = $job.JobId
                                 }
                             }
                             if (-not $job) {
-                                if (-not $lostSince) { $lostSince = Get-Date }
-                                if (((Get-Date) - $lostSince).TotalSeconds -ge $jobLookupGraceSeconds) { break }
+                                if ($lostSeconds -ge $jobLookupGraceSeconds) { break }
                                 Write-Host "  The vault does not return job $jobId yet; retrying..." -ForegroundColor DarkYellow
                                 Start-Sleep -Seconds 10
+                                $lostSeconds += 10
                                 continue
                             }
-                            $lostSince = $null
+                            $lostSeconds = 0
                             $detail = Get-AzRecoveryServicesBackupJobDetail -JobId $jobId -VaultId $vault.ID -ErrorAction SilentlyContinue
                             if (-not $detail) { $detail = Get-AzRecoveryServicesBackupJobDetail -Job $job -VaultId $vault.ID -ErrorAction SilentlyContinue }
                             $snapshotStatus = "$((@($detail.SubTasks) | Where-Object { $_.Name -eq 'Take Snapshot' } | Select-Object -First 1).Status)"

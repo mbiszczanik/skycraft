@@ -232,6 +232,76 @@ class ValueTests(unittest.TestCase):
                 self.assertEqual(value_action(value), action)
 
 
+class SubscriptionPlaceholderTests(unittest.TestCase):
+    """The built-in placeholder for the Subscription field (#236): the run's subscription name,
+    for the guides' three spellings, in every recording unless it overrides the field."""
+
+    NAME = "Fictional Hollow Subscription"
+    ENV = {recording.SUBSCRIPTION_ENV: NAME}
+    RECORDING = {"placeholders": {}, "steps": {"1.2.3": {"valueOverrides": {"Resource group": "dev-rg"}}}}
+
+    def action(self, value: str, rec: dict | None = None, label: str = "Subscription", env: dict | None = None):
+        item = {"kind": "field", "label": label, "value": value, "line": 7}
+        if not recording.value_is_literal(value):
+            item["literal"] = False
+        with mock.patch.dict(os.environ, self.ENV if env is None else env, clear=True):
+            return field_action(rec or self.RECORDING, {"id": "1.2.3"}, item)
+
+    def test_every_guide_spelling_is_typed_as_the_subscription_name(self) -> None:
+        for value in ("[Your subscription]", "[Your Subscription]", "Your subscription", "your SUBSCRIPTION",
+                      "[ Your subscription ]", " Your subscription "):
+            with self.subTest(value=value):
+                self.assertEqual(self.action(value), ("type", self.NAME))
+
+    def test_only_the_whole_value_is_replaced(self) -> None:
+        for value in ("Your subscription's default", "Select your subscription", "[Your subscription] (Free Trial)",
+                      "[Your resource group]"):
+            with self.subTest(value=value):
+                self.assertNotEqual(self.action(value)[1], self.NAME)
+
+    def test_a_name_that_looks_like_a_token_is_still_typed(self) -> None:
+        name = "Your team [prod] subscription"
+        self.assertEqual(self.action("[Your subscription]", env={recording.SUBSCRIPTION_ENV: name}), ("type", name))
+
+    def test_a_valueoverride_wins(self) -> None:
+        rec = {"placeholders": {}, "steps": {"1.2.3": {"valueOverrides": {"Subscription": "Other"}}}}
+        self.assertEqual(self.action("[Your subscription]", rec), ("type", "Other"))
+
+    def test_a_recording_placeholder_wins(self) -> None:
+        rec = {"placeholders": {"[Your subscription]": "Chosen"}, "steps": {}}
+        self.assertEqual(self.action("[Your subscription]", rec), ("type", "Chosen"))
+
+    def test_without_the_variable_the_value_is_left_as_the_guide_gives_it(self) -> None:
+        self.assertEqual(self.action("[Your subscription]", env={}), ("unresolved", "[Your subscription]"))
+        self.assertEqual(self.action("Your subscription", env={}), ("instruction", "Your subscription"))
+        self.assertEqual(self.action("[Your subscription]", env={recording.SUBSCRIPTION_ENV: "  "}),
+                         ("unresolved", "[Your subscription]"))
+
+    def test_the_prompt_names_the_variable_and_the_name_is_a_typed_secret(self) -> None:
+        item = {"kind": "field", "label": "Subscription", "value": "[Your subscription]", "line": 7,
+                "literal": False}
+        with mock.patch.dict(os.environ, self.ENV, clear=True):
+            shown = recording.prompt_value(self.RECORDING, {"id": "1.2.3"}, item)
+            secrets = recording.typed_secrets(self.RECORDING, {"steps": []})
+        self.assertEqual(shown, f"{self.NAME} (the guide's, with the built-in subscription placeholder; "
+                                f"environment variable {recording.SUBSCRIPTION_ENV})")
+        self.assertEqual(secrets, {self.NAME})
+        redactor = Redactor(DOMAIN, TENANT)
+        self.assertEqual(recording.scrub(shown, redactor, secrets),
+                         "[secret] (the guide's, with the built-in subscription placeholder; "
+                         f"environment variable {recording.SUBSCRIPTION_ENV})")
+
+    def test_no_secret_without_the_variable(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(recording.typed_secrets(self.RECORDING, {"steps": []}), set())
+
+    def test_a_recording_may_not_read_the_variable_into_a_field(self) -> None:
+        ref = "${" + recording.SUBSCRIPTION_ENV + "}"
+        rec = {"placeholders": {"[sub]": ref}, "steps": {"1.2.3": {"valueOverrides": {"Subscription": ref}}}}
+        self.assertEqual(len(recording.env_override_problems(rec)), 2)
+        self.assertEqual(recording.env_override_problems(self.RECORDING), [])
+
+
 class FieldActionTests(unittest.TestCase):
     """A field value parse.py marked '"literal": false' is typed only when the recording resolves
     it (#202): an override for the field, or placeholders that leave a literal."""
