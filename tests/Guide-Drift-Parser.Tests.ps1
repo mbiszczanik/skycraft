@@ -1358,13 +1358,19 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         }
     }
 
+    # One guide line per stating verb a guide uses. Untick, clear, deselect, disable and turn on/off
+    # are in no guide step; test_parse.py pins them on fixtures. <only>: the "stateOnly" indices.
     It 'reads step <id>''s "<text>" as <kind> <labels>, <key> at <indices>' -ForEach @(
-        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
-        @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0) }
-        @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
+        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0); only = @(0) }
+        @{ lab = '4.2'; id = '4.2.5'; text = 'Leave **Enable Azure Backup for blobs** unchecked - ...'; kind = 'action'; labels = @('Enable Azure Backup for blobs'); key = 'unchecked'; indices = @(0); only = @(0) }
+        @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0); only = @() }
+        @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1); only = @() }
+        @{ lab = '1.3'; id = '1.3.9'; text = 'Open the **Allowed locations** list and tick **Sweden Central** and **North Europe**'; kind = 'action'; labels = @('Allowed locations', 'Sweden Central', 'North Europe'); key = 'checked'; indices = @(1, 2); only = @() }
+        @{ lab = '4.3'; id = '4.3.3'; text = 'Make sure **Soft delete for all classic file shares** is enabled'; kind = 'action'; labels = @('Soft delete for all classic file shares'); key = 'checked'; indices = @(0); only = @(0) }
+        @{ lab = '5.1'; id = '5.1.3'; text = 'Toggle **Agent** to **Off**, and confirm *Discard changes* ...'; kind = 'action'; labels = @('Agent'); key = 'unchecked'; indices = @(0); only = @(0) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
@@ -1373,6 +1379,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @($items[0].$key) | Should -Be $indices
         $other = if ($key -eq 'checked') { 'unchecked' } else { 'checked' }
         $items[0].PSObject.Properties.Name | Should -Not -Contain $other
+        if ($only.Count) { @($items[0].stateOnly) | Should -Be $only }
+        else { $items[0].PSObject.Properties.Name | Should -Not -Contain 'stateOnly' }
     }
 
     # 'Under **Logs**, check **A**, **B**, **C** and **D** - ... Leave the **Health** metric (under
@@ -1504,8 +1512,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     }
 
     # Step 3.3.2 said 'Toggle **Admin user** to **Enabled**.' until the Portal pass of 2026-10-15
-    # found a check box (#229); no guide line has the switch-value shape now, and test_parse.py
-    # keeps the rule pinned on a fixture.
+    # found a check box (#229); step 5.1.3's 'Toggle **Agent** to **Off**' now pins that shape.
     It 'never clicks a state word in step 3.3.2: Access keys is opened, then Admin user is ticked' {
         $items  = @((Get-StateStep '3.3' '3.3.2').items)
         $labels = @($items | ForEach-Object { $_.labels })
