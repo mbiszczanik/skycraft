@@ -47,15 +47,16 @@ trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-L
 Write-Host "=== Lab 3.4 Validation: App Service ===" -ForegroundColor Cyan
 
 # 1. Verify Connection
-if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1 }
+if (-not (Get-AzContext)) { Write-Host "Not logged in." -ForegroundColor Red; Exit-Lab -FailureCount 1 -PassCount 0 }
 
 $failures = 0
+$script:passCount = 0
 
 # Helper function
 function Assert-Resource {
     param($Name, $Condition, $Message)
     if ($Condition) {
-        Write-Host "  [OK] $Message" -ForegroundColor Green
+        Write-Host "  [OK] $Message" -ForegroundColor Green; $script:passCount++
     } else {
         Write-Host "  [FAIL] $Message ($Name)" -ForegroundColor Red
         $script:failures++
@@ -185,7 +186,7 @@ if ($app -and $app.DefaultHostName) {
     try {
         $page = Invoke-WebRequest -Uri $url -TimeoutSec 30 -ErrorAction Stop
         if ("$($page.Content)" -match 'SkyCraft GM Dashboard') {
-            Write-Host "  [OK] $url shows the SkyCraft GM Dashboard" -ForegroundColor Green
+            Write-Host "  [OK] $url shows the SkyCraft GM Dashboard" -ForegroundColor Green; $script:passCount++
         } else {
             Write-Host "  [WARN] $url does not show the SkyCraft GM Dashboard (not counted): deploy it as in steps 3.4.3-3.4.4, and check the startup command." -ForegroundColor Yellow
         }
@@ -203,4 +204,4 @@ if ($failures -eq 0) {
 } else {
     Write-Host "FAILURE: Found $failures issues." -ForegroundColor Red
 }
-Exit-Lab -FailureCount $failures
+Exit-Lab -FailureCount $failures -PassCount $script:passCount

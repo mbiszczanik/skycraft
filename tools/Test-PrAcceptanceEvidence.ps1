@@ -12,6 +12,9 @@
     UTF-8 file containing the pull request body.
 .PARAMETER ChangedFilePath
     File containing changed paths, one per line.
+.PARAMETER HeadSha
+    Head commit of the pull request. When given, Acceptance-head must name a commit that is a prefix of it,
+    or the entry must carry 'later changes: <reason>'. Without it the commit is not compared.
 .EXAMPLE
     ./tools/Test-PrAcceptanceEvidence.ps1 -BodyPath body.md -ChangedFilePath files.txt
 .NOTES
@@ -23,7 +26,8 @@ param(
     [string]$Body = '',
     [string[]]$ChangedFile = @(),
     [string]$BodyPath,
-    [string]$ChangedFilePath
+    [string]$ChangedFilePath,
+    [string]$HeadSha = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,7 +36,8 @@ $ErrorActionPreference = 'Stop'
 function Get-PrAcceptanceVerdict {
     param(
         [AllowEmptyString()][string]$Body,
-        [AllowEmptyCollection()][string[]]$ChangedFile
+        [AllowEmptyCollection()][string[]]$ChangedFile,
+        [string]$HeadSha = ''
     )
     if (@($ChangedFile | Where-Object { Test-GatedPath -Path $_ }).Count -eq 0) {
         return [pscustomobject]@{ Pass = $true; Reason = 'no gated path changed' }
@@ -71,13 +76,27 @@ function Get-PrAcceptanceVerdict {
             return [pscustomobject]@{ Pass = $false; Reason = "$field is blocked but the body carries a closing keyword; use Refs and retain the outstanding acceptance." }
         }
     }
+    if ($HeadSha) {
+        $headValue = ([regex]::Match($text, '(?im)^ {0,3}Acceptance-head:[ \t]*(?<value>[^\r\n]*)\r?$').Groups['value'].Value -replace '[`*_]', '').Trim()
+        if ($headValue -notmatch '^(?i)(not-applicable|blocked):') {
+            $sha = [regex]::Match($headValue, '(?i)\b[0-9a-f]{7,40}\b').Value
+            if (-not $sha) {
+                return [pscustomobject]@{ Pass = $false; Reason = 'Acceptance-head names no commit (7 to 40 hex characters). See docs/lab-acceptance.md.' }
+            }
+            $why = [regex]::Match($headValue, '(?i)later changes?:[ \t]*(?<why>.*)$').Groups['why'].Value.Trim()
+            $explained = $why -match '[\p{L}\p{N}]' -and $why -notmatch '(?i)^(<.*|tbd|tba|todo|n/?a|none|unknown|see above|[-.?]+|…)\.?$'
+            if (-not $HeadSha.StartsWith($sha, [System.StringComparison]::OrdinalIgnoreCase) -and -not $explained) {
+                return [pscustomobject]@{ Pass = $false; Reason = "Acceptance-head $sha is not the PR head $($HeadSha.Substring(0, [Math]::Min(12, $HeadSha.Length))). Rerun on the head, or add 'later changes: <why they cannot affect the result>'. See docs/lab-acceptance.md." }
+            }
+        }
+    }
     return [pscustomobject]@{ Pass = $true; Reason = 'acceptance record complete; execution and outcomes require evidence review' }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ($BodyPath) { $Body = Get-Content -Raw -LiteralPath $BodyPath }
     if ($ChangedFilePath) { $ChangedFile = @(Get-Content -LiteralPath $ChangedFilePath) }
-    $result = Get-PrAcceptanceVerdict -Body $Body -ChangedFile $ChangedFile
+    $result = Get-PrAcceptanceVerdict -Body $Body -ChangedFile $ChangedFile -HeadSha $HeadSha
     Write-Host $result.Reason
     $code = if ($result.Pass) { 0 } else { 1 }
     $Host.SetShouldExit($code)

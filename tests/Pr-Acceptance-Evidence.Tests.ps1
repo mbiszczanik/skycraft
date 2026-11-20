@@ -92,3 +92,66 @@ Describe 'PR acceptance evidence completeness' {
         $LASTEXITCODE | Should -Be 1
     }
 }
+
+Describe 'Acceptance-head against the PR head' {
+    BeforeAll {
+        $script:Head = '0123456789abcdef0123456789abcdef01234567'
+    }
+
+    It 'accepts a head that is a prefix of the PR head' {
+        (Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $script:Record -HeadSha $script:Head).Pass | Should -BeTrue
+    }
+
+    It 'rejects a stale commit with no explanation and names the entry' {
+        $v = Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $script:Record -HeadSha 'fedcba9876543210fedcba9876543210fedcba98'
+        $v.Pass | Should -BeFalse
+        $v.Reason | Should -Match 'Acceptance-head 0123456789abcdef is not the PR head fedcba987654'
+    }
+
+    It 'accepts a stale commit that explains the later changes' {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', 'Acceptance-head: 0123456789abcdef, later changes: only the PR text and a comment'
+        (Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha 'fedcba9876543210fedcba9876543210fedcba98').Pass | Should -BeTrue
+    }
+
+    It 'rejects a stale commit whose later-changes note is a placeholder: <note> (review finding)' -ForEach @(
+        @{ note = '<why they cannot affect the result>' }, @{ note = 'TBD' }, @{ note = 'todo' }, @{ note = 'n/a' },
+        @{ note = 'none' }, @{ note = '...' }, @{ note = '' }
+    ) {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', "Acceptance-head: 0123456789abcdef, later changes: $note"
+        $v = Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha 'fedcba9876543210fedcba9876543210fedcba98'
+        $v.Pass | Should -BeFalse
+        $v.Reason | Should -Match 'Acceptance-head 0123456789abcdef is not the PR head'
+    }
+
+    It 'rejects an entry that names no commit' {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', 'Acceptance-head: the current branch'
+        $v = Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha $script:Head
+        $v.Pass | Should -BeFalse
+        $v.Reason | Should -Match 'names no commit'
+    }
+
+    It 'does not compare an entry marked not-applicable with a reason' {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', 'Acceptance-head: not-applicable: documentation change, nothing was tested'
+        (Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body -HeadSha $script:Head).Pass | Should -BeTrue
+    }
+
+    It 'does not compare the commit when no head is given' {
+        $body = $script:Record -replace '(?m)^Acceptance-head:.*', 'Acceptance-head: the current branch'
+        (Get-PrAcceptanceVerdict -ChangedFile $script:Paths -Body $body).Pass | Should -BeTrue
+    }
+
+    It 'exits nonzero through the CLI for a stale commit and zero for the matching head' {
+        $bodyFile = Join-Path $TestDrive 'head-body.md'
+        $pathsFile = Join-Path $TestDrive 'head-paths.txt'
+        $script:Record | Set-Content -LiteralPath $bodyFile
+        $script:Paths | Set-Content -LiteralPath $pathsFile
+        & pwsh -NoProfile -File $script:Gate -BodyPath $bodyFile -ChangedFilePath $pathsFile -HeadSha 'fedcba9876543210fedcba9876543210fedcba98' *> $null
+        $LASTEXITCODE | Should -Be 1
+        & pwsh -NoProfile -File $script:Gate -BodyPath $bodyFile -ChangedFilePath $pathsFile -HeadSha $script:Head *> $null
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'does not look at the commit of an ungated change' {
+        (Get-PrAcceptanceVerdict -ChangedFile @('docs/lab-acceptance.md') -Body '' -HeadSha $script:Head).Pass | Should -BeTrue
+    }
+}

@@ -45,11 +45,12 @@ Write-Host "=== Lab 2.3 Validation Script ===" -ForegroundColor Cyan -Background
 $context = Get-AzContext
 if (-not $context) {
     Write-Host "Not logged in. Please run Connect-AzAccount" -ForegroundColor Red
-    Exit-Lab -FailureCount 1
+    Exit-Lab -FailureCount 1 -PassCount 0
 }
 Write-Host "Connected to: $($context.Subscription.Name)" -ForegroundColor Green
 
 $validationErrors = 0
+$script:passCount = 0
 $PublicDnsZoneName = 'skycraft.example.com'
 $PrivateDnsZoneName = 'skycraft.internal'
 $PlatformRG = 'platform-skycraft-swc-rg'
@@ -62,7 +63,7 @@ $ProdRG = 'prod-skycraft-swc-rg'
 Write-Host "`n=== 1. Validating Public DNS Zone ===" -ForegroundColor Cyan
 $pubZone = Get-AzDnsZone -ResourceGroupName $PlatformRG -Name $PublicDnsZoneName -ErrorAction SilentlyContinue
 if ($pubZone) {
-    Write-Host "[OK] Public DNS Zone found: $PublicDnsZoneName" -ForegroundColor Green
+    Write-Host "[OK] Public DNS Zone found: $PublicDnsZoneName" -ForegroundColor Green; $script:passCount++
     
     foreach ($t in @('Project', 'Environment', 'CostCenter', 'Owner')) {
         if (-not $pubZone.Tags -or [string]::IsNullOrWhiteSpace($pubZone.Tags[$t])) {
@@ -84,7 +85,7 @@ if ($pubZone) {
     foreach ($r in $recs) {
         $rec = Get-AzDnsRecordSet -ResourceGroupName $PlatformRG -ZoneName $PublicDnsZoneName -Name $r.Name -RecordType $r.Type -ErrorAction SilentlyContinue
         if ($rec) {
-            Write-Host "  - [OK] Record '$($r.Name)' found ($($rec.RecordType))" -ForegroundColor Green
+            Write-Host "  - [OK] Record '$($r.Name)' found ($($rec.RecordType))" -ForegroundColor Green; $script:passCount++
             if ($r.PipName) {
                 $pip = Get-AzPublicIpAddress -ResourceGroupName $r.PipRg -Name $r.PipName -ErrorAction SilentlyContinue
                 $recorded = @($rec.Records | ForEach-Object { $_.Ipv4Address })
@@ -92,7 +93,7 @@ if ($pubZone) {
                     Write-Host "    - [FAIL] Public IP '$($r.PipName)' NOT found - cannot verify record value" -ForegroundColor Red
                     $validationErrors++
                 } elseif ($recorded -contains $pip.IpAddress) {
-                    Write-Host "    - [OK] Record '$($r.Name)' points at $($pip.IpAddress)" -ForegroundColor Green
+                    Write-Host "    - [OK] Record '$($r.Name)' points at $($pip.IpAddress)" -ForegroundColor Green; $script:passCount++
                 } else {
                     Write-Host "    - [FAIL] Record '$($r.Name)' is $($recorded -join ', ') (Expected $($pip.IpAddress) from $($r.PipName))" -ForegroundColor Red
                     $validationErrors++
@@ -115,7 +116,7 @@ if ($pubZone) {
 Write-Host "`n=== 2. Validating Private DNS Zone ===" -ForegroundColor Cyan
 $privZone = Get-AzPrivateDnsZone -ResourceGroupName $PlatformRG -Name $PrivateDnsZoneName -ErrorAction SilentlyContinue
 if ($privZone) {
-    Write-Host "[OK] Private DNS Zone found: $PrivateDnsZoneName" -ForegroundColor Green
+    Write-Host "[OK] Private DNS Zone found: $PrivateDnsZoneName" -ForegroundColor Green; $script:passCount++
 
     foreach ($t in @('Project', 'Environment', 'CostCenter', 'Owner')) {
         if (-not $privZone.Tags -or [string]::IsNullOrWhiteSpace($privZone.Tags[$t])) {
@@ -135,7 +136,7 @@ if ($privZone) {
     $hubLink = $links | Where-Object { $_.Name -eq 'hub-vnet-link' }
     if ($hubLink) {
         if ($hubLink.RegistrationEnabled -eq $false) {
-             Write-Host "  - [OK] Link 'hub-vnet-link' found (Reg: False)" -ForegroundColor Green
+             Write-Host "  - [OK] Link 'hub-vnet-link' found (Reg: False)" -ForegroundColor Green; $script:passCount++
         } else {
              Write-Host "  - [FAIL] Link 'hub-vnet-link' has Reg: True (Expected False)" -ForegroundColor Red
              $validationErrors++
@@ -150,7 +151,7 @@ if ($privZone) {
         $link = $links | Where-Object { $_.Name -eq $l }
         if ($link) {
             if ($link.RegistrationEnabled -eq $true) {
-                 Write-Host "  - [OK] Link '$l' found (Reg: True)" -ForegroundColor Green
+                 Write-Host "  - [OK] Link '$l' found (Reg: True)" -ForegroundColor Green; $script:passCount++
             } else {
                  Write-Host "  - [FAIL] Link '$l' has Reg: False (Expected True)" -ForegroundColor Red
                  $validationErrors++
@@ -166,7 +167,7 @@ if ($privZone) {
         $link = $links | Where-Object { $_.Name -eq $l }
         if ($link) {
             if ("$($link.ProvisioningState)" -eq 'Succeeded') {
-                Write-Host "  - [OK] Link '$l' provisioning state is Succeeded" -ForegroundColor Green
+                Write-Host "  - [OK] Link '$l' provisioning state is Succeeded" -ForegroundColor Green; $script:passCount++
             } else {
                 Write-Host "  - [FAIL] Link '$l' provisioning state is '$($link.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
                 $validationErrors++
@@ -188,16 +189,16 @@ function Test-LB {
     param($RgName, $LbName, $ExpectedEnvironment)
     $lb = Get-AzLoadBalancer -ResourceGroupName $RgName -Name $LbName -ErrorAction SilentlyContinue
     if ($lb) {
-        Write-Host "[OK] Load Balancer found: $LbName" -ForegroundColor Green
+        Write-Host "[OK] Load Balancer found: $LbName" -ForegroundColor Green; $script:passCount++
         if ("$($lb.ProvisioningState)" -eq 'Succeeded') {
-            Write-Host "  - [OK] Provisioning state is Succeeded" -ForegroundColor Green
+            Write-Host "  - [OK] Provisioning state is Succeeded" -ForegroundColor Green; $script:passCount++
         } else {
             Write-Host "  - [FAIL] Provisioning state is '$($lb.ProvisioningState)' (Expected Succeeded)" -ForegroundColor Red
             $script:validationErrors++
         }
         # Check SKU
         if ($lb.Sku.Name -eq 'Standard') {
-            Write-Host "  - [OK] SKU is Standard" -ForegroundColor Green
+            Write-Host "  - [OK] SKU is Standard" -ForegroundColor Green; $script:passCount++
         } else {
             Write-Host "  - [FAIL] SKU is $($lb.Sku.Name) (Expected Standard)" -ForegroundColor Red
              $script:validationErrors++
@@ -205,7 +206,7 @@ function Test-LB {
         
         # Check Probes
         if ($lb.Probes.Count -ge 2) {
-             Write-Host "  - [OK] Health Probes found ($($lb.Probes.Count))" -ForegroundColor Green
+             Write-Host "  - [OK] Health Probes found ($($lb.Probes.Count))" -ForegroundColor Green; $script:passCount++
         } else {
              Write-Host "  - [FAIL] Missing Health Probes (Found $($lb.Probes.Count))" -ForegroundColor Red
              $script:validationErrors++
@@ -213,7 +214,7 @@ function Test-LB {
 
         $wrongThreshold = @($lb.Probes | Where-Object { $_.ProbeThreshold -ne 1 })
         if ($lb.Probes.Count -ge 2 -and $wrongThreshold.Count -eq 0) {
-            Write-Host "  - [OK] Health probe thresholds are 1" -ForegroundColor Green
+            Write-Host "  - [OK] Health probe thresholds are 1" -ForegroundColor Green; $script:passCount++
         } elseif ($wrongThreshold.Count -gt 0) {
             Write-Host "  - [FAIL] Health probe threshold must be 1 on: $(($wrongThreshold | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Red
             $script:validationErrors++
@@ -221,7 +222,7 @@ function Test-LB {
 
         # Check Rules
         if ($lb.LoadBalancingRules.Count -ge 2) {
-             Write-Host "  - [OK] LB Rules found ($($lb.LoadBalancingRules.Count))" -ForegroundColor Green
+             Write-Host "  - [OK] LB Rules found ($($lb.LoadBalancingRules.Count))" -ForegroundColor Green; $script:passCount++
         } else {
              Write-Host "  - [FAIL] Missing LB Rules (Found $($lb.LoadBalancingRules.Count))" -ForegroundColor Red
              $script:validationErrors++
@@ -234,7 +235,7 @@ function Test-LB {
         # the load balancing rules of that frontend; the check documents the design.
         $snatOn = @($lb.LoadBalancingRules | Where-Object { $_.DisableOutboundSnat -ne $true })
         if ($snatOn.Count -eq 0) {
-            Write-Host "  - [OK] Outbound SNAT disabled on all $($lb.LoadBalancingRules.Count) LB rule(s)" -ForegroundColor Green
+            Write-Host "  - [OK] Outbound SNAT disabled on all $($lb.LoadBalancingRules.Count) LB rule(s)" -ForegroundColor Green; $script:passCount++
         } else {
             Write-Host "  - [FAIL] Outbound SNAT not disabled on: $(($snatOn | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Red
             $script:validationErrors++
@@ -243,14 +244,14 @@ function Test-LB {
         $egressPoolName = "$LbName-be-outbound"
         $egressPool = $lb.BackendAddressPools | Where-Object { $_.Name -eq $egressPoolName }
         if ($egressPool) {
-            Write-Host "  - [OK] Egress backend pool found: $egressPoolName" -ForegroundColor Green
+            Write-Host "  - [OK] Egress backend pool found: $egressPoolName" -ForegroundColor Green; $script:passCount++
             # Pools are compared by name (the last segment of the ID), case-insensitively.
             $egressRules = @($lb.OutboundRules | Where-Object {
                 $_.BackendAddressPool.Id -and ($_.BackendAddressPool.Id -split '/')[-1] -eq $egressPoolName
             })
             $goodRules = @($egressRules | Where-Object { $_.Protocol -eq 'All' -and $_.AllocatedOutboundPorts -gt 0 })
             if ($goodRules.Count -gt 0) {
-                Write-Host "  - [OK] Outbound rule $($goodRules[0].Name) serves $egressPoolName (All, $($goodRules[0].AllocatedOutboundPorts) ports per instance)" -ForegroundColor Green
+                Write-Host "  - [OK] Outbound rule $($goodRules[0].Name) serves $egressPoolName (All, $($goodRules[0].AllocatedOutboundPorts) ports per instance)" -ForegroundColor Green; $script:passCount++
             } elseif ($egressRules.Count -gt 0) {
                 Write-Host "  - [FAIL] Outbound rule $($egressRules[0].Name) for $egressPoolName has protocol $($egressRules[0].Protocol) and $($egressRules[0].AllocatedOutboundPorts) allocated ports (Expected All, more than 0)" -ForegroundColor Red
                 $script:validationErrors++
@@ -290,4 +291,4 @@ if ($validationErrors -eq 0) {
 } else {
     Write-Host "Lab 2.3 validation failed with $validationErrors error(s). Please review the logs above." -ForegroundColor Red -BackgroundColor Black
 }
-Exit-Lab -FailureCount $validationErrors
+Exit-Lab -FailureCount $validationErrors -PassCount $script:passCount
