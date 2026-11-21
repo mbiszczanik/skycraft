@@ -3547,6 +3547,16 @@ class DeploymentWaitTests(RunnerTestCase):
             record, _ = self.act(screen, self.GO, "Go to resource")
         self.assertEqual((record["outcome"], older.clicked, refresh.clicked), ("match", 0, 1))
 
+    def test_the_refresh_of_the_overviews_frame_is_clicked_not_a_child_frames(self) -> None:
+        screen, refresh, go = self.stuck_overview()                       # the overview is in the main frame
+        unrelated = ScreenNode()
+        child = Screen(("button", "Refresh", unrelated), tree=self.TOP_BAR)   # an Entra blade's own Refresh
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.GO], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen, child]),                 mock.patch.object(run.time, "monotonic", lambda: r.page.now),                 mock.patch.object(run, "candidates_on_screen", return_value=[]),                 mock.patch("builtins.print"):
+            record = self.quietly(lambda: r.act_on_label(step, self.GO, "Go to resource", None))
+        self.assertEqual((record["outcome"], unrelated.clicked, refresh.clicked), ("match", 0, 1))
+
     def test_an_overview_without_a_refresh_button_is_reloaded(self) -> None:
         go = ScreenNode()
         screen = Screen(tree=self.RUNNING)
