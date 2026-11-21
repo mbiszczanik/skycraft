@@ -279,3 +279,133 @@ function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemain
         $run.Calls | Should -Not -Contain 'Get-MgDomain'
     }
 }
+
+Describe 'New-LabUser.ps1 - profile properties passed to New-MgUser (#362)' {
+    BeforeAll {
+        Import-Module (Join-Path $PSScriptRoot '..' '..' '..' 'tests' 'Support' 'LabScriptStub.psm1') -Force
+
+        $requiredModules = @(
+            'Microsoft.Graph.Authentication'
+            'Microsoft.Graph.Users'
+            'Microsoft.Graph.Groups'
+            'Microsoft.Graph.Identity.DirectoryManagement'
+            'Microsoft.Graph.Identity.SignIns'
+        )
+        $stubCommands = @(
+            'Get-MgContext', 'Connect-MgGraph', 'Disconnect-MgGraph', 'Get-MgDomain', 'Get-MgUser'
+            'Get-MgGroup', 'Get-MgGroupMember', 'New-MgUser', 'New-MgGroup', 'New-MgGroupMember', 'New-MgInvitation'
+        )
+
+        # New-MgUser logs one 'UPN|keys|CompanyName|OfficeLocation' line of its bound parameters,
+        # password left out. Get-MgUser finds nothing, so the script takes the create path.
+        $stubBody = @'
+function Get-MgContext {
+    [CmdletBinding()] param()
+    [pscustomobject]@{
+        TenantId = '00000000-0000-0000-0000-000000000000'
+        Account  = 'stub-admin@contoso.example'
+        AppName  = 'Microsoft Graph Command Line Tools'
+        AuthType = 'Delegated'
+        Scopes   = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Directory.ReadWrite.All', 'Domain.Read.All', 'User.Invite.All')
+    }
+}
+function Connect-MgGraph    { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function Disconnect-MgGraph { [CmdletBinding()] param() }
+function Get-MgDomain {
+    [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest)
+    [pscustomobject]@{ Id = 'contoso.example'; IsDefault = $true; IsInitial = $true }
+}
+function Get-MgUser         { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function Get-MgGroup        { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function Get-MgGroupMember  { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function New-MgGroup        { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) [pscustomobject]@{ DisplayName = 'stub'; Id = 'g' } }
+function New-MgGroupMember  { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function New-MgInvitation   { [CmdletBinding()] param([Parameter(ValueFromRemainingArguments)]$Rest) }
+function New-MgUser {
+    [CmdletBinding()]
+    param(
+        $UserPrincipalName, $DisplayName, $PasswordProfile, $AccountEnabled, $MailNickname,
+        $UsageLocation, $Department, $JobTitle, $CompanyName, $OfficeLocation
+    )
+    $keys = @($PSBoundParameters.Keys | Where-Object { $_ -notin 'PasswordProfile', 'ErrorAction' } | Sort-Object)
+    Add-Content -LiteralPath $env:SKYCRAFT_STUB_LOG -Value "$UserPrincipalName|$($keys -join ',')|$CompanyName|$OfficeLocation"
+    [pscustomobject]@{ DisplayName = $DisplayName; Id = 'u' }
+}
+'@
+
+        $stub = Initialize-LabScriptStub -Name 'SkyCraftGraphProfileStub' -Command $stubCommands `
+            -Body $stubBody -RequiredModule $requiredModules
+        $script:ProfileStubDir = $stub.Directory
+
+        function Invoke-ProfileRun {
+            param([string[]]$ArgumentList, [string]$LogPath)
+            Invoke-LabScriptWithStub -Stub $stub -ScriptPath $script:ScriptPath -ArgumentList $ArgumentList -Environment @{
+                SKYCRAFT_STUB_LOG              = $LogPath
+                SKYCRAFT_GRAPH_TENANT_ID       = ''
+                SKYCRAFT_GRAPH_CLIENT_ID       = ''
+                SKYCRAFT_GRAPH_CLIENT_SECRET   = ''
+                SKYCRAFT_GRAPH_CERT_THUMBPRINT = ''
+                SKYCRAFT_UNATTENDED            = ''
+            }
+        }
+
+        $logPath = Join-Path $stub.Directory 'create.log'
+        $script:ProfileRun = Invoke-ProfileRun -ArgumentList @() -LogPath $logPath
+        $script:ProfileCalls = @{}
+        if (Test-Path -LiteralPath $logPath) {
+            foreach ($line in Get-Content -LiteralPath $logPath) {
+                $parts = $line -split '\|'
+                $script:ProfileCalls[($parts[0] -split '@')[0]] = [pscustomobject]@{ Keys = $parts[1]; Company = $parts[2]; Office = $parts[3] }
+            }
+        }
+
+        $demoLog = Join-Path $stub.Directory 'demo.log'
+        $script:DemoRun = Invoke-ProfileRun -ArgumentList '-DemoMode' -LogPath $demoLog
+        $script:DemoCalled = Test-Path -LiteralPath $demoLog
+    }
+
+    AfterAll {
+        if ($script:ProfileStubDir) { Remove-Item -LiteralPath $script:ProfileStubDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'runs the real script against the stub and creates the three users' {
+        $script:ProfileRun.Refused | Should -BeFalse
+        # The stub finds no users or groups, so the membership step reports errors; only the user step matters here.
+        $script:ProfileRun.Output | Should -Match 'Created user: Malfurion Stormrage' -Because "output was:`n$($script:ProfileRun.Output)"
+        $script:ProfileCalls.Keys.Count | Should -Be 3
+    }
+
+    It 'passes Malfurion four profile properties: Department, JobTitle, CompanyName and OfficeLocation' {
+        $call = $script:ProfileCalls['malfurion.stormrage']
+        $call.Keys | Should -Match 'CompanyName'
+        $call.Keys | Should -Match 'Department'
+        $call.Keys | Should -Match 'JobTitle'
+        $call.Keys | Should -Match 'OfficeLocation'
+        $call.Company | Should -Be 'SkyCraft'
+        $call.Office | Should -Be 'Remote'
+    }
+
+    It 'passes Khadgar and Chromie Department and JobTitle only, with no CompanyName or OfficeLocation' {
+        foreach ($name in 'khadgar.archmage', 'chromie.timewalker') {
+            $call = $script:ProfileCalls[$name]
+            $call.Keys | Should -Match 'Department'
+            $call.Keys | Should -Match 'JobTitle'
+            $call.Keys | Should -Not -Match 'CompanyName'
+            $call.Keys | Should -Not -Match 'OfficeLocation'
+        }
+    }
+
+    It 'leaves a profile key out instead of passing it empty when the user entry has none' {
+        # Khadgar and Chromie hold neither key in the script's table; an empty bound value would show in Keys.
+        foreach ($name in 'khadgar.archmage', 'chromie.timewalker') {
+            $script:ProfileCalls[$name].Company | Should -BeNullOrEmpty
+            $script:ProfileCalls[$name].Office | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not call New-MgUser in -DemoMode' {
+        $script:DemoRun.Refused | Should -BeFalse
+        $script:DemoRun.ExitCode | Should -Be 0 -Because "output was:`n$($script:DemoRun.Output)"
+        $script:DemoCalled | Should -BeFalse
+    }
+}

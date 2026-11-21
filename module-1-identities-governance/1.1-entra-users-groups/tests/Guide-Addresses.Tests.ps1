@@ -158,7 +158,8 @@ function New-MgUser {
     [CmdletBinding()]
     param(
         [string]$UserPrincipalName, [string]$DisplayName, $PasswordProfile, $AccountEnabled,
-        [string]$MailNickname, [string]$UsageLocation, [string]$Department, [string]$JobTitle
+        [string]$MailNickname, [string]$UsageLocation, [string]$Department, [string]$JobTitle,
+        [string]$CompanyName, [string]$OfficeLocation
     )
     Write-StubCall -Name "New-MgUser|$UserPrincipalName"
     if ($env:SKYCRAFT_STUB_CREATE_FAIL -eq 'all' -or $UserPrincipalName -in ($env:SKYCRAFT_STUB_CREATE_FAIL -split ',')) {
