@@ -9,6 +9,13 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0](https://github.com/mbiszczanik/skycraft/compare/v0.24.0...v0.25.0) (2026-11-21)
+
+
+### Features
+
+* **lab-cycle:** assert that the subscription budget is gone after the teardown (Refs [#526](https://github.com/mbiszczanik/skycraft/issues/526)) ([#588](https://github.com/mbiszczanik/skycraft/issues/588)) ([f746d14](https://github.com/mbiszczanik/skycraft/commit/f746d14cca559ac4419b2b5a2bdd68a1f64d2023))
+
 ## [0.24.0](https://github.com/mbiszczanik/skycraft/compare/v0.23.0...v0.24.0) (2026-11-17)
 
 
