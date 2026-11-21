@@ -118,12 +118,15 @@ has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person as
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
 a line of the accessibility tree, in the main frame or a child frame within the window's columns,
-whose whole text starts with 'Deployment is in progress' (the deployment overview) or 'Deployment
-in progress' (its notification; DEPLOYMENT_RUNNING_TEXT, which says where the texts come from and
-that no run has confirmed them yet). The console says so once, and how long the run waits at most
-(--deployment-timeout-minutes, 30 by default), then every DEPLOYMENT_SAY_S how long it has waited.
-The label is looked for every DEPLOYMENT_POLL_MS meanwhile; a read of the screen whose main frame
-cannot be read or shows nothing says nothing, and the wait goes on. Once the deployment has ended,
+whose whole text starts with 'Deployment is in progress' (the deployment overview), 'Deployment
+in progress' or 'Initializing deployment' (its notification; DEPLOYMENT_RUNNING_TEXT, which says
+where the texts come from and that no run has confirmed them yet). The console says so once, and
+how long the run waits at most (--deployment-timeout-minutes, 30 by default), then every
+DEPLOYMENT_SAY_S how long it has waited. The label is looked for every DEPLOYMENT_POLL_MS
+meanwhile; a read of the screen whose main frame cannot be read or shows nothing says nothing, and
+the wait goes on. While the overview itself says 'Deployment is in progress', it is refreshed every
+DEPLOYMENT_REFRESH_S between polls (refresh_overview: the last visible Refresh button, else a
+reload of the page), as it can keep that title after ARM has finished. Once the deployment has ended,
 the label is looked for FIND_TIMEOUT_MS again, then as above. A failure ('Your deployment failed',
 'Deployment failed') ends the item as unknown with the Portal's text and the line after it,
 scrubbed as any observed text, and so does a deployment still running after the longest wait; the
@@ -378,7 +381,13 @@ BLADE_EMPTY_TIMEOUT_MS = 20000
 # 'Deployment failed'. No guide screenshot shows either and no run has read them yet: the first
 # supervised run of a lab that deploys confirms them (blade-*.aria.txt keeps what a lookup that
 # found nothing read). A complete or succeeded deployment is none: nothing is waited for.
-DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress)\b", re.IGNORECASE)
+# The Chrome pass of Module 2 (2026-10-15, #328) saw the overview texts and a notification that
+# reads 'Initializing deployment...' first.
+DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress|initializing deployment)\b",
+                                     re.IGNORECASE)
+# The overview's own running title: it can stay after ARM has finished until its Refresh is
+# clicked (Bastion, a private DNS zone, a load balancer; #328). A notification updates by itself.
+DEPLOYMENT_OVERVIEW_RUNNING = re.compile(r"^deployment is in progress\b", re.IGNORECASE)
 DEPLOYMENT_FAILED_TEXT = re.compile(r"^(?:your deployment failed|deployment failed)\b", re.IGNORECASE)
 DEPLOYMENT_ENDED_TEXT = re.compile(r"^(?:your deployment is complete|deployment succeeded)\b", re.IGNORECASE)
 DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPLOYMENT_ENDED_TEXT)
@@ -388,6 +397,10 @@ DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPL
 DEPLOYMENT_TIMEOUT_MIN = 30
 DEPLOYMENT_POLL_MS = 5000
 DEPLOYMENT_SAY_S = 60
+# How often a wait refreshes a deployment overview still running: its Refresh button, or a reload
+# of the page when there is none.
+DEPLOYMENT_REFRESH_S = 30
+REFRESH = "Refresh"
 # A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
 # reads 'undefined' while the blade's content is still loading.
 BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
@@ -2175,7 +2188,9 @@ class Runner:
         has waited. Returns (the seconds it waited, what it found); (None, None) at once when no
         deployment is running, so a step without one waits no longer. An Ambiguous look counts as
         none while the deployment runs, and so does a read of the screen that says nothing
-        (texts_of: the main frame unreadable or empty): the wait goes on.
+        (texts_of: the main frame unreadable or empty): the wait goes on. While the last readable
+        screen shows the overview's running title (DEPLOYMENT_OVERVIEW_RUNNING), it is refreshed
+        every DEPLOYMENT_REFRESH_S between polls (refresh_overview), saying so once.
 
         A failure (DEPLOYMENT_FAILED_TEXT) raises DeploymentStopped with the Portal's text, which
         write() scrubs as any observed text, but only a failure that is new. The failures on screen
@@ -2207,7 +2222,9 @@ class Runner:
         limit = self.deployment_minutes
         print(f"A Portal deployment is still running: waiting up to {limit} min for it to end "
               f"before giving up on {what}.")
-        started = said = time.monotonic()
+        started = said = refreshed = time.monotonic()
+        overview = any(DEPLOYMENT_OVERVIEW_RUNNING.match(text.strip()) for text in texts)
+        told = False
         while True:
             try:
                 found = look()
@@ -2219,6 +2236,7 @@ class Runner:
                 return waited, found
             texts = screen_texts(self.page)
             if texts is not None:
+                overview = any(DEPLOYMENT_OVERVIEW_RUNNING.match(text.strip()) for text in texts)
                 running, failures = deployment_state(texts)
                 if running is None:
                     new = [failure for failure in failures if failure not in earlier]
@@ -2236,7 +2254,41 @@ class Runner:
                 print(f"  still waiting for the deployment: {duration(waited)} of up to {limit} min")
             if self.page.is_closed():
                 raise PageClosed("the browser window was closed")
+            if overview and time.monotonic() - refreshed >= DEPLOYMENT_REFRESH_S:
+                refreshed = time.monotonic()
+                how = self.refresh_overview()
+                if how and not told:
+                    told = True
+                    print(f"The overview still says the deployment is in progress: {how}, "
+                          f"and again every {DEPLOYMENT_REFRESH_S} s while it does.")
             self.page.wait_for_timeout(DEPLOYMENT_POLL_MS)
+
+    def refresh_overview(self) -> str | None:
+        """Refresh a deployment overview that may lag ARM (#328): click the last visible Refresh
+        button of the frame that holds the 'Deployment is in progress' heading (the newest blade's;
+        another frame's Refresh belongs to another blade), or reload the page when that frame shows
+        none. What it did, or None when the click or reload failed (the next poll reads the screen
+        as it is)."""
+        try:
+            buttons: list[Locator] = []
+            for frame in all_frames(self.page):
+                try:
+                    snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+                    if not any(DEPLOYMENT_OVERVIEW_RUNNING.match(snapshot_text(line).strip())
+                               for line in snapshot.splitlines()):
+                        continue
+                    buttons = visible_in(frame.get_by_role("button", name=REFRESH, exact=True),
+                                         self.page.viewport_size)
+                except PlaywrightError:     # the frame detached or navigated: not the overview's
+                    continue
+                break
+            if buttons:
+                buttons[-1].click(timeout=FIND_TIMEOUT_MS)
+                return f"clicked its {REFRESH}"
+            self.page.reload(wait_until="domcontentloaded")
+            return "reloaded the page"
+        except PlaywrightError:
+            return None
 
     def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
                        renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
