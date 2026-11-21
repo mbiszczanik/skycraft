@@ -6696,7 +6696,7 @@ class ListOptionTests(RunnerTestCase):
 
     def test_a_missing_option_saves_the_list_tree_scrubbed(self) -> None:
         tree = ('- listbox "Regions":\n  - option "(Europe) North Europe"\n'
-                '  - option "Item 3f2a9c1e-8b4d-4e6f-9a1b-2c3d4e5f6a7b"')
+                '  - option "Item 11111111-2222-4333-8444-555555555555"')
         screen, page, box, _, _, popup = self.paged([["(Europe) North Europe"]])
         popup.tree = tree
         seen = []
@@ -6711,7 +6711,7 @@ class ListOptionTests(RunnerTestCase):
         self.quietly(lambda: r.save_list_tree(step, {"line": 7}, seen[0]))
         saved = (r.run_dir / "list-9.9.1-7.aria.txt").read_text(encoding="utf-8")
         self.assertIn("(Europe) North Europe", saved)
-        self.assertNotIn("3f2a9c1e", saved)
+        self.assertNotIn("11111111-2222", saved)
         self.assertIn("<id>", saved)
 
 
