@@ -2954,10 +2954,23 @@ class Runner:
 
     def refresh_overview(self) -> str | None:
         """Refresh a deployment overview that may lag ARM (#328): click the last visible Refresh
-        button (the newest blade's), or reload the page when none is visible. What it did, or None
-        when the click or reload failed (the next poll reads the screen as it is)."""
+        button of the frame that holds the 'Deployment is in progress' heading (the newest blade's;
+        another frame's Refresh belongs to another blade), or reload the page when that frame shows
+        none. What it did, or None when the click or reload failed (the next poll reads the screen
+        as it is)."""
         try:
-            buttons = visible_across_frames(self.page, lambda f: f.get_by_role("button", name=REFRESH, exact=True))
+            buttons: list[Locator] = []
+            for frame in all_frames(self.page):
+                try:
+                    snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+                    if not any(DEPLOYMENT_OVERVIEW_RUNNING.match(snapshot_text(line).strip())
+                               for line in snapshot.splitlines()):
+                        continue
+                    buttons = visible_in(frame.get_by_role("button", name=REFRESH, exact=True),
+                                         self.page.viewport_size)
+                except PlaywrightError:     # the frame detached or navigated: not the overview's
+                    continue
+                break
             if buttons:
                 buttons[-1].click(timeout=FIND_TIMEOUT_MS)
                 return f"clicked its {REFRESH}"
