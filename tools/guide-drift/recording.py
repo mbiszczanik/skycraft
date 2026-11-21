@@ -5,7 +5,8 @@ run.py drives Chromium through Playwright and imports these; keeping them here l
 tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has no Playwright.
 
   Redactor             keeps the tenant domain, tenant id and guest addresses out of the
-                       committed recording, and restores them when a recorded name is looked up
+                       committed recording, and restores them when a recorded name is looked up;
+                       its view_url leaves ids and generated resource names out of a view (#342)
   expand_env           expands '${NAME}' references from the environment at the moment of use
   env_secrets          the '${NAME}' references whose values are addresses (for the Redactor)
   missing_env          the '${NAME}' references the environment does not set
@@ -26,6 +27,12 @@ tests (tools/guide-drift/tests/test_redact.py) run on the CI runner, which has n
   rejected_candidates  the reference set of candidates not chosen: only the Portal's labels,
                        without tenant data (#317)
   skip_reason          why the recording skips a step ('"skip": "<reason>"', #200), or None
+  late_minutes         how long the recording lets a view that lists a label only later be refreshed
+                       for ('"lateLabels": {"<label>": <minutes>}', #342), or None
+  late_label_problems  every 'lateLabels' entry that is not whole minutes from 1 to 60 (run.py
+                       refuses to start on one, as for a skip without a reason)
+  subscription_steps   the steps a run performs whose labels hold '[yoursubscription]' (run.py
+                       refuses to start on one without the subscription's name, #342)
   view_blade           the blade part of a recorded view, what a step's start is compared by (#207)
   same_blade           whether two blades are the same, regardless of case and of a trailing
                        'overview' (#207)
@@ -132,6 +139,14 @@ GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 # A GUID written without hyphens: 32 hex digits that are not part of a longer run, also right
 # after a percent-encoded character ('%2F' and the id).
 HEX_ID = re.compile(r"(?:(?<=%[0-9a-fA-F]{2})|(?<![0-9a-fA-F]))[0-9a-fA-F]{32}(?![0-9a-fA-F])")
+# A generated resource name in a path (#342): 20 or more hex digits, in either case, that make a
+# whole path segment, after '/' or a percent-encoded one ('%2F', '%2f', double-encoded '%252F'),
+# with no letter or digit after them, also none percent-encoded ('%61'). The Portal names a Policy
+# assignment with 24 hex digits, and step 1.3.10's Compliance view carries it after
+# 'policyassignments%2F'. Masked as OBJECT_ID with its '/' kept (Redactor.view_url, scrub); a run
+# of fewer digits, or one inside a longer word, is kept.
+RESOURCE_HEX_NAME = re.compile(r"(?P<sep>/|%(?:25)*2[fF])[0-9a-fA-F]{20,}(?![0-9A-Za-z])"
+                               r"(?!%(?:25)*(?:3[0-9]|[46][1-9a-fA-F]|[57][0-9aA]))")
 DECODE_ROUNDS = 5
 
 
@@ -191,8 +206,11 @@ class Redactor:
     becomes '[yourtenant]', the guides' own placeholder, when it is at least 4 characters long;
     a shorter one would clobber ordinary words. The tenant's display name ('Contoso Ltd', shown
     in the directory switcher and on the Entra overview) becomes '[tenantname]' under the same
-    rule. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it fails on any literal e-mail
-    address, *.onmicrosoft.com domain, guest user principal name or GUID in a recording.
+    rule, and the run's subscription name ('Example Subscription', shown on the subscription's
+    blades and in the list of subscriptions) becomes '[yoursubscription]', the guides' own
+    placeholder, under it as well. tests/Guide-Drift-Recording.Tests.ps1 is the backstop: it
+    fails on any literal e-mail address, *.onmicrosoft.com domain, guest user principal name or
+    GUID in a recording.
 
     Restored values are lower case, as the Portal shows domains and ids (the display name comes
     back as given); a display name that spells the prefix in another case ('Contoso') comes back
@@ -202,13 +220,14 @@ class Redactor:
     TENANT = "[tenantid]"
     NAME = "[tenantname]"
     PREFIX = "[yourtenant]"
+    SUBSCRIPTION = "[yoursubscription]"
     # Every fixed token above; an address from the environment becomes its '${NAME}' (ENV_REF).
     # A new token goes here too, so that REDACTION_TOKENS covers it (#211).
-    TOKENS = frozenset({DOMAIN, TENANT, NAME, PREFIX})
+    TOKENS = frozenset({DOMAIN, TENANT, NAME, PREFIX, SUBSCRIPTION})
     PREFIX_MIN = 4
 
     def __init__(self, domain: str, tenant_id: str, secrets: dict[str, str] | None = None,
-                 tenant_name: str = "") -> None:
+                 tenant_name: str = "", subscription_name: str = "") -> None:
         # The Portal shows domains in lower case; restore() must give back what is on screen.
         self.domain = domain.lower()
         self.tenant_id = tenant_id.lower()
@@ -229,6 +248,11 @@ class Redactor:
         if len(name) >= self.PREFIX_MIN:
             self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])", re.IGNORECASE),
                                 self.NAME, name))
+        # The subscription's name under the same rule, before the prefix it may contain.
+        subscription = subscription_name.strip()
+        if len(subscription) >= self.PREFIX_MIN:
+            self._pairs.append((re.compile(rf"(?<![\w-]){re.escape(subscription)}(?![\w-])", re.IGNORECASE),
+                                self.SUBSCRIPTION, subscription))
         # Last, so the full domain is already a token.
         prefix = self.domain.split(".", 1)[0]
         if len(prefix) >= self.PREFIX_MIN:
@@ -280,19 +304,24 @@ class Redactor:
 
     def view_url(self, url: str) -> str | None:
         """The Portal view without the tenant pin ('#@<tenant>/'), query strings (before or inside
-        the fragment), object ids (GUIDs, with or without hyphens: '<id>') or tenant data, for the
-        recording; a resume opens it again (run.py, Runner.view_address). None when the view
-        cannot be kept without tenant or personal data: once fully percent-decoded (fully_decoded:
-        '%40' and the Portal's double-encoded '%2540' are '@'), it still holds an address or a
-        user principal name ('@', '#EXT#'), a query, an id, or text the Redactor would replace (an
-        encoded tenant name, 'Contoso%20Ltd'); or it does not stop decoding."""
+        the fragment), object ids (GUIDs, with or without hyphens: '<id>'), generated resource
+        names (RESOURCE_HEX_NAME, #342: a path segment of 20 or more hex digits, as a Policy
+        assignment's name follows 'policyassignments%2F', becomes '<id>' after its '/') or tenant
+        data, for the recording; a resume opens it again (run.py, Runner.view_address). None when
+        the view cannot be kept without tenant or personal data: once fully percent-decoded
+        (fully_decoded: '%40' and the Portal's double-encoded '%2540' are '@'), it still holds an
+        address or a user principal name ('@', '#EXT#'), a query, an id or such a name (one partly
+        percent-encoded is whole only once decoded), or text the Redactor would replace (an encoded
+        tenant name, 'Contoso%20Ltd'); or it does not stop decoding."""
         parts = urlsplit(url)
         fragment = re.sub(r"^@[^/]*/?", "", parts.fragment).split("?", 1)[0]
         view = f"{parts.scheme}://{parts.netloc}{parts.path}#{fragment}"
-        view = self.redact(HEX_ID.sub("<id>", GUID.sub("<id>", view)))
+        view = HEX_ID.sub("<id>", GUID.sub("<id>", view))
+        view = self.redact(RESOURCE_HEX_NAME.sub(lambda m: m.group("sep") + "<id>", view))
         decoded = fully_decoded(view)
         if (decoded is None or "@" in decoded or "?" in decoded or "#ext#" in decoded.casefold()
-                or GUID.search(decoded) or HEX_ID.search(decoded) or self.redact(decoded) != decoded):
+                or GUID.search(decoded) or HEX_ID.search(decoded) or RESOURCE_HEX_NAME.search(decoded)
+                or self.redact(decoded) != decoded):
             return None
         return view
 
@@ -441,6 +470,60 @@ def skip_reason(recording: dict, step_id: str) -> str | None:
         raise ValueError(f"step {step_id}: 'skip' must be the reason the step is skipped, "
                          f"a non-empty string, not {json.dumps(reason)}")
     return reason.strip()
+
+
+LATE_MINUTES_MAX = 60
+
+
+def late_minutes(recording: dict, step_id: str, label: str) -> int | None:
+    """How many minutes the recording lets step `step_id` refresh a view that does not list
+    `label` yet ('"lateLabels": {"Require-Environment-Tag-RG": 30}', #342: a Policy compliance
+    grid fills in minutes after an assignment is made); None when the entry does not say, which
+    is no wait at all. A value that late_label_problems rejects is none too: run.py refuses to
+    start on it before any step runs."""
+    late = recording["steps"].get(step_id, {}).get("lateLabels")
+    minutes = late.get(label) if isinstance(late, dict) else None
+    return minutes if is_late_minutes(minutes) else None
+
+
+def is_late_minutes(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= LATE_MINUTES_MAX
+
+
+def late_label_problems(recording: dict) -> list[str]:
+    """Why a step entry's 'lateLabels' cannot be used, one text per fault: it is not an object of
+    label to minutes, or a label's minutes are not a whole number from 1 to 60 (0, text such as
+    "30", a fraction and a boolean are not). run.py refuses to start on any, as on a 'skip'
+    without a reason (skip_reason), so a typo cannot read as 'wait for nothing' or 'wait for
+    ever'; tests/Guide-Drift-Recording.Tests.ps1 also requires each label to be one of its
+    step's labels. Empty when every entry is well-formed."""
+    problems: list[str] = []
+    for step_id, entry in recording.get("steps", {}).items():
+        if "lateLabels" not in entry:
+            continue
+        late = entry["lateLabels"]
+        if not isinstance(late, dict):
+            problems.append(f"step {step_id}: 'lateLabels' must be an object of label to minutes, "
+                            f"not {json.dumps(late)}")
+            continue
+        for label, minutes in late.items():
+            if not is_late_minutes(minutes):
+                problems.append(f"step {step_id}: 'lateLabels' '{label}' must be whole minutes from 1 to "
+                                f"{LATE_MINUTES_MAX}, not {json.dumps(minutes)}")
+    return problems
+
+
+def subscription_steps(steps: dict, recording: dict) -> list[str]:
+    """The ids of the steps a run performs (a portal part, no 'skip' in the recording) with a label
+    that holds Redactor.SUBSCRIPTION, the guide's '[yoursubscription]' (1.3.18 item 2, #342). Only
+    the run's subscription name finds such a label (Redactor.restore) and keeps it out of what the
+    run writes; without it the label is not found, and the person's pick of the subscription's link
+    would reach the public recording as the literal name. run.py refuses to start (254) when this is
+    not empty and --subscription-name is missing or too short to redact (Redactor.PREFIX_MIN)."""
+    return [step["id"] for step in steps.get("steps", [])
+            if step.get("portal") and skip_reason(recording, step["id"]) is None
+            and any(Redactor.SUBSCRIPTION in label for item in step.get("items", ())
+                    for label in item.get("labels", ()))]
 
 
 def view_blade(view: str | None) -> str | None:
@@ -800,7 +883,9 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
          every typed secret (longest first) and every credential ('AccountKey=...', 'sig=...')
          as SECRET
       3. object ids (GUIDs, with hyphens, '%2D' or none) as OBJECT_ID, the tenant id as the
-         Redactor's '[tenantid]': first, so that 'contoso<32 hex digits>' loses the prefix too
+         Redactor's '[tenantid]': first, so that 'contoso<32 hex digits>' loses the prefix too;
+         then a generated resource name in a path (RESOURCE_HEX_NAME, #342: 20 or more hex
+         digits as a path segment, after '/' or '%2F', a Policy assignment's name) as OBJECT_ID
       4. tenant data, also as a regular expression escapes it, as the Redactor's tokens
       5. every e-mail address left (outside the tenant's domain) as EMAIL
       6. a value a Playwright call typed ('fill("[typed]")') and an element's value attribute
@@ -816,7 +901,9 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
     base64, in a JSON escape) is not recognised. Text that only looks like one is masked too:
     'Group@2x.png' becomes '<email>', 'ResetPassword=true' becomes 'ResetPassword=[secret]', a
     quoted argument of 'type(' or 'fill(' in prose becomes '"[typed]"', ' value=x' becomes
-    ' value="[value]"', and 32 hex digits that are no id become '<id>'."""
+    ' value="[value]"', and 32 hex digits that are no id become '<id>', as does any path segment
+    of 20 or more hex digits. A generated resource name outside a path (a grid cell, prose) is
+    not recognised."""
     if text is None:
         return None
     protected = redactor.tokens
@@ -832,6 +919,7 @@ def scrub(text: str | None, redactor: Redactor, secrets: set[str] | frozenset[st
         text = sub_outside(CREDENTIAL, lambda m: m.group("head") + SECRET, text, protected)
         for pattern in (GUID_ANY, HEX_ID):
             text = sub_outside(pattern, object_id, text, protected)
+        text = sub_outside(RESOURCE_HEX_NAME, lambda m: m.group("sep") + OBJECT_ID, text, protected)
         text = redactor.redact(redactor.redact_escaped(text))
         text = sub_outside(EMAIL_ADDRESS, EMAIL, text, protected)
         text = TYPED_CALL.sub(lambda m: f'{m.group("call")}("{TYPED}"', text)

@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recording  # noqa: E402
 from decide import Candidate  # noqa: E402
 from recording import (Redactor, env_secrets, expand_env, field_action, missing_env,  # noqa: E402
-                       rejected_candidates, resolve_value, resource_name, same_blade, skip_reason,
-                       start_blade, value_action, view_blade, write_json)
+                       late_label_problems, late_minutes, rejected_candidates, resolve_value,
+                       resource_name, same_blade, skip_reason, start_blade, value_action, view_blade, write_json)
 
 DOMAIN = "contoso.onmicrosoft.com"
 TENANT = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -104,6 +104,21 @@ class RedactorTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(Redactor(DOMAIN, TENANT, tenant_name=name).redact("Abc corp"), "Abc corp")
 
+    def test_the_subscription_name_becomes_yoursubscription_and_back(self) -> None:
+        redactor = Redactor(DOMAIN, TENANT, subscription_name="Example Subscription")
+        redacted = redactor.redact("example subscription | Overview (Example Subscription-Archive)")
+        # Case-insensitive, and only as a whole name, like the tenant's display name.
+        self.assertEqual(redacted, "[yoursubscription] | Overview (Example Subscription-Archive)")
+        self.assertEqual(redactor.restore("[yoursubscription] | Overview"), "Example Subscription | Overview")
+        self.assertIsNotNone(redactor.matcher("[yoursubscription]").search("EXAMPLE SUBSCRIPTION"))
+        self.assertEqual(redactor.redact(redacted), redacted)
+
+    def test_a_short_subscription_name_is_left_alone(self) -> None:
+        for name in ("", "  ", "Dev"):
+            with self.subTest(name=name):
+                self.assertEqual(Redactor(DOMAIN, TENANT, subscription_name=name).redact("Dev subscription"),
+                                 "Dev subscription")
+
     def test_guest_upn_becomes_the_upn_token_and_restores(self) -> None:
         upn = f"me_example.com#EXT#@{DOMAIN}"
         redacted = self.redactor.redact(upn)
@@ -131,9 +146,42 @@ class RedactorTests(unittest.TestCase):
                 self.assertEqual(self.redactor.view_url(f"https://portal.azure.com/#{raw}"),
                                  f"https://portal.azure.com/#{raw[:raw.index('id/') + 3]}"
                                  f"{'%2F' if '%2F' in raw else ''}<id>")
-        # A longer run of hex digits is no id.
-        longer = "https://portal.azure.com/#view/Blade/hash/" + "a" * 40
+        # A longer run of hex digits is no GUID; inside a longer segment it is kept (as a whole
+        # segment it is a generated resource name: test_view_url_masks_a_generated_resource_name).
+        longer = "https://portal.azure.com/#view/Blade/hash/x" + "a" * 40
         self.assertEqual(self.redactor.view_url(longer), longer)
+
+    # A made-up Policy assignment name: the Portal names an assignment with 24 hex digits.
+    ASSIGNMENT = "0123456789abcdef01234567"
+
+    def test_view_url_masks_a_generated_resource_name(self) -> None:
+        # Step 1.3.10's Compliance view names the assignment in its address (#342).
+        base = "https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyComplianceDetail.ReactView/assignmentId/"
+        for raw, kept in (
+                (f"%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2F{self.ASSIGNMENT}/scopes~/x",
+                 "%2Fproviders%2Fmicrosoft.authorization%2Fpolicyassignments%2F<id>/scopes~/x"),
+                (f"%2Fproviders%2Fpolicyassignments%2f{self.ASSIGNMENT.upper()}",       # lower-case '%2f'
+                 "%2Fproviders%2Fpolicyassignments%2f<id>"),
+                (f"providers/policyassignments/{self.ASSIGNMENT}", "providers/policyassignments/<id>"),
+                (f"%252Fpolicyassignments%252F{self.ASSIGNMENT}%252Fx", "%252Fpolicyassignments%252F<id>%252Fx"),
+                ("hash/" + "a" * 40, "hash/<id>"),
+                # A double-encoded id is no HEX_ID ('2F' is hex too), but a whole segment all the same.
+                ("%252F1111111122223333444455555555aaaa", "%252F<id>"),
+                (f"%2F{self.ASSIGNMENT}%2Fx", "%2F<id>%2Fx"),
+                ("name/" + "1" * 20, "name/<id>")):
+            with self.subTest(raw=raw):
+                self.assertEqual(self.redactor.view_url(base + raw), base + kept)
+        # Partly encoded, it is a whole segment only once decoded: recorded as none.
+        for raw in (f"name/{self.ASSIGNMENT}%31", f"name/{self.ASSIGNMENT}%2561"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(self.redactor.view_url(base + raw))
+
+    def test_view_url_keeps_a_short_hex_run_and_one_inside_a_word(self) -> None:
+        for raw in ("name/" + "1" * 19, f"name/{self.ASSIGNMENT}x", f"name/x{self.ASSIGNMENT}",
+                    "name/Microsoft.Authorization", "name/deadbeef"):
+            with self.subTest(raw=raw):
+                url = f"https://portal.azure.com/#view/Blade/{raw}"
+                self.assertEqual(self.redactor.view_url(url), url)
 
     def test_view_url_keeps_nothing_that_holds_personal_or_tenant_data_once_decoded(self) -> None:
         for fragment in ("view/User/upn/someone%40example.com",            # an address, encoded
@@ -147,7 +195,6 @@ class RedactorTests(unittest.TestCase):
                          "view/User/upn/someone%2540example.com",
                          "view/User/u/someone%2540example%252Ecom",
                          "view/User/upn/someone_example.com%2523EXT%2523",
-                         "view/Blade/id/%252F1111111122223333444455555555aaaa",
                          "view/User/upn/someone%EF%BC%A0example.com",      # a fullwidth at sign
                          "view/User/upn/x%2525252525252540example.com"):   # never stops decoding
             with self.subTest(fragment=fragment):
@@ -509,6 +556,56 @@ class SkipReasonTests(unittest.TestCase):
         for value in ("", "  \t", None, 0, 1, True, False, [], ["optional"], {}):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "step 9.9.1: 'skip' must be"):
                 skip_reason(self.recording({"skip": value}), "9.9.1")
+
+
+class SubscriptionStepsTests(unittest.TestCase):
+    """The steps a run performs whose labels name the run's subscription as '[yoursubscription]'
+    (#342): without the subscription's name the run cannot find, or redact, it."""
+
+    @staticmethod
+    def steps(*labels_by_step: tuple[str, bool, list[str]]) -> dict:
+        return {"steps": [{"id": step, "portal": portal, "items": [{"kind": "navigation", "labels": labels}]}
+                          for step, portal, labels in labels_by_step]}
+
+    def test_a_portal_step_with_the_token_in_a_label_needs_the_name(self) -> None:
+        steps = self.steps(("9.9.1", True, ["Subscriptions"]), ("9.9.2", True, ["Cost analysis", "[yoursubscription]"]),
+                           ("9.9.3", True, ["[yoursubscription] | Overview"]))
+        self.assertEqual(recording.subscription_steps(steps, {"steps": {}}), ["9.9.2", "9.9.3"])
+
+    def test_a_step_without_a_portal_part_or_skipped_by_the_recording_does_not(self) -> None:
+        steps = self.steps(("9.9.1", False, ["[yoursubscription]"]), ("9.9.2", True, ["[yoursubscription]"]))
+        self.assertEqual(recording.subscription_steps(steps, {"steps": {"9.9.2": {"skip": "Optional"}}}), [])
+        self.assertEqual(recording.subscription_steps(self.steps(("9.9.1", True, ["[yourtenant]"])), {"steps": {}}),
+                         [])
+
+
+class LateLabelTests(unittest.TestCase):
+    """'"lateLabels": {"<label>": <minutes>}' on a step entry (#342): how long a view that lists the
+    label only later is refreshed for. Whole minutes from 1 to 60, never a silent 'no wait'."""
+
+    def recording(self, late: object) -> dict:
+        return {"steps": {"9.9.1": {"lateLabels": late}, "9.9.2": {"labels": {}}}}
+
+    def test_the_minutes_of_a_label_are_returned(self) -> None:
+        recording = self.recording({"Require-Environment-Tag-RG": 30})
+        self.assertEqual(late_minutes(recording, "9.9.1", "Require-Environment-Tag-RG"), 30)
+        self.assertIsNone(late_minutes(recording, "9.9.1", "Enforce-Project-Tag"))
+        self.assertIsNone(late_minutes(recording, "9.9.2", "Require-Environment-Tag-RG"))
+        self.assertIsNone(late_minutes(recording, "9.9.3", "Require-Environment-Tag-RG"))
+        self.assertEqual(late_label_problems(recording), [])
+
+    def test_a_late_label_of_zero_or_of_text_is_refused(self) -> None:
+        for value in (0, -5, 61, 1.5, "30", "", None, True, False, [30]):
+            with self.subTest(minutes=value):
+                problems = late_label_problems(self.recording({"Require-Environment-Tag-RG": value}))
+                self.assertEqual(len(problems), 1)
+                self.assertIn("step 9.9.1: 'lateLabels' 'Require-Environment-Tag-RG' must be", problems[0])
+        for edge in (1, 60):
+            self.assertEqual(late_label_problems(self.recording({"A": edge})), [])
+        for late in ([], ["A"], "A", 30, None):
+            with self.subTest(late=late):
+                self.assertEqual(len(late_label_problems(self.recording(late))), 1)
+        self.assertEqual(late_label_problems(self.recording({})), [])
 
 
 class ViewBladeTests(unittest.TestCase):
@@ -961,6 +1058,25 @@ class RunLogTextTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.scrub(text), kept)
 
+    def test_scrub_masks_a_generated_resource_name_in_a_path(self) -> None:
+        # A Policy assignment is named with 24 hex digits (made up here); the Portal's address and an
+        # outline's '/url:' line carry it after its resource type (#342).
+        name = "0123456789abcdef01234567"
+        cases = {
+            f"Page.goto: #view/assignmentId/%2Fproviders%2Fpolicyassignments%2F{name}/scopes~": (
+                "Page.goto: #view/assignmentId/%2Fproviders%2Fpolicyassignments%2F<id>/scopes~"),
+            f"- /url: /providers/Microsoft.Authorization/policyAssignments/{name.upper()}": (
+                "- /url: /providers/Microsoft.Authorization/policyAssignments/<id>"),
+            f"policyassignments%252F{name}%252F": "policyassignments%252F<id>%252F",
+            f"name {name} outside a path": f"name {name} outside a path",       # no path segment: kept
+            f"/x{name}": f"/x{name}",
+            "/" + "1" * 19: "/" + "1" * 19,
+        }
+        for text, kept in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.scrub(text, whole=True), kept)
+                self.assertEqual(self.scrub(kept, whole=True), kept)                # idempotent
+
     def test_scrub_masks_tenant_data_as_a_regular_expression_escapes_it(self) -> None:
         redactor = Redactor(DOMAIN, TENANT, {TOKEN: "me@example.com"}, tenant_name="Contoso Ltd")
         text = ('Locator.click: Error: strict mode violation: get_by_role("option", name=re.compile('
@@ -1054,6 +1170,11 @@ class RedactionTokenTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(recording.redaction_tokens(text), [])
 
+    def test_yoursubscription_is_a_redaction_token(self):
+        self.assertIn("[yoursubscription]", recording.REDACTION_TOKENS)
+        self.assertIn(Redactor.SUBSCRIPTION, Redactor.TOKENS)
+        self.assertEqual(recording.redaction_tokens("[yoursubscription] | Overview"), ["[yoursubscription]"])
+
     def test_every_token_constant_is_a_redaction_token(self):
         # A token constant added to recording.py, or to the Redactor, without adding it to
         # REDACTION_TOKENS would let a guide edit carry it.
@@ -1061,7 +1182,7 @@ class RedactionTokenTests(unittest.TestCase):
         constants = {name: value for scope in (vars(recording), vars(Redactor)) for name, value in scope.items()
                      if isinstance(value, str) and shape.match(value)}
         self.assertGreaterEqual(set(constants), {"SECRET", "OBJECT_ID", "EMAIL", "TYPED", "VALUE",
-                                                 "DOMAIN", "TENANT", "NAME", "PREFIX"})
+                                                 "DOMAIN", "TENANT", "NAME", "PREFIX", "SUBSCRIPTION"})
         for name, value in constants.items():
             with self.subTest(name=name):
                 self.assertIn(value, recording.REDACTION_TOKENS)

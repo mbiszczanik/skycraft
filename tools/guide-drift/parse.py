@@ -194,6 +194,11 @@ without a browser. Rules (issue #189):
     switch verbs, 'Leave', 'Make sure' or 'Ensure' give is also listed in '"stateOnly"': those
     words are no click, so the runner reports any other element as unknown instead. A
     '**Label**: checked' field is read as before (checkbox_state).
+  * An action or navigation item whose text starts with 'If' (CONDITIONAL) carries
+    '"conditional": true': 'If the review page opens without an error, click **Create**, then
+    ...' (1.3.6), 'If prompted, click **Use Bastion**' (3.2). The runner performs it only when its
+    first label is on screen and not greyed out; otherwise the condition does not hold, and the
+    item is passed as such, nobody asked (#342).
   * A bold span right after the word 'under' (and an optional 'the') names where the next
     label is, a blade menu's group or a section heading, and is no label (UNDER): 'Under
     **Settings**, select **Networking**.' (3.4.10), 'Under **Cost Management** click **Cost
@@ -206,7 +211,10 @@ without a browser. Rules (issue #189):
     ('Expand all headers'). An item that names only a place gives no item: 'Under **Blob access
     tier (default)**, select the desired tier' (4.2.4) names no tier. A span followed by 'tab'
     stays a label ('Under the **Advanced** tab, check **X**' clicks Advanced): a tab is
-    clicked to show what is under it (UNDER_TAB).
+    clicked to show what is under it (UNDER_TAB). So is a bold span between 'in the' and a
+    container's kind, dialog, blade, pane, panel or window (IN_PLACE, PLACE_KIND, #342): 'In the
+    **Delete confirmation** dialog, click **Delete**' (1.3.6, 1.3.13) clicks Delete only; a
+    dialog is no control.
   * Bold spans that are not UI elements are dropped by NON_UI_BOLD, by the guide's own entry
     in LAB_CAPTIONS and by the colon rule (bold text ending with ':' is a caption, not a label).
     NON_UI_BOLD holds the captions of every guide ('Note', 'Expected Result', 'Result');
@@ -218,6 +226,9 @@ without a browser. Rules (issue #189):
     each row becomes a 'tag' item (name, value), typed into the Portal's Tags grid by row rather
     than looked up as a labelled control. Backticks and bold are stripped from both cells.
     Every other table is informational and is not read.
+  * A step whose read body holds no numbered list item (1.3.14 and 2.2.16 explain a concept in
+    bullet lists) gives no action, navigation or search item from its lists; its fields and
+    tags (form tables, 3.2.10, 3.2.11, and 'Label: **value**' list items) stay (#342).
   * A step with no item left is emitted with portal=false and is not checked by the runner.
 
 Known gaps. Spec #189 records only lab 1.1; fix these before another lab is recorded
@@ -326,6 +337,8 @@ SUBHEADING = re.compile(r"^####\s")
 FENCE = re.compile(r"^[ \t]*(?P<run>`{3,}|~{3,})(?P<info>.*)$")
 LIST_ITEM = re.compile(r"^\s*(?:\d+\.|[-*])\s+(?P<text>.+)$")
 BOLD = re.compile(r"\*\*(?P<text>(?:\\\*|[^*])+?)\*\*")   # '\*' inside bold is a literal '*'
+# An item that holds only under a condition the guide states first (#342): 'If prompted, ...'.
+CONDITIONAL = re.compile(r"^\s*If\b")
 LIST_FIELD = re.compile(r"^\*\*(?P<label>(?:\\\*|[^*])+?)\*\*\s*:\s*(?P<value>.+)$")
 # 'Label: **value**' or 'Label: `value`' with a plain label (#198). The label starts with a
 # letter and holds letters of any script, digits, spaces and '()/&-', never '_' ([^\W_] is a
@@ -476,6 +489,11 @@ SURE_AFTER = re.compile(WORDED_KIND + r"\s+is\s+(?P<state>" + _STATE_WORD + r")\
 # ('Under **Settings**, select **Networking**', 3.4.10; 'Click **Containers** under **Data
 # storage**', 4.2.2), not a control: clicking a Portal menu group collapses it. It is no label.
 UNDER = re.compile(r"\bunder\s+(?:the\s+)?$", re.IGNORECASE)
+# A bold span between 'in the' and the kind of a container names where the next label is, no label
+# itself (#342): 'In the **Delete confirmation** dialog, click **Delete**' (1.3.6, 1.3.13), 'In the
+# **Overview** blade, locate ...' (3.3).
+IN_PLACE = re.compile(r"\bin\s+the\s+$", re.IGNORECASE)
+PLACE_KIND = re.compile(r"\s+(?:dialog|blade|pane|panel|window)\b", re.IGNORECASE)
 UNDER_TAB = re.compile(r"\s+tabs?\b", re.IGNORECASE)   # 'Under the **Advanced** tab': a tab to click
 # What may stand between two labels of one list after a stating verb: 'Check **A** and **B**',
 # 'Uncheck **A**, **B** and **C**'. The later labels take the earlier one's state.
@@ -903,6 +921,9 @@ def read_option(body: list[tuple[int, str]], regions: list[str | int], chosen: i
                 continue
         index += 1
     items, images = parse_items(item_lines, captions)
+    if not any(ORDERED_ITEM.match(line) for _, line in item_lines):
+        # no numbered item: its lists describe and give no click; fields and tags stay (#342)
+        items = [item for item in items if item["kind"] in ("field", "tag")]
     items = sorted(items + checks, key=lambda item: item["line"])    # stable: a check follows its intro
     return items, expected if expected is not None else fallback, images
 
@@ -1077,7 +1098,8 @@ def stated_states(text: str, spans: list[tuple[int, int, str]]
         # What stands before the label is looked for from the end of the span before it on, so
         # an item of n spans is read in linear time, not in time n squared.
         since = spans[index - 1][1] if index else 0
-        if UNDER.search(masked, since, start) and not UNDER_TAB.match(masked, end):
+        if ((UNDER.search(masked, since, start) and not UNDER_TAB.match(masked, end))
+                or (IN_PLACE.search(masked, since, start) and PLACE_KIND.match(masked, end))):
             dropped.add(start)
             previous = None
             continue
@@ -1157,6 +1179,8 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
                       for at, name in (chain_resources(text[start:]) if chain else [])])
     if (picker and steps) or (chain and len(steps) > 1):
         item = {"kind": "navigation"}
+        if CONDITIONAL.match(text):
+            item["conditional"] = True
         if picker:
             item["field"] = picker[0]          # open the field's picker, then the chain (#250)
         item["labels"] = [label for _, label, _ in steps]
@@ -1169,6 +1193,8 @@ def list_item(text: str, number: int, captions: frozenset[str] = NO_CAPTIONS) ->
     if not bold:
         return None
     item = {"kind": "action", "labels": [label for _, label in bold]}
+    if CONDITIONAL.match(text):
+        item["conditional"] = True
     mark_states(item, [at for at, _ in bold], states)
     item["line"] = number
     return item

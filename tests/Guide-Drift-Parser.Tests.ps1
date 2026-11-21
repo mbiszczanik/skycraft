@@ -735,10 +735,46 @@ Describe 'parse.py - lab 1.3, a lock type is a field, not a click on Delete' {
     }
 }
 
-Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#224)' {
+Describe 'parse.py - every guide, a step without numbered items gives no list clicks (#342)' {
+    BeforeAll {
+        $guides = Get-ChildItem -Path $script:RepoRoot -Directory -Filter 'module-*' |
+            Get-ChildItem -Directory | Where-Object { $_.Name -match '^\d+\.\d+-' } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Filter 'lab-guide-*.md' }
+        $script:Dropped = [System.Collections.Generic.List[string]]::new()
+        $script:GuideCount = 0
+        foreach ($guide in $guides) {
+            $script:GuideCount++
+            $out = Join-Path $TestDrive "dropped-$($guide.Name).json"
+            & $script:Python $script:Parser $guide.FullName --out $out --repo-root $script:RepoRoot
+            $parsed = Get-Content -Raw -Encoding utf8 -LiteralPath $out | ConvertFrom-Json
+            # Per step: a bold list item outside fenced code, and a numbered item outside it.
+            $bold = @{}; $numbered = @{}; $step = $null; $fence = $false
+            foreach ($line in (Get-Content -LiteralPath $guide.FullName -Encoding utf8)) {
+                if ($line -match '^[ \t]*(`{3,}|~{3,})') { $fence = -not $fence; continue }
+                if ($fence) { continue }
+                if ($line -match '^###\s+Step\s+(\d+\.\d+\.\d+):') { $step = $Matches[1]; continue }
+                if ($line -match '^#{1,3}\s') { $step = $null; continue }
+                if (-not $step) { continue }
+                if ($line -match '^\s*\d+\.\s') { $numbered[$step] = $true }
+                if ($line -match '^\s*(?:[-*]|\d+\.)\s.*\*\*') { $bold[$step] = $true }
+            }
+            foreach ($s in $parsed.steps) {
+                if (-not $s.portal -and $bold[$s.id] -and -not $numbered[$s.id]) { $script:Dropped.Add($s.id) }
+            }
+        }
+    }
+
+    It 'drops list clicks only in step 2.2.16 of every guide' {
+        $script:GuideCount | Should -Be 17
+        @($script:Dropped | Sort-Object) | Should -Be @('2.2.16')
+    }
+}
+
+Describe 'parse.py - labs 2.2, 2.3 and 4.1, lists to verify are checks, not fields (#224)' {
     BeforeAll {
         $script:CheckLabs = @{}
         foreach ($guide in 'module-2-networking/2.2-secure-access/lab-guide-2.2.md',
+                           'module-2-networking/2.3-name-resolution/lab-guide-2.3.md',
                            'module-4-storage/4.1-storage-accounts/lab-guide-4.1.md') {
             $lab = [regex]::Match($guide, 'lab-guide-(\d+\.\d+)\.md$').Groups[1].Value
             $out = Join-Path $TestDrive "checks-$lab.json"
@@ -764,6 +800,30 @@ Describe 'parse.py - labs 2.2 and 4.1, lists to verify are checks, not fields (#
     ) {
         $step = $script:CheckLabs[$lab].steps | Where-Object id -eq $id
         @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
+        @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
+        $step.expected | Should -Be $expected
+    }
+
+    It 'checks the Verify list of step <id> on the blade it opens, before the step moves on (#292)' -ForEach @(
+        # The zone's Overview is checked before Recordsets; the record table after 'Verify records exist:' is informational.
+        @{ id = '2.3.19'; labels = @('Private DNS zones', 'skycraft.internal', 'Overview', 'Recordsets')
+           order = @('navigation', 'action', 'check', 'action')
+           checks = @('Recordsets: 3 (the SOA record at @, which the Portal counts, and the two records you created: dev-db, prod-db); ' +
+                      'Virtual Network Links: 3 (hub, dev, prod); Virtual Network Links With Registration: 2 (dev, prod)')
+           expected = 'Private DNS configured for internal name resolution.' }
+        # The dev load balancer is checked before the step opens prod.
+        @{ id = '2.3.20'; labels = @('Load balancers', 'dev-skycraft-swc-lb', 'Overview', 'prod-skycraft-swc-lb')
+           order = @('navigation', 'action', 'check', 'action')
+           checks = @('Frontend IP: 1 (dev-skycraft-swc-lb-frontend with public IP); Backend pools: 3 (world, auth, outbound); ' +
+                      'Load balancing rules: 2 (port 8085, port 3724); Health probes: 2 (world, auth); ' +
+                      'Outbound rules: 1 (dev-skycraft-swc-lb-outbound for the outbound pool; listed under Settings (expand it if it is collapsed) ' +
+                      [char]0x2192 + ' Outbound rules)')
+           expected = 'Both load balancers fully configured and ready to distribute traffic (VMs will be added in Module 3).' }
+    ) {
+        $step = $script:CheckLabs['2.3'].steps | Where-Object id -eq $id
+        @($step.items | Where-Object kind -eq 'field') | Should -BeNullOrEmpty
+        @($step.items | ForEach-Object { $_.kind }) | Should -Be $order
         @($step.items | Where-Object kind -ne 'check' | ForEach-Object { $_.labels }) | Should -Be $labels
         @($step.items | Where-Object kind -eq 'check' | ForEach-Object { $_.text }) | Should -Be $checks
         $step.expected | Should -Be $expected
@@ -1358,13 +1418,19 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         }
     }
 
+    # One guide line per stating verb a guide uses. Untick, clear, deselect, disable and turn on/off
+    # are in no guide step; test_parse.py pins them on fixtures. <only>: the "stateOnly" indices.
     It 'reads step <id>''s "<text>" as <kind> <labels>, <key> at <indices>' -ForEach @(
-        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0) }
-        @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0) }
-        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0) }
-        @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1) }
+        @{ lab = '4.4'; id = '4.4.2'; text = 'Under **Exceptions**, leave **Allow trusted Microsoft services to access this resource** checked'; kind = 'action'; labels = @('Allow trusted Microsoft services to access this resource'); key = 'checked'; indices = @(0); only = @(0) }
+        @{ lab = '4.2'; id = '4.2.5'; text = 'Leave **Enable Azure Backup for blobs** unchecked - ...'; kind = 'action'; labels = @('Enable Azure Backup for blobs'); key = 'unchecked'; indices = @(0); only = @(0) }
+        @{ lab = '3.3'; id = '3.3.7'; text = 'Uncheck **Use quickstart image**.'; kind = 'action'; labels = @('Use quickstart image'); key = 'unchecked'; indices = @(0); only = @() }
+        @{ lab = '4.2'; id = '4.2.5'; text = 'Under **Recovery**, enable **Enable soft delete for blobs**'; kind = 'action'; labels = @('Enable soft delete for blobs'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '3.3'; id = '3.3.2'; text = 'Check **Admin user**.'; kind = 'action'; labels = @('Admin user'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '3.3'; id = '3.3.8'; text = 'Check **Ingress** (it is off by default).'; kind = 'action'; labels = @('Ingress'); key = 'checked'; indices = @(0); only = @() }
+        @{ lab = '4.3'; id = '4.3.6'; text = '... -> check **Overwrite if files already exist** -> **Upload**'; kind = 'navigation'; labels = @('Upload', 'Overwrite if files already exist', 'Upload'); key = 'checked'; indices = @(1); only = @() }
+        @{ lab = '1.3'; id = '1.3.9'; text = 'Open the **Allowed locations** list and tick **Sweden Central** and **North Europe**'; kind = 'action'; labels = @('Allowed locations', 'Sweden Central', 'North Europe'); key = 'checked'; indices = @(1, 2); only = @() }
+        @{ lab = '4.3'; id = '4.3.3'; text = 'Make sure **Soft delete for all classic file shares** is enabled'; kind = 'action'; labels = @('Soft delete for all classic file shares'); key = 'checked'; indices = @(0); only = @(0) }
+        @{ lab = '5.1'; id = '5.1.3'; text = 'Toggle **Agent** to **Off**, and confirm *Discard changes* ...'; kind = 'action'; labels = @('Agent'); key = 'unchecked'; indices = @(0); only = @(0) }
     ) {
         $items = @(($script:StateLabs[$lab].steps | Where-Object id -eq $id).items |
             Where-Object { (@($_.labels) -join "`n") -ceq ($labels -join "`n") })
@@ -1373,6 +1439,8 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
         @($items[0].$key) | Should -Be $indices
         $other = if ($key -eq 'checked') { 'unchecked' } else { 'checked' }
         $items[0].PSObject.Properties.Name | Should -Not -Contain $other
+        if ($only.Count) { @($items[0].stateOnly) | Should -Be $only }
+        else { $items[0].PSObject.Properties.Name | Should -Not -Contain 'stateOnly' }
     }
 
     # 'Under **Logs**, check **A**, **B**, **C** and **D** - ... Leave the **Health** metric (under
@@ -1504,8 +1572,7 @@ Describe 'parse.py - a label the guide says to check, uncheck, enable, switch or
     }
 
     # Step 3.3.2 said 'Toggle **Admin user** to **Enabled**.' until the Portal pass of 2026-10-15
-    # found a check box (#229); no guide line has the switch-value shape now, and test_parse.py
-    # keeps the rule pinned on a fixture.
+    # found a check box (#229); step 5.1.3's 'Toggle **Agent** to **Off**' now pins that shape.
     It 'never clicks a state word in step 3.3.2: Access keys is opened, then Admin user is ticked' {
         $items  = @((Get-StateStep '3.3' '3.3.2').items)
         $labels = @($items | ForEach-Object { $_.labels })

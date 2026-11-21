@@ -13,30 +13,32 @@ Everything a run leaves behind goes under --log-dir/<run id>/ and is gitignored:
 record per check, appended as the run goes and never rewritten, and a "redo" marker before a
 redone step's new attempt, or before a step the recording now skips, when the earlier attempt
 left records), Step-X.Y.N.png (full window, for manual cropping and anonymisation), summary.md,
-and blade-<step>-<line>.aria.txt for a label that was not found (the outline the loading check
-read, redacted). Only the recording is written back into the repository.
+blade-<step>-<line>.aria.txt for a label that was not found (the outline the loading check
+read, redacted), and list-<step>-<line>.aria.txt for a list option that was not found (the open
+list's accessibility tree, redacted). Only the recording is written back into the repository.
 
 summary.md, and results.jsonl behind it, are what gets copied into an issue or a pull request, so
 they hold the text the failure prompt shows (issue #212). A record's "observed" is scrubbed before
 it is written (Runner.scrubbed, recording.scrub): one line, the first of an error, without the
 Playwright call log after it (which holds the element's HTML, an auto-generated password in a value
-attribute among it, and the value the runner typed); every value the runner types into a field
-whose label names a password, secret or other credential, every value read from the environment
-but an address and the tenant prefix (recording.typed_secrets, #210), and every credential in a
-connection string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids
-as '<id>'; tenant data, also as a regular expression escapes it, as the Redactor's tokens; any
-other e-mail address as '<email>'; a value a call typed and an element's value attribute as
-'[typed]' and '[value]' (recording.scrub lists what it cannot recognise and what it masks that only
-looks like one of these: 'Group@2x.png', 'ResetPassword=true'). Scrubbing twice changes nothing, so
-the records a -Resume reloads stay as written. A results.jsonl written before #212 keeps its old
-lines as they are: a resume cleans them for the summary only, so such a file is not safe to share.
-A proposed edit's new label is scrubbed the same way; the rest of its line is the guide's own text
-and is never redacted. The summary names the run folder relative to the repository (or by its name
-alone), never by an absolute path. The *.aria.txt files are scrubbed with every line kept, and the
-value of a text field named like a password or other credential is masked there too (the Portal's
-auto-generated password is in an accessibility snapshot). The text a step's result is checked by,
-as the person types it, is kept in the recording scrubbed the same way. The screenshots are not
-scrubbed: crop and anonymise them by hand.
+attribute among it, and the value the runner typed); every value the runner types into a field whose
+label names a password, secret or other credential, every value read from the environment but an
+address and the tenant prefix (recording.typed_secrets, #210), and every credential in a connection
+string or SAS address ('AccountKey=', 'sig=') as '[secret]'; object ids, and a generated resource
+name as a path segment (20 or more hex digits, #342), as '<id>'; tenant data and the run's
+subscription name (--subscription-name, '[yoursubscription]'), also as a regular expression escapes
+it, as the Redactor's tokens; any other e-mail address as '<email>'; a value a call typed and an
+element's value attribute as '[typed]' and '[value]' (recording.scrub lists what it cannot recognise
+and what it masks that only looks like one of these: 'Group@2x.png', 'ResetPassword=true').
+Scrubbing twice changes nothing, so the records a -Resume reloads stay as written. A results.jsonl
+written before #212 keeps its old lines as they are: a resume cleans them for the summary only, so
+such a file is not safe to share. A proposed edit's new label is scrubbed the same way; the rest of
+its line is the guide's own text and is never redacted. The summary names the run folder relative to
+the repository (or by its name alone), never by an absolute path. The *.aria.txt files are scrubbed
+with every line kept, and the value of a text field named like a password or other credential is
+masked there too (the Portal's auto-generated password is in an accessibility snapshot). The text a
+step's result is checked by, as the person types it, is kept in the recording scrubbed the same way.
+The screenshots are not scrubbed: crop and anonymise them by hand.
 
 When a label is not on screen, the person answers at the prompt (decide.py). For a field it shows
 the value the run will type, not the guide's (recording.prompt_value, #210): after the recording's
@@ -48,29 +50,29 @@ environment but an address, shown as its '${NAME}', and the tenant prefix, shown
 and its valueOverride reads one only into a field that names a secret
 (recording.env_override_problems, checked by tests/Guide-Drift-Recording.Tests.ps1). A tag is
 decided as a field is (recording.tag_action): its value is typed, and its record keeps the value
-typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or
-an instruction is reported as unknown, never typed as written. At the prompt, a number uses that
+typed, scrubbed; an override's '[Leave blank]' leaves it out ('left out'), and a [token] left or an
+instruction is reported as unknown, never typed as written. At the prompt, a number uses that
 element as the guide's, renamed (misleading drift); 'c <number>' uses it, the difference cosmetic;
 'w <number>' uses it as a workaround, not as the guide's element (#211: misleading drift, never
 written to the recording, so the next run asks again); 'g' gone (blocking drift); 'i' ignore; 'u'
 unknown. A pick by number or with 'c' whose name the recording cannot keep, as it holds an id, an
-address outside the tenant or a secret (Runner.recordable, the rule a typed result text follows),
-is used as a workaround all the same, and the console says so (#315): replay looks the element up
-by the name the recording keeps, and a masked one would never be found. A drift acted on under
-another name proposes a guide edit (the summary's 'proposed edits': the guide line with the bold
-label replaced), misleading or cosmetic (a change of case is a real rename), only when its new text
+address outside the tenant or a secret (Runner.recordable, the rule a typed result text follows), is
+used as a workaround all the same, and the console says so (#315): replay looks the element up by
+the name the recording keeps, and a masked one would never be found. A drift acted on under another
+name proposes a guide edit (the summary's 'proposed edits': the guide line with the bold label
+replaced), misleading or cosmetic (a change of case is a real rename), only when its new text
 belongs in the guide (Runner.not_proposed, #211). It proposes none when the element was used as a
 workaround (and a workaround at the step's first item records no start blade); when the step has a
 wrong-blade record earlier in the step or its start is excused (see the start of a step below), as
 the Portal was then not where the guide leads; or when the Portal's name, scrubbed, holds a
-redaction token (recording.redaction_tokens: '[tenantname]', '<id>', '[secret]' or any other the
-Redactor or scrub writes), as it carries tenant or personal data; or when the Portal's name is the
-label plus one of its decorations (see the lookup below, #244), which the learner does not see. The
-first of these that applies is the reason given. Such a drift is written to results.jsonl all the
-same; the record's "notProposed" and the summary's 'not proposed' say why, and a workaround's
-record has "workaround": true. The summary also holds back an edit that a record written before
-#211 proposes and that brings a token into the guide line, and one that a record written before
-#244 proposes for a decorated name.
+redaction token (recording.redaction_tokens: '[tenantname]', '[yoursubscription]', '<id>',
+'[secret]' or any other the Redactor or scrub writes), as it carries tenant or personal data; or
+when the Portal's name is the label plus one of its decorations (see the lookup below, #244), which
+the learner does not see. The first of these that applies is the reason given. Such a drift is
+written to results.jsonl all the same; the record's "notProposed" and the summary's 'not proposed'
+say why, and a workaround's record has "workaround": true. The summary also holds back an edit that
+a record written before #211 proposes and that brings a token into the guide line, and one that a
+record written before #244 proposes for a decorated name.
 
 The console is scrubbed only in part: an error before or during the run is shown as a record
 keeps it, a crash as its frames (file, line, function) and each error's scrubbed first line
@@ -79,51 +81,100 @@ scrubbed. The rest is not: Invoke-GuideDrift.ps1 prints the tenant (id and domai
 subscription before the run, and run.py prints the run folder's absolute path. Copy the summary,
 not the console.
 
-The runner acts only on a visible element within the window's width (the Portal parks earlier
-blades off to the left; below the fold is fine, it scrolls there first), and only on one:
-several matches are reported as unknown rather than guessed. It refuses to click or fill an
-element whose name contains the word delete, remove, reset, revoke, disable, block, purge or
-sign out, unless the guide's own label does too. A guide's 'Search for **X**' is typed into the
-Portal's global search, and the result named exactly X in its dropdown is opened (the Services
-entry, never Marketplace or Documentation); when that fails, the dropdown's accessibility tree
-is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
+The runner acts only on a visible element within the window's width (the Portal parks earlier blades
+off to the left; below the fold is fine, it scrolls there first), and only on one: several matches
+are reported as unknown rather than guessed, except that when each of them sits in a blade (a
+[role=region], or a <section> named by aria-labelledby or aria-label, which the Portal's blades are),
+the blades differ and the right-most, newest blade holds only one, that one is acted
+on (newest_blade: a resource group's pane stays open beside the list it came from, and both menus
+show 'Tags'). A decorated name (find_decorated, below) keeps the stricter rule on purpose: several
+are ambiguous wherever they sit, as a decoration is a looser match than the plain name. It refuses
+to click or fill an element whose name contains the word delete, remove, reset, revoke, disable,
+block, purge or sign out, unless the guide's own label does too. A guide's 'Search for **X**' is
+typed into the Portal's global search, and the result named exactly X in its dropdown is opened (the
+Services entry, never Marketplace or Documentation); when the Portal lists a service category under
+another name, its Services entry with the group's words after the label ('Resource groups Resource
+Manager' for 'Resource groups', #342: decide.Decoration.search) is the result, but only when there
+is no exact one, and never under Marketplace or Documentation or beside several. A search whose
+results never load (no results list before the deadline) is closed and typed once more; when that
+fails, or no result is found, the dropdown's accessibility tree (the whole frame when there was no
+list) is kept as search-<step>.aria.txt in the run folder. A search inside a blade ('Search for
 **"Owner"**' in a role assignment, scope 'blade') is typed into that blade's own search box, the
-only one on screen besides the top one, and the result is checked for, not clicked: the guide's
-next item clicks it. Plain text counts only when it
-is, or sits inside, a link, button or other interactive element. When nothing on screen has the
-label's name, an element whose name is the label plus one of the Portal's decorations, words the
-screen does not show beside the label (decide.DECORATIONS, #244: a list row's check box 'Select
-row X' for an action, a required field's marker 'X *', or a field label's info icon and marker,
-'X information *'), is the guide's element as well (find_decorated): a match, so nobody is asked,
-nothing is recorded and no guide edit is proposed. It is looked for once SETTLE_MS of looking
-has not found the plain name, which a blade still rendering may show later, and that time starts
-again once a loading blade has rendered and once the person has opened a form. A decoration counts
-only on the roles it decorates (a button or link of those words is another element), two
-decorated elements are ambiguous as two plain ones are, and a plain name that is on screen more
-than once as text is not found as before, never replaced by a decorated one. Known gap: a field
-label with an info icon and no required marker is presumably named 'X information', but no run
-has seen one, so that suffix alone is no decoration and the person is asked. Such a row's check
-box is acted on as one the person picked: 'Search for and select **X**' states no state
-(parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**' leaves it
-ticked. A person who picks a decorated name on a role it decorates all the same (by number or
-with 'c') uses it, no drift either (decide.py). A label is looked for until
-FIND_TIMEOUT_MS has passed, as a blade renders its controls after its heading; when SETTLE_MS of
-that finds nothing, the blade menu's collapsed groups are opened once ('Expand all headers') and
-the looking goes on to the same deadline. When the deadline passes while a blade is still
-loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
-blade's title heading has no content after it), the console says so once and the label is looked
-for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
-has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
+only one on screen besides the top one, and the result is checked for, not clicked: the guide's next
+item clicks it. Plain text counts only when it is, or sits inside, a link, button or other
+interactive element. When nothing on screen has the label's name, an element whose name is the label
+plus one of the Portal's decorations, words the screen does not show beside the label
+(decide.DECORATIONS, #244: a list row's check box 'Select row X' for an action, a required field's
+marker 'X *', a field label's info icon and marker, 'X information *', or a search result's group,
+'X Resource Manager', found in the global search only), is the guide's element as well
+(find_decorated): a match, so nobody is asked, nothing is recorded and no guide edit is proposed. It
+is looked for once SETTLE_MS of looking has not found the plain name, which a blade still rendering
+may show later, and that time starts again once a loading blade has rendered and once the person has
+opened a form. A decoration counts only on the roles it decorates (a button or link of those words
+is another element), two decorated elements are ambiguous as two plain ones are, and a plain name
+that is on screen more than once as text is not found as before, never replaced by a decorated one.
+Known gap: a field label with an info icon and no required marker is presumably named 'X
+information', but no run has seen one, so that suffix alone is no decoration and the person is
+asked. Such a row's check box is acted on as one the person picked: 'Search for and select **X**'
+states no state (parse.py, #296), so it is clicked, which clears a row already ticked; 'Check **X**'
+leaves it ticked. A person who picks a decorated name on a role it decorates all the same (by number
+or with 'c') uses it, no drift either (decide.py).
+
+A picker row is the guide's element as well (find_row_control, #342): a policy picker names the
+policy in a cell of the row and holds a radio named 'Select' (or a check box) in it, so for an
+action nothing else has the name, the visible row (never the header row) with a grid cell or cell
+named exactly the label gives its one radio, or else its one check box that is no decoration of the
+label. 'Allowed locations' is not the row 'Azure Cosmos DB allowed locations'; two rows of that
+exact cell are ambiguous, and a row without one such control is not found. It is looked for after
+the decorated names, from SETTLE_MS on, is a match with nothing recorded and no guide edit, and is
+selected as a stated 'Check' is (set_state: a radio is selected, a check box ticked), so a row
+already selected is 'already set' and selecting never clears it.
+
+A field (and an action whose control opens a list) is the guide's element as well when its label is
+plain text with the control right after it (find_by_text_label, #342): the Advisor alert's three
+combo boxes have no accessible name and the texts 'Category', 'Sub-category' and 'Impact level'
+before them; a budget's 'Name' is a text box named 'Enter a unique name'. The text must be the label
+alone (whole text, no link, button or other interactive element), and the first control after it in
+document order (input, select, textarea, or role combobox, textbox, listbox, spinbutton, radiogroup)
+must come before any other text, whatever its own name. The same text twice is ambiguous unless the
+controls sit in different blades, when the newest blade's is the one. It is looked for after the
+decorated names, from SETTLE_MS on, is a match with nothing recorded and no guide edit, and counts
+as a field that can be filled in, so a form whose first field is found this way is open (find_form)
+and writes no wrong-blade record.
+
+A label is looked for until FIND_TIMEOUT_MS has passed, as a blade renders its controls after its
+heading; when SETTLE_MS of that finds nothing, the blade menu's collapsed groups are opened ('Expand
+all headers', the newest blade's button when several blades show one) and the looking goes on to the
+same deadline. The groups count as open once that blade shows 'Collapse all headers' within
+SETTLE_MS; a click while the menu still reads 'Loading...' changes nothing, so it is clicked again
+on a later look, EXPAND_TRIES times at most per item. When the deadline passes while a blade is
+still loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
+blade's title heading has no content after it, or a part of it is named 'Loading...' as Cost
+analysis' date range button is while its VIEW list has not come yet, or no frame could be read at
+all, as when the Portal
+was too busy to answer within the snapshot's time while a subscription's overview rendered, run
+20261017-003656), the console says so once and the label is looked for up to BLADE_LOAD_TIMEOUT_MS
+more (BLADE_EMPTY_TIMEOUT_MS for a titled, busy or unread blade); once the blade has rendered, it is looked
+for FIND_TIMEOUT_MS again. Only then is the person asked.
+
+A combo box whose own box has no width or no height (ng-select, Cost analysis' VIEW list: a
+zero-width input inside the visible container) counts as visible when its nearest ancestor with a
+box is (ZERO_SIZE_COMBOBOX_JS), and is clicked there (click_target): Playwright neither sees nor
+clicks a zero-width element. An action is looked up among combo boxes too, after every other action
+role, so 'Open the **VIEW** list' opens it and the item's next label is picked from that list.
 
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
 a line of the accessibility tree, in the main frame or a child frame within the window's columns,
-whose whole text starts with 'Deployment is in progress' (the deployment overview) or 'Deployment
-in progress' (its notification; DEPLOYMENT_RUNNING_TEXT, which says where the texts come from and
-that no run has confirmed them yet). The console says so once, and how long the run waits at most
-(--deployment-timeout-minutes, 30 by default), then every DEPLOYMENT_SAY_S how long it has waited.
-The label is looked for every DEPLOYMENT_POLL_MS meanwhile; a read of the screen whose main frame
-cannot be read or shows nothing says nothing, and the wait goes on. Once the deployment has ended,
+whose whole text starts with 'Deployment is in progress' (the deployment overview), 'Deployment
+in progress' or 'Initializing deployment' (its notification; DEPLOYMENT_RUNNING_TEXT, which says
+where the texts come from and that no run has confirmed them yet). The console says so once, and
+how long the run waits at most (--deployment-timeout-minutes, 30 by default), then every
+DEPLOYMENT_SAY_S how long it has waited. The label is looked for every DEPLOYMENT_POLL_MS
+meanwhile; a read of the screen whose main frame cannot be read or shows nothing says nothing, and
+the wait goes on. While the overview itself says 'Deployment is in progress', it is refreshed every
+DEPLOYMENT_REFRESH_S between polls (refresh_overview: the last visible Refresh button, else a
+reload of the page), as it can keep that title after ARM has finished. Once the deployment has ended,
 the label is looked for FIND_TIMEOUT_MS again, then as above. A failure ('Your deployment failed',
 'Deployment failed') ends the item as unknown with the Portal's text and the line after it,
 scrubbed as any observed text, and so does a deployment still running after the longest wait; the
@@ -144,6 +195,22 @@ alone did, and the Expected Result's miss reads it once more than before. The st
 (check_start) is not waited for: the deployment overview's address is set when it opens, not when
 it ends.
 
+A view can list a label minutes after the step before it made it: Policy's Compliance grid shows
+an assignment only after the next evaluation (step 1.3.10). A step entry says so with '"lateLabels":
+{"<label>": <minutes>}', whole minutes from 1 to 60 (recording.late_minutes; run.py refuses to start
+on any other value, recording.late_label_problems, as on a skip without a reason). Only for that
+label, once the lookup above found nothing and before the recording's decision or the person is
+asked (Runner.wait_for_late_view): the console says once how long the run waits, then every
+LATE_POLL_S the view is refreshed (Runner.refresh_view: the newest blade's one visible 'Refresh'
+is clicked, a button or a menu item alike, chosen among both roles together by newest_blade; when
+the screen shows none, or several it cannot tell apart, the page is reloaded, and a reload that
+times out is said on the console and the wait goes on) and the label is looked for
+FIND_TIMEOUT_MS; every DEPLOYMENT_SAY_S the console says how long the run has waited. The refresh
+comes before the limit is checked, so N minutes give N refreshes, the last one at the limit and
+looked at too. After that it goes on as without the wait, so a label that never shows is still
+reported or asked about; a label without an entry is never waited for, as a real drift would
+cost minutes on every run.
+
 A resource a navigation chain names in a code span ('**Load balancers** -> `dev-skycraft-swc-lb`
 -> **Backend pools**', parse.py's "resources") is opened as the one visible link, grid cell or row
 of that exact name, once the recording's placeholders are filled; a name with a placeholder left
@@ -163,6 +230,19 @@ through its chain: the field is looked up as a field is and clicked, never fille
 its picker; it is asked about like any label when it is not found. The chain's labels and
 resource names follow; a resource at the chain's start is listed in the picker, so it is looked
 for on screen only.
+
+A label of an action or navigation item that opens a list (#342: 1.3.9's **Allowed locations** is
+the text before the combo box 'Location', found by that text, find_by_text_label) keeps it as
+Runner.open_list for the rest of the item; whether the control opens a list (opens_a_list) is read
+before it is clicked, as a click may close a form or open a blade. Each later label is looked for as
+an option of that list first (find_in_list: an option or tree item in the popup the combo box names,
+else on screen, under a region prefix too; when it is not there, the list's filter box is typed
+into, then the list is scrolled, as pick_option does), and is put in the state the guide gives it as
+any option is (toggle_kind: 'already set' without a click for a region that is ticked already), or
+clicked when the guide gives none. A label the list does not hold is looked for on screen as before.
+When the item ends (also when it failed), a list still open is closed with Escape on its combo box,
+so the next tab click is not intercepted, unless no later label was looked for in it: a list that
+the item's last label opened is the next item's to pick from. The list is forgotten at each item.
 
 When a step does not go through, the person chooses: c, finish it by hand and continue; s, skip
 this step and continue with the next one, giving the reason, which the summary lists under
@@ -205,9 +285,11 @@ blades the guide opened before it: the person checks the Portal and corrects it.
 the resume question is saved only then, so closed input there leaves the state as it was.
 
 A view is recorded only from a Portal page, and only without tenant or personal data
-(Redactor.view_url): the tenant pin, query strings and object ids (with or without hyphens) are
-left out, and a view that still holds an address, a guest user principal name, an id or tenant
-data once percent-decoded is recorded as none.
+(Redactor.view_url): the tenant pin, query strings, object ids (with or without hyphens) and
+generated resource names (a path segment of 20 or more hex digits: a Policy assignment's name in
+step 1.3.10's Compliance view, #342) are left out, as '<id>' for an id or a name, and a view that
+still holds an address, a guest user principal name, an id, such a name or tenant data once
+percent-decoded is recorded as none.
 
 Each step starts on a blade, and the run checks it is the right one (issue #207). The recording
 keeps, as the step's "startBlade", the blade part of the view the step began on (view_blade:
@@ -242,39 +324,53 @@ Enter, then looks the field up as usual; when this happens at the step's first i
 blade is the one recorded. A first field the recording holds a decision for is not checked: replay
 finds it. Neither drift makes the guide's screenshots stale or counts in the exit code.
 
-A field is filled as its control takes a value: a text box is typed into, a combo box or a
-drop-down has the option of the value picked, a check box or switch is ticked or cleared. A field
-label that names a container rather than a control (fill_parts) is filled through what it holds:
-its one text box; the Portal's user principal name, a text box and a domain combo box; or a radio
-group (issue #294: a storage account's 'Performance', Standard or Premium), radios and no combo
-box, a text box among them or not (an 'Other' option's), where the radio the value names is
-selected and nothing is typed. The value names a radio, compared regardless of case and of
-surrounding whitespace, by its whole accessible name; when no radio has that name, by the part of
-the name before its first ':' (the Portal names the radios 'Standard: Recommended for most
-scenarios (general-purpose v2 account)' and 'Premium: ...'); when none has that either, by the
-same two with the value's remarks in parentheses removed ('None (NSG already on subnet)' names
-'None'). A value that names no radio is unknown, and the observation lists the radios' names;
-one that names several by the rule that matched is unknown as ambiguous. A radio already selected
-is 'already set', so a re-run changes nothing. A radio found as the field itself (by its own name,
-or picked by the person) is selected when the value names it or states 'checked'; 'unchecked'
-leaves one not selected as it is, and is unknown for a selected one, which only selecting another
-radio clears. Accessible names come from the accessibility snapshot, read as the YAML Playwright
-writes (snapshot_key): a key holding ': ' is single-quoted and its name JSON-escaped.
+A field is filled as its control takes a value: a text box is typed into, a combo box or a drop-down
+has the option of the value picked, a check box or switch is ticked or cleared. An option is an
+entry of role option or treeitem (a tree is a list too: Cost Management's 'Reset period'), looked
+for inside the list the combo box names, else on screen; its name matches whole, or else after the
+region prefix the Portal puts before a location ('Sweden Central' picks '(Europe) Sweden Central';
+two such entries are ambiguous), and a field showing the prefixed name is already set. When the open
+list holds one search box or text box, or the combo box is an editable input, the value (without its
+prefix) is typed into it first; an option still missing is looked for in a list that scrolls, a page
+at a time, up to LIST_SCROLL_PAGES pages. One not found leaves the open list's tree, scrubbed, as
+list-<step>-<line>.aria.txt in the run folder. A field label that names a container rather than a
+control (fill_parts) is filled through what it holds: its one text box; the Portal's user principal
+name, a text box and a domain combo box; or a radio group (issue #294: a storage account's
+'Performance', Standard or Premium), radios and no combo box, a text box among them or not (an
+'Other' option's), where the radio the value names is selected and nothing is typed. When a <label>,
+a wrapper and a radio group all carry the field's name (1.3.5's 'Policy enforcement', #342), the
+radio group that holds radios is the field (one_field: after a control that takes a value and a
+button that opens a list), and it is filled so. The value names a radio, compared regardless of case
+and of surrounding whitespace, by its whole accessible name; when no radio has that name, by the
+part of the name before its first ':' (the Portal names the radios 'Standard: Recommended for most
+scenarios (general-purpose v2 account)' and 'Premium: ...'); when none has that either, by the same
+two with the value's remarks in parentheses removed ('None (NSG already on subnet)' names 'None'). A
+value that names no radio is unknown, and the observation lists the radios' names; one that names
+several by the rule that matched is unknown as ambiguous. A radio already selected is 'already set',
+so a re-run changes nothing. A radio found as the field itself (by its own name, or picked by the
+person) is selected when the value names it or states 'checked'; 'unchecked' leaves one not selected
+as it is, and is unknown for a selected one, which only selecting another radio clears. Accessible
+names come from the accessibility snapshot, read as the YAML Playwright writes (snapshot_key): a key
+holding ': ' is single-quoted and its name JSON-escaped.
 
-A check box is ticked or cleared with set_checked(), or through its label when Fluent UI's tick
-mark intercepts that click, and its state is then read back: one that does not change is unknown.
-A label of an action or a navigation that the guide gives a state ('Check **X**', 'Uncheck **X**',
-'Under **Recovery**, enable **X**'; parse.py's "checked" and "unchecked", issue #296) is looked up
-as any other label (a switch is among the roles looked for), and when the element found is a check
-box, switch or radio it is set as a field's state is (set_state), never toggled: 'already set'
-without a click when it holds the state (also when it is disabled), ticked or cleared otherwise. A
-radio is selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a
-selected one. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting,
-edited after a deployment script created it) is not cleared. Any other element, a button named
-'Enable ...', is clicked as a label without a state is, unless the words that give the state are
-no click (parse.py's "stateOnly": 'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make
-sure **X** is checked'): then it is unknown, "the guide sets 'X' to checked, but it is no switch,
-check box or radio".
+A check box is ticked or cleared with set_checked(), or through its label when Fluent UI's tick mark
+intercepts that click, and its state is then read back: one that does not change is unknown. A label
+of an action or a navigation that the guide gives a state ('Check **X**', 'Uncheck **X**', 'Under
+**Recovery**, enable **X**'; parse.py's "checked" and "unchecked", issue #296) is looked up as any
+other label (a switch is among the roles looked for), and when the element found is a check box,
+switch or radio it is set as a field's state is (set_state), never toggled: 'already set' without a
+click when it holds the state (also when it is disabled), ticked or cleared otherwise. A radio is
+selected for 'checked'; 'unchecked' leaves one not selected as it is and is unknown for a selected
+one. So a box the Portal's default or an earlier run ticked (5.2.8's diagnostic setting, edited
+after a deployment script created it) is not cleared. An entry of a multi-select list (role option,
+treeitem, menuitemcheckbox or menuitemradio) is set the same way, by its aria-selected or
+aria-checked, read back after one click (unknown when it does not change), so an option already
+selected ('North Europe' in 1.3.9's Allowed locations, #342) is not clicked again and cleared; an
+entry without that attribute that holds exactly one check box is set through the box, and one with
+neither is clicked as before. Any other element, a button named 'Enable ...', is clicked as a label
+without a state is, unless the words that give the state are no click (parse.py's "stateOnly":
+'Toggle **X** to **Enabled**', 'Leave **X** unchecked', 'Make sure **X** is checked'): then it is
+unknown, "the guide sets 'X' to checked, but it is no switch, check box or radio".
 
 A step whose recording entry carries '"skip": "<reason>"' (an optional or conceptual step that
 would create resources, or the other option of a lettered pair; issue #200) is never performed:
@@ -293,6 +389,12 @@ So are the findings of a step completed in an earlier part and skipped in the re
 the resume lists it as skipped by the recording, once. All of this is written only once the
 resume has its answers, so a run that does not start (254) leaves results.jsonl as it was.
 
+A step the run performs whose label holds '[yoursubscription]' (1.3.18 item 2,
+recording.subscription_steps) needs the run's subscription name: without --subscription-name, or
+with one shorter than the Redactor redacts (Redactor.PREFIX_MIN), the run refuses to start (254)
+before the browser opens, as the label would not be found and the person's pick of the
+subscription's link would reach the recording as the literal name.
+
 Exit code: blocking drifts plus unknowns, capped at 250, when the run ends normally; 254 when a
 precondition, a guard or the state stopped it before the first step; 255 when it stopped mid-run
 (Ctrl+C, 'q', a closed window, a crash) with the state kept for -Resume, so nothing is cleaned up.
@@ -301,12 +403,14 @@ Usage (normally via Invoke-GuideDrift.ps1):
   python run.py --steps steps.json --recording recordings/lab-1.1.json --log-dir <dir>
                 --run-id 20261007-100000 --tenant-id <guid> --tenant-domain contoso.onmicrosoft.com
                 --state <path> --auth-state <path> [--tenant-name "Contoso Ltd"]
+                [--subscription-name "Example Subscription"]
                 [--from-step 1.1.6] [--resume] [--deployment-timeout-minutes 30]
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import itertools
 import json
 import re
 import subprocess
@@ -324,8 +428,9 @@ from decide import DECORATIONS, decoration_of  # noqa: E402
 from recording import literal_pattern  # noqa: E402
 from decide import Candidate, Decision, HumanDecider, ReplayDecider, decide  # noqa: E402
 from recording import (LABEL_ROLES, REMARK, EntryNames, Redactor, checkbox_state, env_secrets,  # noqa: E402
-                       missing_env, field_action, rejected_candidates, resource_name, skip_reason,
-                       fully_decoded, same_blade, start_blade, view_blade, write_json)
+                       missing_env, field_action, late_label_problems, late_minutes, rejected_candidates,
+                       resource_name, skip_reason, subscription_steps, fully_decoded, same_blade,
+                       start_blade, view_blade, write_json)
 from recording import (error_text, one_line, prompt_value, redaction_tokens, scrub, tag_action,  # noqa: E402
                        typed_secrets)
 
@@ -378,7 +483,13 @@ BLADE_EMPTY_TIMEOUT_MS = 20000
 # 'Deployment failed'. No guide screenshot shows either and no run has read them yet: the first
 # supervised run of a lab that deploys confirms them (blade-*.aria.txt keeps what a lookup that
 # found nothing read). A complete or succeeded deployment is none: nothing is waited for.
-DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress)\b", re.IGNORECASE)
+# The Chrome pass of Module 2 (2026-10-15, #328) saw the overview texts and a notification that
+# reads 'Initializing deployment...' first.
+DEPLOYMENT_RUNNING_TEXT = re.compile(r"^(?:deployment is in progress|deployment in progress|initializing deployment)\b",
+                                     re.IGNORECASE)
+# The overview's own running title: it can stay after ARM has finished until its Refresh is
+# clicked (Bastion, a private DNS zone, a load balancer; #328). A notification updates by itself.
+DEPLOYMENT_OVERVIEW_RUNNING = re.compile(r"^deployment is in progress\b", re.IGNORECASE)
 DEPLOYMENT_FAILED_TEXT = re.compile(r"^(?:your deployment failed|deployment failed)\b", re.IGNORECASE)
 DEPLOYMENT_ENDED_TEXT = re.compile(r"^(?:your deployment is complete|deployment succeeded)\b", re.IGNORECASE)
 DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPLOYMENT_ENDED_TEXT)
@@ -388,13 +499,24 @@ DEPLOYMENT_STATUS_TEXTS = (DEPLOYMENT_RUNNING_TEXT, DEPLOYMENT_FAILED_TEXT, DEPL
 DEPLOYMENT_TIMEOUT_MIN = 30
 DEPLOYMENT_POLL_MS = 5000
 DEPLOYMENT_SAY_S = 60
+# How often a wait refreshes a deployment overview still running: its Refresh button, or a reload
+# of the page when there is none.
+DEPLOYMENT_REFRESH_S = 30
+# A view that lists a label only later ("lateLabels", Runner.wait_for_late_view): how often it is
+# refreshed, and the button that does it.
+LATE_POLL_S = 60
+REFRESH = "Refresh"
 # A blade's or pane's close button, named after its title: "Close content 'New Group'". The title
 # reads 'undefined' while the blade's content is still loading.
 BLADE_CLOSE = re.compile(r"^Close content '(?P<title>.*)'$")
 UNTITLED_BLADE = "undefined"
-# What blade_still_loading() answers: a close button titled 'undefined', or a titled blade with no
-# content after its heading.
-BLADE_UNTITLED, BLADE_EMPTY = "untitled", "empty"
+# What blade_still_loading() answers: a close button titled 'undefined', a titled blade with no
+# content after its heading, or no frame read at all.
+BLADE_UNTITLED, BLADE_EMPTY, BLADE_UNREAD, BLADE_BUSY = "untitled", "empty", "unread", "busy"
+# The whole name of an element the Portal shows while a part of a blade still loads: Cost analysis'
+# date range button reads 'Loading... ' for seconds after the blade's title, and its VIEW list
+# comes only then (run 20261017-095926, about 13 s after the blade opened).
+LOADING_NAME = re.compile(r"^Loading(?:\.\.\.|\u2026)?\s*$")
 # What a rendered blade shows after its title: form controls, list rows, tabs, tables, prose.
 # Buttons, links and bare text do not count, as the blade's header has them (Maximize, Close)
 # before anything else renders.
@@ -405,6 +527,9 @@ CANDIDATE_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "t
                    "combobox", "checkbox", "radio", "switch", "heading", "cell")
 FIELD_ROLES = ("textbox", "combobox", "checkbox", "radio")
 ACTION_ROLES = ("button", "link", "menuitem", "tab", "treeitem", "option", "checkbox", "radio", "switch")
+# What an action's plain name is looked up among (find_exact): a list the guide opens by its name
+# ('Open the **VIEW** list', 1.3.18) too, last, so a button or link of that name wins.
+ACTION_LOOKUP_ROLES = ACTION_ROLES + ("combobox",)
 RESULT_ROLES = ("option", "link", "button", "menuitem")    # entries of the global search's results
 # A resource in a Portal list: the link in its name cell, the cell, or the whole row (#199).
 RESOURCE_ROLES = ("link", "gridcell", "row")
@@ -438,6 +563,94 @@ INTERACTIVE = ("a, button, [role=link], [role=button], [role=menuitem], [role=tr
                "[role=option], [role=checkbox], [role=radio]")
 # A blade menu's button that opens all its collapsed groups ('Manage', 'Monitoring', 'Help').
 EXPAND_ALL = "Expand all headers"
+COLLAPSE_ALL = "Collapse all headers"       # what a blade's menu shows once its groups are open
+# What a conditional item's record observes when its condition does not hold (condition_unmet).
+CONDITION_UNMET = "condition not met"
+# What a field's or tag's record observes when the form showed the value already, and what a disabled
+# submit observes when every value of its form was (Runner.form_unchanged).
+ALREADY_SET = "already set"
+NOTHING_TO_SAVE = "disabled: nothing to save, every value was already set"
+# What a kept outline holds when no frame could be read (save_blade_outline, BLADE_UNREAD).
+UNREAD_OUTLINE = "(no frame could be read: the Portal did not answer within the snapshot's time)"
+EXPAND_TRIES = 3                            # clicks of 'Expand all headers' per item, while the menu loads
+# A blade toolbar's overflow ('...'), which holds the commands that do not fit: a resource group's
+# pane opened beside the list is narrow, and 'Delete resource group' goes there (run
+# 20261017-123546, 1.3.6). A button or a menu item (OVERFLOW_ROLES).
+MORE_COMMANDS = "More commands"
+OVERFLOW_ROLES = ("button", "menuitem")
+# The closest region (a blade) holding the element: [its name, its left edge], or null. A region is
+# an element of role region, or a <section> named by aria-labelledby or aria-label, which is one
+# without the attribute: the Portal's blades are such sections ('section.fxs-blade', labelled by the
+# title and subtitle; run 20261017-003656). The name is the text of the elements aria-labelledby
+# names, joined by a space, or else the aria-label, as the accessible name is computed.
+BLADE_OF_JS = r"""e => {
+  const r = e.closest('[role=region], section[aria-labelledby], section[aria-label]');
+  if (!r) return null;
+  const ids = (r.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+  const texts = ids.map(id => document.getElementById(id)).filter(Boolean).map(x => x.textContent.trim());
+  const name = texts.length ? texts.join(' ') : (r.getAttribute('aria-label') || '');
+  return [name, r.getBoundingClientRect().left];
+}"""
+# Whether a click at the element's centre reaches it (receives_click): the element at that point is
+# the element or inside it; true when the centre is outside the window, which a scroll fixes, and for
+# an element without a width or height, which click_target clicks at its ancestor.
+HIT_TEST_JS = r"""e => {
+  const r = e.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return true;
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true;
+  const hit = document.elementFromPoint(x, y);
+  return !hit || hit === e || e.contains(hit);
+}"""
+# What blade_of names a blade that is an iframe in no region (a React blade).
+IFRAME_BLADE = "(iframe)"
+# A combo box whose own box has no width or no height (ng-select's input: Cost analysis' VIEW list,
+# run 20261017-003656, a zero-width input inside a 150 px container): the nearest ancestor, at most
+# four up, whose box has both, when it is visible and holds no other control; it may be fully
+# transparent, as ng-select's '.ng-input' is (opacity 0), since a click still reaches it. Answers that
+# ancestor's {x, width} (visible_in checks it against the window's columns), and marks it with
+# CLICK_PROXY_ATTR = the token when one is given (click_target clicks it); null for any other
+# element, or when no such ancestor is found.
+CLICK_PROXY_ATTR = "data-skycraft-click-proxy"
+ZERO_SIZE_COMBOBOX_JS = r"""(e, token) => {
+  if (e.getAttribute('role') !== 'combobox') return null;
+  const own = e.getBoundingClientRect();
+  if (own.width > 0 && own.height > 0) return null;
+  const controls = 'input, select, textarea, button, a[href], [role=combobox], [role=textbox], '
+                 + '[role=button], [role=link], [role=checkbox], [role=radio]';
+  let n = e.parentElement;
+  for (let i = 0; n && i < 4; i++, n = n.parentElement) {
+    const r = n.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      if (!n.checkVisibility({visibilityProperty: true})) return null;
+      if (n.querySelectorAll(controls).length !== 1) return null;
+      if (token !== null) n.setAttribute('""" + CLICK_PROXY_ATTR + r"""', token);
+      return {x: r.x, width: r.width};
+    }
+  }
+  return null;
+}"""
+# The control that follows a non-interactive text in document order (find_by_text_label, #342): an
+# input, select or textarea, or an element of role combobox, textbox, listbox, spinbutton or
+# radiogroup, visible, with no other visible text between the two. It marks that control with
+# NEXT_CONTROL_ATTR = the token it is given (a locator can then find it in its frame) and answers
+# whether there is one. A text that is, or sits inside, an interactive element (INTERACTIVE)
+# answers false.
+NEXT_CONTROL_ATTR = "data-skycraft-next-control"
+NEXT_CONTROL_TOKENS = itertools.count(1)
+NEXT_CONTROL_JS = (
+    "(e, token) => { if (e.closest('" + INTERACTIVE + "')) return false; "
+    "const control = 'input:not([type=hidden]), select, textarea, [role=combobox], [role=textbox], "
+    "[role=listbox], [role=spinbutton], [role=radiogroup]'; "
+    "const shown = n => n.getClientRects().length > 0; "
+    "const walker = e.ownerDocument.createTreeWalker(e.ownerDocument.body, "
+    "NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT); walker.currentNode = e; "
+    "for (let n = walker.nextNode(); n; n = walker.nextNode()) { if (e.contains(n)) continue; "
+    "if (n.nodeType === 1) { if (n.matches(control) && shown(n)) { "
+    "n.setAttribute('" + NEXT_CONTROL_ATTR + "', token); return true; } } "
+    "else if (n.textContent.trim()) { const p = n.parentElement; "
+    "if (p && !/^(SCRIPT|STYLE|NOSCRIPT)$/.test(p.tagName) && shown(p)) return false; } } "
+    "return false; }")
 # The global search's dropdown when the box names none in aria-controls or aria-owns: a popup of
 # these roles that was not visible before typing (MARK_POPUPS_JS records the visible ones first,
 # NEW_POPUP_JS asks, UNMARK_POPUPS_JS forgets them after the search). Only when that record could
@@ -509,6 +722,28 @@ FIELD_CANDIDATE_JS = r"""e => {
 }"""
 # FIELD_CANDIDATE_JS over every element of a locator in one call (visible_in's `keep_js`).
 FIELD_CANDIDATES_JS = f"els => els.map({FIELD_CANDIDATE_JS})"
+# Roles of an entry of a multi-select list, whose state is aria-selected or aria-checked (toggle_kind).
+OPTION_ROLES = ("option", "treeitem", "menuitemcheckbox", "menuitemradio")
+# What pick_option picks from (#342): an entry of a drop-down list, or of the tree that is one
+# (Cost Management's 'Reset period').
+PICK_ROLES = ("option", "treeitem")
+# The Portal's location lists put the geography before a region's name: '(Europe) Sweden Central'.
+REGION_PREFIX = re.compile(r"^\([^()]+\)\s+")
+# A list that groups its options names each after its group's heading: Create a resource group's
+# Region list puts 'Recommended: (Europe) Sweden Central' under 'Recommended' (run 20261017-123546).
+GROUP_PREFIX = re.compile(r"^[^:()]+:\s+")
+# A list that scrolls (virtualised: only the entries in view exist) is scrolled a page at a time,
+# this many pages at most, while the option is missing. LIST_SCROLL_JS scrolls the nearest
+# scrollable ancestor of the element (or, failing that, its first scrollable descendant) by its
+# own height and answers whether it moved.
+LIST_SCROLL_PAGES = 20
+LIST_SCROLL_JS = (
+    "e => { const scrolls = n => n.scrollHeight > n.clientHeight + 1 "
+    "&& !/^(visible|hidden)$/.test(getComputedStyle(n).overflowY); let list = null; "
+    "for (let n = e; n && !list; n = n.parentElement) if (scrolls(n)) list = n; "
+    "if (!list) list = [...e.querySelectorAll('*')].find(scrolls) || null; if (!list) return false; "
+    "const before = list.scrollTop; list.scrollTop = before + list.clientHeight; "
+    "return list.scrollTop > before; }")
 # What toggle_kind reads of an element: [tag, type attribute].
 TAG_TYPE_JS = "e => [e.tagName.toLowerCase(), (e.getAttribute('type') || '').toLowerCase()]"
 # For a check box's label (label_of): [whether it belongs to the input, whether it holds a link].
@@ -535,6 +770,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--account-name", action="append", default=[],
                    help="display name of the signed-in account, kept out of a recorded view or result "
                         "text (#320); may be repeated")
+    p.add_argument("--subscription-name", default="",
+                   help="the run's subscription name, kept out of the recording as [yoursubscription]")
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--auth-state", type=Path, required=True)
     p.add_argument("--from-step")
@@ -689,12 +926,18 @@ def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
 
 def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     """Whether a blade's frame is open while its content has not rendered yet (issue #233), from
-    aria_outline(): BLADE_UNTITLED when any close button reads "Close content 'undefined'";
+    aria_outline(): BLADE_UNREAD when the outline is empty, as no frame could be read (the main
+    frame's snapshot timed out while a subscription's overview rendered, run 20261017-003656: the
+    lookup then gave up before the blade's menu was there to expand); BLADE_UNTITLED when any
+    close button reads "Close content 'undefined'"; BLADE_BUSY when an element after the newest
+    blade's close button is named 'Loading...' as a whole (LOADING_NAME);
     BLADE_EMPTY when the newest blade (the one whose "Close content '<title>'" button comes last)
     has a heading named after its title but no content (BLADE_CONTENT_ROLES) after the later of
     the two; None otherwise. The top bar's search box and an older blade's fields come before
     them, so they do not count. Without a close button, or without the title heading, nothing is
     said to be loading and the lookup keeps its normal time."""
+    if not outline:
+        return BLADE_UNREAD
     closes = [(index, m.group("title")) for index, (role, name) in enumerate(outline)
               if role == "button" and (m := BLADE_CLOSE.match(name))]
     if not closes:
@@ -702,6 +945,8 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     if any(title == UNTITLED_BLADE for _, title in closes):
         return BLADE_UNTITLED
     close_at, title = closes[-1]
+    if any(LOADING_NAME.match(name) for _, name in outline[close_at + 1:]):
+        return BLADE_BUSY
     headings = [index for index, (role, name) in enumerate(outline) if role == "heading" and name == title]
     if not headings:
         return None
@@ -857,10 +1102,11 @@ def frame_in_window(frame: Frame, viewport: dict | None) -> bool:
 
 def visible_in(locator: Locator, viewport: dict | None, keep_js: str | None = None) -> list[Locator]:
     """The elements of `locator` that are visible and, when `viewport` is given, overlap the
-    window horizontally. is_visible() does not wait. An element that cannot be inspected (it
-    went away mid-check) still counts: dropping it could turn two matches into one, and the
-    runner would act on a guess. A frame that goes away raises PlaywrightError from count(),
-    which callers handle per frame. `keep_js` maps all elements to booleans in one call
+    window horizontally. is_visible() does not wait. A combo box without a width or height of its
+    own counts by the ancestor it is clicked at (ZERO_SIZE_COMBOBOX_JS). An element that cannot be
+    inspected (it went away mid-check) still counts: dropping it could turn two matches into one,
+    and the runner would act on a guess. A frame that goes away raises PlaywrightError from
+    count(), which callers handle per frame. `keep_js` maps all elements to booleans in one call
     (FIELD_CANDIDATES_JS); the ones answered false are never looked at, so a lookup and its wait
     only see what can match. When it cannot run, every element is kept, as for one that cannot
     be inspected."""
@@ -876,12 +1122,31 @@ def visible_in(locator: Locator, viewport: dict | None, keep_js: str | None = No
             continue
         element = locator.nth(index)
         try:
-            counts = element.is_visible() and in_window_columns(element, viewport)
+            if element.is_visible():
+                counts = in_window_columns(element, viewport)
+            else:
+                box = element.evaluate(ZERO_SIZE_COMBOBOX_JS, None, timeout=1000)
+                counts = box is not None and (viewport is None or overlaps_columns(box, viewport))
         except PlaywrightError:
             counts = True
         if counts:
             found.append(element)
     return found
+
+
+def click_target(element: Locator) -> Locator:
+    """Where to click `element`: itself, or for a combo box without a width or height of its own
+    the ancestor ZERO_SIZE_COMBOBOX_JS marks (Playwright refuses to click a zero-width element,
+    and the ancestor opens the list). An element that cannot be inspected is clicked itself, and
+    the error that follows is reported."""
+    token = str(next(NEXT_CONTROL_TOKENS))
+    try:
+        box = element.evaluate(ZERO_SIZE_COMBOBOX_JS, token, timeout=1000)
+    except PlaywrightError:
+        return element
+    if box is None:
+        return element
+    return element.locator(f'xpath=ancestor::*[@{CLICK_PROXY_ATTR}="{token}"][1]')
 
 
 def visible_across_frames(page: Page, make_locator: Callable[[Frame], Locator],
@@ -903,6 +1168,65 @@ def only_one(found: list[Locator], by_text: bool = False) -> Locator | None:
     if len(found) > 1:
         raise Ambiguous(f"{len(found)} visible elements match")
     return found[0] if found else None
+
+
+def newest_blade(found: list[Locator], by_text: bool = False) -> Locator | None:
+    """Like only_one, except that several matches may be told apart by the blade they sit in: the
+    Portal keeps earlier blades open to the left of the newest one (a resource group's pane beside
+    the list it was opened from), and both show a 'Tags' link. When every match sits in a region
+    (BLADE_OF_JS), the regions differ and the right-most one holds exactly one match, that is the
+    one (the step works on the newest blade); an element in a child frame counts in the blade of
+    the iframe that shows it (blade_of). Otherwise (two in that blade, one outside any
+    region, a region that cannot be read, regions at the same place) it raises Ambiguous."""
+    if len(found) < 2:
+        return only_one(found, by_text)
+    blades = []
+    for element in found:
+        try:
+            blades.append(blade_of(element))
+        except PlaywrightError:
+            blades.append(None)
+    if any(blade is None for blade in blades) or len({tuple(blade) for blade in blades}) < 2:
+        return only_one(found, by_text)
+    right = max(blade[1] for blade in blades)
+    newest = [element for element, blade in zip(found, blades) if blade[1] == right]
+    if len(newest) == 1:
+        return newest[0]
+    return only_one(found, by_text)
+
+
+def blade_of(element: Locator) -> list | None:
+    """The blade the element sits in (BLADE_OF_JS): the closest region in its own frame, or, for
+    an element of a child frame outside any region there, the region holding the iframe that
+    shows that frame, and so on up to the main frame. Cost analysis renders in an iframe of the
+    subscription's blade, so its 'Add filter' has no region of its own, while the Subscriptions
+    list beside it has an 'Add filter' too (run 20261017-095926). A React blade is an iframe of
+    its own beside the others, in no region (the Resource groups list and a group's pane, each
+    with a 'More commands', run 20261017-123546): the outermost such iframe then stands for the
+    blade, as [IFRAME_BLADE, its left edge]. None for an element of the main frame that no
+    region holds; raises PlaywrightError when the element or a frame cannot be read."""
+    blade = element.evaluate(BLADE_OF_JS, timeout=1000)
+    if blade is not None:
+        return blade
+    handle = element.element_handle(timeout=1000)
+    try:
+        frame = handle.owner_frame()
+    finally:
+        handle.dispose()
+    outermost = None        # the left edge of the iframe in the main frame that shows the element
+    while frame is not None and frame.parent_frame is not None:
+        iframe = frame.frame_element()
+        try:
+            blade = iframe.evaluate(BLADE_OF_JS)
+            box = iframe.bounding_box()
+        finally:
+            iframe.dispose()
+        if blade is not None:
+            return blade
+        if box is not None:
+            outermost = box["x"]
+        frame = frame.parent_frame
+    return None if outermost is None else [IFRAME_BLADE, outermost]
 
 
 def unique_visible(page: Page, make_locator: Callable[[Frame], Locator]) -> Locator | None:
@@ -930,24 +1254,41 @@ def interactive_text(scope: Frame | Locator, label: str) -> Locator:
 Choose = Callable[[list[Locator], bool], "Locator | None"]
 
 
+def receives_click(element: Locator) -> bool:
+    """Whether a click at the element's centre reaches it (HIT_TEST_JS): a toolbar too narrow for
+    its commands clips the last ones, which Playwright still calls visible, and the click times out
+    (run 20261017-123546, 1.3.6's 'Delete resource group' beside the '...' that holds it). An
+    element whose centre is outside the window counts, as it is scrolled into view first; so does
+    one that cannot be inspected: the click then reports what went wrong."""
+    try:
+        return bool(element.evaluate(HIT_TEST_JS, timeout=1000))
+    except PlaywrightError:
+        return True
+
+
 def find_in_roles(page: Page, label: str, roles: tuple[str, ...], root: Locator | None = None,
-                  choose: Choose = only_one) -> Locator | None:
+                  choose: Choose = newest_blade, reachable: bool = False) -> Locator | None:
     """The visible element of the first of `roles` whose accessible name is exactly `label`, then
     plain text that is, or sits inside, an interactive element (interactive_text). Static text is
     never a match: the Entra overview's 'Basic information' table has a 'Users' caption, and
     clicking it navigates nowhere. Every frame is searched, or only inside `root` when it is
     given (the global search's results). `choose` picks among the matches of one role, or of the
-    text: by default there must be at most one, and several raise Ambiguous. An ambiguous text
-    match counts as not found, so the person picks a role-specific candidate. A `choose` with a
-    `survey` attribute is first given every match of every pass (the roles and the text), so it
-    can judge them as one set (search_result)."""
+    text: by default there must be at most one, or one in the newest blade (newest_blade), and
+    several others raise Ambiguous. An ambiguous text match counts as not found, so the person
+    picks a role-specific candidate. A `choose` with a `survey` attribute is first given every
+    match of every pass (the roles and the text), so it can judge them as one set (search_result).
+    `reachable`: only an element a click at its centre reaches counts (receives_click), so a
+    command a narrow toolbar clips is not found, and the one in its overflow is
+    (Runner.open_overflow)."""
     def matches(make_locator: Callable[[Frame | Locator], Locator]) -> list[Locator]:
         if root is None:
-            return visible_across_frames(page, make_locator)
-        try:
-            return visible_in(make_locator(root), page.viewport_size)
-        except PlaywrightError:     # the results went away while the Portal reloaded them
-            return []
+            found = visible_across_frames(page, make_locator)
+        else:
+            try:
+                found = visible_in(make_locator(root), page.viewport_size)
+            except PlaywrightError:     # the results went away while the Portal reloaded them
+                return []
+        return [element for element in found if receives_click(element)] if reachable else found
 
     by_role = [(role, matches(lambda s, role=role: s.get_by_role(role, name=label, exact=True)))
                for role in roles] if hasattr(choose, "survey") else None
@@ -999,16 +1340,22 @@ def field_kind(element: Locator) -> tuple[str, str | None]:
 
 def one_field(found: list[Locator]) -> Locator | None:
     """The field among the elements a label matches: the only one, or else the only one that
-    takes a value, or else the only button that opens a list (field_kind). Fluent UI forms put
-    more than the field under a label ('Group description' and its info icon). Raises Ambiguous
-    naming what matched ('textarea, button'), so a live run shows what collided, and whenever
-    one of them could not be inspected: it may be the field, and dropping it would be a guess."""
+    takes a value, or else the only button that opens a list (field_kind), or else the only
+    radiogroup holding radios (Policy enforcement: a <label>, a wrapper <div> and the radiogroup
+    all carry the name). Fluent UI forms put more than the field under a label ('Group
+    description' and its info icon). Raises Ambiguous naming what matched ('textarea, button'),
+    so a live run shows what collided, and whenever one of them could not be inspected: it may
+    be the field, and dropping it would be a guess."""
     if len(found) <= 1:
         return found[0] if found else None
     kinds = [field_kind(element) for element in found]
     inspected = all(what != "?" for what, _ in kinds)
-    for tier in ("value", "dropdown") if inspected else ():
-        picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
+    for tier in ("value", "dropdown", "group") if inspected else ():
+        if tier == "group":     # the radio group of the name, beside its <label> and a wrapper <div>
+            picked = [element for element, (what, _) in zip(found, kinds)
+                      if what == "radiogroup" and parts_of(element, "radio")]
+        else:
+            picked = [element for element, (_, kind) in zip(found, kinds) if kind == tier]
         if len(picked) == 1:
             return picked[0]
         if picked:
@@ -1041,8 +1388,12 @@ def find_field(page: Page, label: str) -> Locator | None:
     a domain combo box, and fill_field splits the value over those parts. Only elements that can
     be a field count (FIELD_CANDIDATES_JS, part of the lookup): a list's column header or a plain button of the label's
     name is never taken for the field, so the field is not found and the person decides. Of
-    several matches, the one that takes a value wins (one_field). An ambiguous match raises
-    Ambiguous."""
+    several matches, the one that takes a value wins, else the one button that opens a list, else
+    the one radio group holding radios (one_field, #342: 1.3.5's 'Policy enforcement' is a <label>,
+    a wrapper <div> and the radiogroup). An ambiguous match raises Ambiguous. A field whose label is
+    plain text beside an unnamed control is not looked for here: find_exact asks find_by_text_label
+    for it, after the decorated names (find_decorated), so a field of the label's own name, plain
+    or decorated, always wins."""
     def fields(make_locator: Callable[[Frame], Locator]) -> list[Locator]:
         return visible_across_frames(page, make_locator, keep_js=FIELD_CANDIDATES_JS)
 
@@ -1105,16 +1456,99 @@ def find_decorated(page: Page, label: str, field: bool = False) -> Locator | Non
     for a member the guide selects, the text box 'Email information *' for the field 'Email'.
     A row's check box is never a field (Decoration.fields). Every decoration counts at
     once, so two elements decorated differently are as ambiguous as two of one name: Ambiguous,
-    or for a field the one that takes a value (one_field)."""
+    or for a field the one that takes a value (one_field). Unlike the other lookups it keeps
+    only_one, not newest_blade, on purpose: a decorated name is a looser match than the plain one,
+    so one in the list's blade and one in the pane's stay ambiguous, and the person decides."""
     found: list[Locator] = []
     for role in FIELD_ROLES if field else ACTION_ROLES:
-        names = [d.of(label) for d in DECORATIONS if role in d.roles and (d.fields or not field)]
+        names = [d.of(label) for d in DECORATIONS
+                 if role in d.roles and (d.fields or not field) and not d.search]
         if names:
             pattern = re.compile("^(?:" + "|".join(map(literal_pattern, names)) + ")$")
             found += visible_across_frames(page, lambda f, role=role, pattern=pattern:
                                            f.get_by_role(role, name=pattern),
                                            keep_js=FIELD_CANDIDATES_JS if field else None)
     return one_field(found) if field else only_one(found)
+
+
+# Set on the control find_row_control returns, so act_on_label selects it (set_state) rather than click it.
+ROW_CONTROL_MARK = "skycraft_row_control"
+
+
+def find_row_control(page: Page, label: str) -> Locator | None:
+    """The selection control of the picker row that names `label` (#342): a policy picker's row
+    holds a radio named 'Select' beside the cell that carries the policy's name (1.3.5, 1.3.9).
+    The rows are the visible `row` elements that are no header row (they hold no column header)
+    and hold a `gridcell` or `cell` whose accessible name is exactly `label`, so 'Allowed
+    locations' is not the row 'Azure Cosmos DB allowed locations' or 'Allowed locations for
+    resource groups'. Two such rows raise Ambiguous. The row's control is its one radio, or else
+    its one check box whose name is no decoration of the label (decide.DECORATIONS: that one is
+    find_decorated's); None when the row holds neither or several. The control is marked
+    (ROW_CONTROL_MARK) for act_on_label."""
+    rows = []
+    for row in visible_across_frames(page, lambda f: f.get_by_role("row")):
+        try:
+            if row.get_by_role("columnheader").count():
+                continue
+            if any(row.get_by_role(role, name=label, exact=True).count() for role in ("gridcell", "cell")):
+                rows.append(row)
+        except PlaywrightError:     # the row went away while the Portal re-rendered the list
+            continue
+    if len(rows) > 1:
+        raise Ambiguous(f"{len(rows)} visible rows have a cell named exactly '{label}'")
+    if not rows:
+        return None
+    viewport = page.viewport_size
+    radios = visible_in(rows[0].get_by_role("radio"), viewport)
+    boxes = [] if radios else [box for box in visible_in(rows[0].get_by_role("checkbox"), viewport)
+                               if decoration_of(accessible_name(box), label, "checkbox") is None]
+    control = (radios if radios else boxes)
+    if len(control) != 1:
+        return None
+    setattr(control[0], ROW_CONTROL_MARK, True)
+    return control[0]
+
+
+def opens_a_list(element: Locator) -> bool:
+    """Whether the control opens a list: a combo box, or an element with aria-haspopup listbox.
+    One that cannot be inspected does not. act_on_label asks before it clicks the control, which
+    may be gone or re-rendered after the click."""
+    try:
+        _, role, _, popup, _ = element.evaluate(FIELD_KIND_JS, timeout=1000)
+    except PlaywrightError:
+        return False
+    return role == "combobox" or popup == "listbox"
+
+
+def find_by_text_label(page: Page, label: str, opens_list: bool = False) -> Locator | None:
+    """The control whose label is plain text beside it (#342): the Portal's Create Advisor Alerts
+    form has three combo boxes without a name under the texts 'Category', 'Sub-category' and
+    'Impact level', and a budget's 'Name' is a text box named by its placeholder 'Enter a unique
+    name'. Text whose whole text is `label`, that is no interactive element and sits in none
+    (get_by_text, exact), gives the first control after it in document order (NEXT_CONTROL_JS:
+    input, select, textarea, or role combobox, textbox, listbox, spinbutton, radiogroup) when no
+    other text comes between; the control's own accessible name does not matter (empty, or not
+    the label). Of several, the newest blade's is taken (newest_blade); otherwise they raise
+    Ambiguous. `opens_list`: only a control that opens a list counts (opens_a_list), which is
+    all a guide's action names this way. The guide's element: a match with nothing recorded."""
+    controls: list[Locator] = []
+    viewport = page.viewport_size
+    for frame in all_frames(page):
+        try:
+            for text in visible_in(frame.get_by_text(label, exact=True), viewport):
+                token = str(next(NEXT_CONTROL_TOKENS))
+                try:
+                    if not text.evaluate(NEXT_CONTROL_JS, token, timeout=1000):
+                        continue
+                except PlaywrightError:     # the text went away while the Portal re-rendered
+                    continue
+                # A second text of the same control re-marks it: only the last token finds it.
+                controls += visible_in(frame.locator(f'[{NEXT_CONTROL_ATTR}="{token}"]'), viewport)
+        except PlaywrightError:     # the frame detached or navigated: nothing to find there
+            continue
+    if opens_list:
+        controls = [control for control in controls if opens_a_list(control)]
+    return newest_blade(controls)
 
 
 def find_exact(page: Page, label: str, field: bool = False, decorated: bool = True) -> Locator | None:
@@ -1127,11 +1561,15 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
     is the guide's element as well, so the plain name always wins; not at all when `decorated`
     is False (looking_for, while a blade may still render the plain one). A plain name on screen
     as interactive text more than once is not found, as before, and is no reason to take a
-    decorated one: the person decides."""
+    decorated one: the person decides. After the decorated names, for an action, the control of
+    the picker row whose cell names the label (find_row_control, #342); then, for a field, and
+    for an action when the control opens a list, the control after the plain text of that label
+    (find_by_text_label, #342). The text-label lookup sits here, last, and not in find_field, so
+    every name a control carries itself, plain or decorated, is tried before a text beside one."""
     bare = LEADING_PLUS.sub("", label, count=1)
     names = [label] + ([bare] if bare and bare != label else [])
     for name in names:
-        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_ROLES)
+        element = find_field(page, name) if field else find_in_roles(page, name, ACTION_LOOKUP_ROLES, reachable=True)
         if element is not None:
             return element
     if not decorated or (not field and any(visible_across_frames(page, lambda f, name=name: interactive_text(f, name))
@@ -1141,7 +1579,9 @@ def find_exact(page: Page, label: str, field: bool = False, decorated: bool = Tr
         element = find_decorated(page, name, field)
         if element is not None:
             return element
-    return None
+    if field:
+        return find_by_text_label(page, label)
+    return find_row_control(page, label) or find_by_text_label(page, label, opens_list=True)
 
 
 def find_resource(page: Page, name: str) -> Locator | None:
@@ -1239,7 +1679,7 @@ def search_dropdown(page: Page, frame: Frame, box: Locator) -> Locator | None:
         return None
 
 
-def search_result(label: str, root: object) -> Choose:
+def search_result(label: str, root: object, category: bool = False) -> Choose:
     """find_in_roles' choice among exact results in the search dropdown `root` (an element
     handle). The Portal lists a service under 'Services' and again under 'Marketplace' (an offer
     to buy) and in 'Documentation' links; the section is the result's group name, or the nearest
@@ -1251,7 +1691,9 @@ def search_result(label: str, root: object) -> Choose:
     not when it is the highlighted part of a longer result ('Microsoft Entra ID Protection'). A
     result that changes while it is read raises Ambiguous, so the caller looks again. "Another
     result" means any match of any role pass or of the text (survey), not only of the pass at
-    hand."""
+    hand. `category` (#342): `label` is a service category's result name
+    (decide.Decoration.search): only a result under Services counts, whatever else has no section
+    or another, and never plain text."""
     reads: dict[int, tuple[str, str]] = {}      # id(element) -> (section, whole)
     seen: list[Locator] = []                    # keeps the ids valid
     sectioned = False
@@ -1272,12 +1714,14 @@ def search_result(label: str, root: object) -> Choose:
         sectioned = any(read_of(element)[0] for element in everything)
 
     def choose(found: list[Locator], by_text: bool) -> Locator | None:
+        if category and by_text:
+            return None
         read = [(element, *read_of(element)) for element in found]
         services: list[Locator] = []
         others: list[Locator] = []
         for element, section, whole in read:
             if (SEARCH_EXCLUDED.match(section) or (by_text and whole != label)
-                    or (sectioned and not section)):
+                    or (sectioned and not section) or (category and not SEARCH_PREFERRED.match(section))):
                 continue
             (services if SEARCH_PREFERRED.match(section) else others).append(element)
         if len(services) > 1:
@@ -1303,15 +1747,20 @@ def tree_of(dropdown: Locator | None, frame: Frame) -> str:
 
 
 def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None = None) -> Locator | None:
-    """Type `label` into the Portal's global search and return the result named exactly `label`
-    in its dropdown (search_dropdown, search_result): an option, link, button or menu item, then
-    plain text. Nothing outside the dropdown counts, so a same-named link already on the page (a
-    favourite in the portal menu, a tile on Home) is never clicked. The results load as the
-    Portal answers, so they are looked for until FIND_TIMEOUT_MS has passed; an ambiguous look
-    is retried too. When there is no exact result, or the last look was ambiguous, `diagnose` is
-    given the dropdown's accessibility tree; then None is returned (the person picks from the
-    list still open on screen) or the last Ambiguous raised. Raises LookupError when the search
-    box is not on screen, PageClosed when the window is gone."""
+    """Type `label` into the Portal's global search and return its result in the dropdown
+    (search_dropdown, search_results): the result named exactly `label` (search_result: an
+    option, link, button or menu item, then plain text), or, when there is none, the Services
+    entry named `label` plus its service group (decide.Decoration.search, #342: 'Resource groups
+    Resource Manager' for 'Resource groups'), never under Marketplace or Documentation. Nothing
+    outside the dropdown counts, so a same-named link already on the page (a favourite in the
+    portal menu, a tile on Home) is never clicked. The results load as the Portal answers, so
+    they are looked for until FIND_TIMEOUT_MS has passed; an ambiguous look is retried too. When
+    no results list shows up by then, the box is emptied and closed and `label` typed once more
+    with a new deadline (#342). When there is no result after that, or the last look was
+    ambiguous, `diagnose` is given the dropdown's accessibility tree (the whole frame's when no
+    list was identified); then None is returned (the person picks from the list still open on
+    screen) or the last Ambiguous raised. Raises LookupError when the search box is not on
+    screen, PageClosed when the window is gone."""
     found = in_time(page, lambda: search_box(page))
     if found is None:
         if page.is_closed():
@@ -1333,36 +1782,54 @@ def search_portal(page: Page, label: str, diagnose: Callable[[str], None] | None
 
 def search_results(page: Page, frame: Frame, box: Locator, label: str,
                    diagnose: Callable[[str], None] | None) -> Locator | None:
-    """search_portal once the popups on the page are recorded: type, then look for the result."""
-    try:
-        box.fill(label, timeout=FIND_TIMEOUT_MS)
-    except PlaywrightError:
-        if page.is_closed():
-            raise PageClosed("the browser window was closed") from None
-        raise
-    page.wait_for_timeout(SETTLE_MS)
-    deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
-    while True:
-        dropdown = search_dropdown(page, frame, box)
-        ambiguous: Ambiguous | None = None
-        if dropdown is not None:
-            result = None
-            try:
-                root = dropdown.element_handle(timeout=1000)
+    """search_portal once the popups on the page are recorded: type, then look for the result.
+    The result is the one named exactly `label` (search_result); when there is none, the one a
+    search decoration makes of it (decide.Decoration.search, #342: 'Resource groups Resource
+    Manager' for 'Resource groups'), under Services only. When the results are not loading at
+    all (no results list is identified before the deadline), the box is emptied and closed
+    (close_search) and the label is typed once more with a new deadline; the tree is kept only
+    after that second try."""
+    dropdown = None
+    ambiguous: Ambiguous | None = None
+    for attempt in range(2):
+        if attempt:
+            close_search(page)
+        try:
+            box.fill(label, timeout=FIND_TIMEOUT_MS)
+        except PlaywrightError:
+            if page.is_closed():
+                raise PageClosed("the browser window was closed") from None
+            raise
+        page.wait_for_timeout(SETTLE_MS)
+        deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
+        while True:
+            dropdown = search_dropdown(page, frame, box)
+            ambiguous = None
+            if dropdown is not None:
+                result = None
                 try:
-                    result = find_in_roles(page, label, RESULT_ROLES, root=dropdown,
-                                           choose=search_result(label, root))
-                finally:
-                    root.dispose()
-            except Ambiguous as error:
-                ambiguous = error
-            except PlaywrightError:     # the dropdown went away while the Portal reloaded it
-                pass
-            if result is not None:
-                return result
-        if time.monotonic() >= deadline:
+                    root = dropdown.element_handle(timeout=1000)
+                    try:
+                        result = find_in_roles(page, label, RESULT_ROLES, root=dropdown,
+                                               choose=search_result(label, root))
+                        for decoration in (d for d in DECORATIONS if d.search):
+                            if result is None:
+                                named = decoration.of(label)
+                                result = find_in_roles(page, named, decoration.roles, root=dropdown,
+                                                       choose=search_result(named, root, category=True))
+                    finally:
+                        root.dispose()
+                except Ambiguous as error:
+                    ambiguous = error
+                except PlaywrightError:     # the dropdown went away while the Portal reloaded it
+                    pass
+                if result is not None:
+                    return result
+            if time.monotonic() >= deadline:
+                break
+            page.wait_for_timeout(500)
+        if dropdown is not None:
             break
-        page.wait_for_timeout(500)
     if diagnose is not None:
         diagnose(tree_of(dropdown, frame))
     if ambiguous is not None:
@@ -1493,7 +1960,6 @@ def stays_disabled(page: Page, element: Locator) -> bool:
 # Buttons that commit a form or a blade; one that stays disabled after every value of its step was
 # already in place has nothing to save (#209).
 COMMIT_BUTTON = re.compile(r"^(save|create|apply|update|submit|ok|done|confirm|add|select)\b", re.IGNORECASE)
-NOTHING_TO_SAVE = "nothing to save"
 
 
 def option_selected(element: Locator) -> bool:
@@ -1526,49 +1992,200 @@ def current_text(element: Locator, tag: str) -> str:
     return element.inner_text(timeout=FIND_TIMEOUT_MS).strip()
 
 
-def find_option(page: Page, element: Locator, name: str | re.Pattern[str]) -> Locator | None:
-    """The option called `name` of the open combo box `element`: inside the listbox it names in
-    aria-controls or aria-owns, when that is on screen; otherwise anywhere on screen. Raises
-    Ambiguous when several options have the name."""
+def open_list(page: Page, element: Locator) -> Locator | None:
+    """The listbox, tree or dialog the combo box `element` names in aria-controls or aria-owns,
+    when it is on screen (and only one is); None otherwise."""
     try:
         owned = owned_ids(element)
     except PlaywrightError:
-        owned = []
+        return None
     for owned_id in owned:
         try:
-            listbox = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
+            found = unique_visible(page, lambda f, owned_id=owned_id: f.locator(by_id(owned_id)))
         except Ambiguous:
             continue
-        if listbox is not None:
-            try:
-                return only_one(visible_in(listbox.get_by_role("option", name=name, exact=True),
-                                           page.viewport_size))
-            except PlaywrightError:     # the list closed or reloaded: look again
-                return None
-    return find_by_name(page, "option", name)
+        if found is not None:
+            return found
+    return None
 
 
-def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False) -> str | None:
+def option_names(name: str | re.Pattern[str]) -> list[str | re.Pattern[str]]:
+    """What an option may be called, in the order it is looked for: `name` itself, then `name`
+    after a region prefix (REGION_PREFIX), then after a group's heading (GROUP_PREFIX) and an
+    optional region prefix, in the same case rule."""
+    body, flags = ((literal_pattern(name) + "$", 0) if isinstance(name, str)
+                   else (name.pattern.removeprefix("^"), name.flags))
+    region = REGION_PREFIX.pattern.removeprefix("^")
+    return [name, re.compile("^" + region + body, flags),
+            re.compile("^" + GROUP_PREFIX.pattern.removeprefix("^") + "(?:" + region + ")?" + body, flags)]
+
+
+def options_named(page: Page, container: Locator | None, name: str | re.Pattern[str]) -> list[Locator]:
+    """The visible entries (PICK_ROLES) called `name`: inside `container` when there is one,
+    else anywhere on screen."""
+    found: list[Locator] = []
+    for role in PICK_ROLES:
+        if container is not None:
+            found += visible_in(container.get_by_role(role, name=name, exact=True), page.viewport_size)
+        else:
+            found += visible_across_frames(page, lambda f, role=role: f.get_by_role(role, name=name, exact=True))
+    return found
+
+
+def find_option(page: Page, element: Locator, name: str | re.Pattern[str]) -> Locator | None:
+    """The option called `name` of the open combo box `element`: an entry of role option or
+    treeitem, inside the listbox, tree or dialog it names in aria-controls or aria-owns, when that
+    is on screen; otherwise anywhere on screen. The name matches whole; when no entry has it, after
+    removing a region prefix from the entry's name ('Sweden Central' finds '(Europe) Sweden
+    Central'). Raises Ambiguous when several entries match by the rule that matched."""
+    container = open_list(page, element)
+    try:
+        for candidate in option_names(name):
+            found = options_named(page, container, candidate)
+            if found:
+                return only_one(found)
+    except PlaywrightError:     # the list closed or reloaded: look again
+        return None
+    return None
+
+
+def filter_box(page: Page, element: Locator, tag: str, container: Locator | None) -> Locator | None:
+    """The text box that narrows the open list: the one search box or text box the list (the popup
+    `container`) holds, else the combo box itself when it is an editable input; None otherwise."""
+    if container is not None:
+        boxes = parts_of(container, "searchbox") + parts_of(container, "textbox")
+        if boxes:
+            return boxes[0] if len(boxes) == 1 else None
+    if tag == "input" and not is_read_only(element):
+        return element
+    return None
+
+
+def scroll_list(page: Page, element: Locator) -> bool:
+    """Scroll the open list of `element` by a page; whether it moved. The list is the one the combo
+    box names, else the page of the first entry on screen."""
+    target = open_list(page, element)
+    if target is None:
+        entries = [found for role in PICK_ROLES
+                   for found in visible_across_frames(page, lambda f, role=role: f.get_by_role(role))]
+        target = entries[0] if entries else None
+    if target is None:
+        return False
+    try:
+        return bool(target.evaluate(LIST_SCROLL_JS, timeout=1000))
+    except PlaywrightError:
+        return False
+
+
+def list_tree(page: Page, element: Locator) -> str:
+    """The accessibility tree of the open list, for a run's diagnosis (list-<step>-<line>.aria.txt):
+    the list the combo box names; else the popups on screen; else the frames' bodies."""
+    container = open_list(page, element)
+    if container is not None:
+        targets, what = [container], "the open list"
+    else:
+        targets = [popup for frame in all_frames(page) for popup in safe_visible(frame, POPUP_ROLES)]
+        what = "the popups on screen"
+        if not targets:
+            targets, what = [frame.locator("body") for frame in all_frames(page)], "no list identified; the whole page"
+    lines = [f"# {what}"]
+    for target in targets:
+        try:
+            lines.append(target.aria_snapshot(timeout=2000))
+        except PlaywrightError as error:
+            lines.append(f"# no snapshot ({error_text(error)})")
+    return "\n".join(lines)
+
+
+def safe_visible(frame: Frame, selector: str) -> list[Locator]:
+    """The visible elements `selector` matches in the frame; none when it went away."""
+    try:
+        return visible_in(frame.locator(selector), None)
+    except PlaywrightError:
+        return []
+
+
+def find_in_list(page: Page, element: Locator, label: str) -> Locator | None:
+    """The option called `label` in the list the combo box `element` opened (find_option: its
+    popup, else on screen; the region prefix counts), for a label that follows the label which
+    opened the list. Looked at once; then, when the list has a filter box (filter_box), `label`
+    (without its region prefix) is typed into it and the list is looked at for SETTLE_MS; then
+    scrolled, a page at a time, LIST_SCROLL_PAGES at most (scroll_list). None when the list does
+    not hold it: the label is looked for on screen then. Raises Ambiguous as find_option does."""
+    found = find_option(page, element, label)
+    if found is not None:
+        return found
+    try:
+        tag = element.evaluate(TAG_TYPE_JS, timeout=1000)[0]
+        box = filter_box(page, element, tag, open_list(page, element))
+        if box is not None:
+            box.fill(REGION_PREFIX.sub("", label), timeout=FIND_TIMEOUT_MS)
+            page.wait_for_timeout(SETTLE_MS // 5)
+    except PlaywrightError:     # the list closed or reloaded: look on screen
+        return None
+    found = in_time(page, lambda: find_option(page, element, label), SETTLE_MS)
+    for _ in range(LIST_SCROLL_PAGES):
+        if found is not None or not scroll_list(page, element):
+            break
+        page.wait_for_timeout(250)
+        found = find_option(page, element, label)
+    return found
+
+
+def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case: bool = False,
+                diagnose: Callable[[str], None] | None = None) -> str | None:
     """Open the combo box or drop-down button `element` and pick the option named `value`;
-    'already set' when it shows `value` already. With `ignore_case`, names are compared regardless
+    'already set' when it shows `value` already (also the name with a region prefix: 'Sweden
+    Central' for '(Europe) Sweden Central'). With `ignore_case`, names are compared regardless
     of case (a domain). The options load as the Portal answers, so they are looked for until
     FIND_TIMEOUT_MS has passed (find_option), and so is the field's text after the click, which
-    the Portal may update late. Raises LookupError when no option has the name, or when the
-    element does not show `value` by then; Ambiguous when several options have the name."""
+    the Portal may update late. When the open list holds one search box or text box, or the combo
+    box is an editable input, `value` (without its region prefix) is typed into it before the
+    options are looked at (filter_box). An option still missing when the time has passed is looked
+    for in a list that scrolls, a page at a time, LIST_SCROLL_PAGES at most. Raises LookupError when
+    no option has the name, or when the element does not show `value` by then; Ambiguous when
+    several options have the name. When no option is found, `diagnose` is given the open list's
+    accessibility tree (list_tree)."""
     def shows(text: str) -> bool:
-        return text == value or (ignore_case and text.casefold() == value.casefold())
+        # The whole text, or one of its lines: a Region field shows the region on its first line
+        # and more text under it (run 20261017-123546, 1.3.6).
+        texts = [text.strip()] + [line.strip() for line in text.splitlines() if line.strip()]
+        names = [n for t in texts for n in (t, REGION_PREFIX.sub("", t), REGION_PREFIX.sub("", GROUP_PREFIX.sub("", t)))]
+        return any(n == value or (ignore_case and n.casefold() == value.casefold()) for n in names)
 
     if shows(current_text(element, tag)):
         return "already set"
-    element.click(timeout=FIND_TIMEOUT_MS)
+    click_target(element).click(timeout=FIND_TIMEOUT_MS)
     page.wait_for_timeout(SETTLE_MS // 2)
     name = re.compile("^" + literal_pattern(value) + "$", re.IGNORECASE) if ignore_case else value
+    filtered = False
+
+    def look() -> Locator | None:
+        nonlocal filtered
+        if not filtered:
+            box = filter_box(page, element, tag, open_list(page, element))
+            if box is not None:
+                try:
+                    box.fill(REGION_PREFIX.sub("", value), timeout=FIND_TIMEOUT_MS)
+                    filtered = True
+                    page.wait_for_timeout(SETTLE_MS // 5)
+                except PlaywrightError:     # the list closed: try again with the next look
+                    pass
+        return find_option(page, element, name)
+
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
-    option = find_option(page, element, name)
+    option = look()
     while option is None and time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+        option = look()
+    for _ in range(LIST_SCROLL_PAGES):
+        if option is not None or not scroll_list(page, element):
+            break
         page.wait_for_timeout(250)
         option = find_option(page, element, name)
     if option is None:
+        if diagnose is not None:
+            diagnose(list_tree(page, element))
         raise LookupError(f"option '{value}' not found")
     option.click(timeout=FIND_TIMEOUT_MS)
     deadline = time.monotonic() + FIND_TIMEOUT_MS / 1000
@@ -1581,25 +2198,27 @@ def pick_option(page: Page, element: Locator, tag: str, value: str, ignore_case:
     return None
 
 
-def fill_parts(page: Page, container: Locator, value: str) -> str | None:
+def fill_parts(page: Page, container: Locator, value: str,
+               diagnose: Callable[[str], None] | None = None) -> str | None:
     """Give `value` to a labelled container that is not a control itself (find_field). With one
     text box and nothing else, the text box gets the value. With one text box and one combo box
     and an '@' in the value (the Portal's user principal name: name, '@', domain), the combo box
     must show the part after the last '@', compared regardless of case (when it does not, the
     domain is picked from its options), and then the text box gets the part before it. With
     radios and no combo box (a radio group: a storage account's 'Performance', Standard or
-    Premium), the radio the value names is selected (pick_radio: its whole name, else the part
-    before its ':', else either without the value's remark), also when a text box is there (an
-    'Other' option's): the value names a radio, and nothing is typed. 'already set' when every
-    part held its value before. Raises LookupError for any other container, when the domain
-    cannot be picked or when no radio is named so; Ambiguous when several options or radios
-    are."""
+    Premium; find_field takes the radiogroup when it, a <label> and a wrapper <div> share the
+    name, 'Policy enforcement'), the radio the value names is selected (pick_radio: its whole
+    name, else the part before its ':', else either without the value's remark), also when a
+    text box is there (an 'Other' option's): the value names a radio, and nothing is typed.
+    'already set' when every part held its value before. Raises LookupError for any other
+    container, when the domain cannot be picked or when no radio is named so; Ambiguous when
+    several options or radios are."""
     textboxes, comboboxes = parts_of(container, "textbox"), parts_of(container, "combobox")
     radios = parts_of(container, "radio")
     if radios and not comboboxes:
         return pick_radio(page, radios, value)
     if len(textboxes) == 1 and not comboboxes:
-        return fill_field(page, textboxes[0], value)
+        return fill_field(page, textboxes[0], value, diagnose)
     if len(textboxes) == 1 and len(comboboxes) == 1 and not radios and "@" in value:
         local, domain = value.rsplit("@", 1)
         # A text box that cannot take the name is found out before the domain is picked: the combo box
@@ -1609,12 +2228,12 @@ def fill_parts(page: Page, container: Locator, value: str) -> str | None:
             raise ReadOnly("the field is read-only")
         try:
             tag = comboboxes[0].evaluate(CONTROL_JS, timeout=FIND_TIMEOUT_MS)[0]
-            picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True)
+            picked = pick_option(page, comboboxes[0], tag, domain, ignore_case=True, diagnose=diagnose)
         except Ambiguous:
             raise
         except LookupError as error:
             raise LookupError(f"the domain combo box: {error}") from error
-        typed = fill_field(page, textboxes[0], local)
+        typed = fill_field(page, textboxes[0], local, diagnose)
         return "already set" if typed and picked else None
     raise LookupError(f"the labelled element is not a field: it holds {len(textboxes)} text box(es), "
                       f"{len(comboboxes)} combo box(es) and {len(radios)} radio(s)")
@@ -1732,10 +2351,10 @@ def set_check_state(page: Page, element: Locator, checked: bool) -> None:
         raise LookupError(f"its label was clicked to make it {wanted}, but it is still {other}")
 
 
-def state_within(page: Page, element: Locator, checked: bool, ms: int) -> bool:
-    """Whether the check box shows `checked` within `ms`, read every 250 ms."""
+def state_within(page: Page, element: Locator, checked: bool, ms: int, kind: str = "check") -> bool:
+    """Whether the toggle (toggle_state) shows `checked` within `ms`, read every 250 ms."""
     deadline = time.monotonic() + ms / 1000
-    while element.is_checked(timeout=FIND_TIMEOUT_MS) != checked:
+    while toggle_state(element, kind) != checked:
         if time.monotonic() >= deadline:
             return False
         page.wait_for_timeout(250)
@@ -1746,14 +2365,45 @@ def toggle_kind(element: Locator) -> tuple[str | None, str, str]:
     """(what the element is as a toggle, its role attribute, its tag): 'radio' for a radio (role
     radio, or an <input type=radio> without a role), 'check' for a check box or switch (role
     checkbox or switch, or an <input type=checkbox>, or one of type radio with another role),
-    None for any other element (#296)."""
+    'option' for an entry of a multi-select list (role option, treeitem, menuitemcheckbox or
+    menuitemradio) that carries aria-selected or aria-checked, whose state is that attribute
+    (toggle_state), and 'check' for such an entry without one that holds exactly one check box,
+    which option_box finds and set_state sets; None for any other element (#296)."""
     role = element.get_attribute("role", timeout=FIND_TIMEOUT_MS) or ""
     tag, input_type = element.evaluate(TAG_TYPE_JS)
+    if role in OPTION_ROLES:
+        if option_state(element) is not None:
+            return "option", role, tag
+        if option_box(element) is not None:
+            return "check", role, tag
     if role == "radio" or (not role and tag == "input" and input_type == "radio"):
         return "radio", role, tag
     if role in ("checkbox", "switch") or (tag == "input" and input_type in ("checkbox", "radio")):
         return "check", role, tag
     return None, role, tag
+
+
+def option_state(element: Locator) -> str | None:
+    """The 'true' or 'false' that an option carries as aria-selected or aria-checked, else None."""
+    for name in ("aria-selected", "aria-checked"):
+        value = (element.get_attribute(name, timeout=FIND_TIMEOUT_MS) or "").lower()
+        if value in ("true", "false"):
+            return value
+    return None
+
+
+def option_box(element: Locator) -> Locator | None:
+    """The one check box inside the option `element`, None when it holds none or several."""
+    boxes = element.get_by_role("checkbox")
+    return boxes.nth(0) if boxes.count() == 1 else None
+
+
+def toggle_state(element: Locator, kind: str) -> bool:
+    """Whether the toggle `element` of `kind` (toggle_kind) is checked: is_checked() for a check
+    box, switch or radio, aria-selected or aria-checked for an 'option'."""
+    if kind == "option":
+        return option_state(element) == "true"
+    return element.is_checked(timeout=FIND_TIMEOUT_MS)
 
 
 def set_state(page: Page, element: Locator, checked: bool, kind: str) -> str | None:
@@ -1762,30 +2412,42 @@ def set_state(page: Page, element: Locator, checked: bool, kind: str) -> str | N
     reads the state back) and let the form settle. A radio is selected (select_radio);
     'unchecked' leaves one not selected as it is and raises LookupError for a selected one, as a
     radio is cleared only by selecting another. Used for a field's state (fill_field) and for a
-    label the guide gives a state ('Check **X**', #296)."""
+    label the guide gives a state ('Check **X**', #296). An 'option' of a list is clicked once when
+    its state differs, then read for CHECK_TIMEOUT_MS: LookupError when it did not change."""
+    if kind == "option":
+        if toggle_state(element, kind) == checked:
+            return "already set"
+        element.click(timeout=FIND_TIMEOUT_MS)
+        if not state_within(page, element, checked, CHECK_TIMEOUT_MS, kind):
+            wanted, other = ("checked", "unchecked") if checked else ("unchecked", "checked")
+            raise LookupError(f"it was clicked to make it {wanted}, but it is still {other}")
+        page.wait_for_timeout(SETTLE_MS // 2)
+        return None
     if kind == "radio":
         if checked:
             return select_radio(page, element)
         if element.is_checked(timeout=FIND_TIMEOUT_MS):
             raise LookupError("a radio cannot be cleared; pick another option")
         return "already set"
-    if element.is_checked(timeout=FIND_TIMEOUT_MS) == checked:
+    if toggle_state(element, kind) == checked:
         return "already set"
     set_check_state(page, element, checked)
     page.wait_for_timeout(SETTLE_MS // 2)
     return None
 
 
-def fill_field(page: Page, element: Locator, value: str) -> str | None:
+def fill_field(page: Page, element: Locator, value: str,
+               diagnose: Callable[[str], None] | None = None) -> str | None:
     """Give the field `value`: tick or clear a checkbox, select a radio, pick an option, or type;
     a labelled container that is not a control itself is filled through its parts (fill_parts).
     A radio (found by its own name, or picked by the person) is selected when the value names it
     (radio_matches) or states 'checked'; a value stating 'unchecked' leaves one not selected as
     it is and is refused for a selected one, as a radio is only cleared by selecting another.
     Returns 'already set' when the field held the value before, and does nothing then. Raises
-    LookupError when the value cannot be applied (not a checkbox state, no such option)."""
+    LookupError when the value cannot be applied (not a checkbox state, no such option; `diagnose`
+    then gets the open list's tree, pick_option)."""
     if not is_control(element):
-        return fill_parts(page, element, value)
+        return fill_parts(page, element, value, diagnose)
     kind, role, tag = toggle_kind(element)
     if kind == "radio":
         name = accessible_name(element)
@@ -1804,7 +2466,7 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
             return "already set"
         element.select_option(value, timeout=FIND_TIMEOUT_MS)   # an option whose value or label is `value`
     elif role in ("combobox", "button") or tag == "button":
-        if pick_option(page, element, tag, value):
+        if pick_option(page, element, tag, value, diagnose=diagnose):
             return "already set"
     else:
         if current_text(element, tag) == value:
@@ -1816,10 +2478,15 @@ def fill_field(page: Page, element: Locator, value: str) -> str | None:
     return None
 
 
-def fill_tag(page: Page, name: str, value: str) -> None:
-    """The Portal's Tags grid ends with an empty row whose inputs are named 'Name' and 'Value';
-    typing into it adds the next empty row. Fill the last of each. The exact roles are confirmed
-    in the first supervised run (Task 12); until then a miss is reported as unknown, not guessed."""
+def fill_tag(page: Page, name: str, value: str) -> str | None:
+    """The Portal's Tags grid lists the tags a resource has as rows of plain cells, name, ':' and
+    value ('row "CostCenter : MSDN"'), and ends with an empty row whose combo boxes are named
+    'Name' and 'Value'; typing into it adds the next empty row (run 20261017-123546). A tag the
+    grid lists already (its name case aside, as Azure compares tag names) is not typed again: with
+    the value, ALREADY_SET is returned; with another value, LookupError, as no run has seen how
+    the Portal edits a listed value. Lab 1.2's Bicep path creates the resource groups with Lab
+    1.3's tags, so a replay finds them, and a second row of the same name would only keep 'Apply'
+    greyed out. Otherwise the last row's combo boxes (or inputs labelled so) are filled."""
     for frame in all_frames(page):
         try:
             names = frame.get_by_role("combobox", name="Name", exact=True)
@@ -1829,15 +2496,39 @@ def fill_tag(page: Page, name: str, value: str) -> None:
             if values.count() == 0:
                 values = frame.get_by_label("Value", exact=True)
             grid = names.count() > 0 and values.count() > 0
+            listed = listed_tags(frame) if grid else {}
         except PlaywrightError:     # the frame went away: look in the others
             continue
         if grid:
-            names.last.fill(name, timeout=FIND_TIMEOUT_MS)
+            if name.casefold() in listed:
+                shown = listed[name.casefold()]
+                if shown == value:
+                    return ALREADY_SET
+                raise LookupError(f"tag '{name}' is listed with the value '{shown}', not '{value}'")
+            # The row is taken by its place before typing: the Portal adds the next empty row as
+            # soon as a name is typed, and '.last' would then be that new row (run 20261017-123546,
+            # 1.3.6: 'Test' went into the row after 'Environment').
+            row = min(names.count(), values.count()) - 1
+            names.nth(row).fill(name, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
-            values.last.fill(value, timeout=FIND_TIMEOUT_MS)
+            values.nth(row).fill(value, timeout=FIND_TIMEOUT_MS)
             page.wait_for_timeout(SETTLE_MS // 2)
-            return
+            return None
     raise LookupError("Tags grid not found (no inputs named 'Name' and 'Value')")
+
+
+def listed_tags(frame: Frame) -> dict[str, str]:
+    """The tags the Tags grid lists in `frame` (fill_tag): {name, case-folded: value} from every
+    row of three or more cells whose second cell reads ':' and whose first holds no control."""
+    tags: dict[str, str] = {}
+    for row in frame.get_by_role("row").all():
+        cells = row.get_by_role("gridcell")
+        if cells.count() < 3 or cells.nth(1).inner_text(timeout=1000).strip() != ":":
+            continue
+        if cells.nth(0).locator("input, [role=combobox], [role=textbox]").count():
+            continue        # the empty row to type into
+        tags[cells.nth(0).inner_text(timeout=1000).strip().casefold()] = cells.nth(2).inner_text(timeout=1000).strip()
+    return tags
 
 
 # --- signing in and the guards -------------------------------------------------------------
@@ -2025,12 +2716,14 @@ class Runner:
                                       say=lambda text: print(scrub(text, self.redactor, self.secrets, whole=True)),
                                       value_to_type=lambda step, item: prompt_value(self.recording, step, item))]
         self.redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording),
-                                 getattr(args, "tenant_name", ""))
+                                 getattr(args, "tenant_name", ""), getattr(args, "subscription_name", ""))
         # What the runner types into a password or secret field, never written to a run log (#212).
         self.secrets = typed_secrets(recording, steps)
         self.records: list[dict] = self.earlier_results() if args.resume else []
         self.first_failure: str | None = None   # the step every later step is skipped because of
         self.expanded = False                   # whether the current item opened the menu groups
+        self.overflow_opened = False            # whether the current item opened a toolbar's overflow
+        self.expand_tries = 0                   # clicks of 'Expand all headers' for the current item
         # The blade the current step started on, to record once its first item went through; None
         # when there is none to record (one is recorded already, or the view has none), and after
         # the first item (#207).
@@ -2053,6 +2746,10 @@ class Runner:
         # The current label was looked up past a failure already reported (wait_for_deployment): the
         # person's answer is used in this run only, never written to the recording (#328).
         self.failure_on_screen = False
+        # The control that opened a list for the current item (a label of an action or navigation
+        # item that opens one), and whether a later label was looked up in it; reset per item (#342).
+        self.open_list: Locator | None = None
+        self.list_consulted = False
 
     def earlier_results(self) -> list[dict]:
         """The records the stopped parts of this run wrote, scrubbed as write() scrubs them: that
@@ -2154,14 +2851,19 @@ class Runner:
         opened (expand_menu_groups) and the looks go on to the same deadline, so a label that
         only an open group shows costs a moment, not the whole FIND_TIMEOUT_MS. A decorated name
         (find_decorated, #244) counts only from SETTLE_MS on as well: a blade still rendering may
-        show the plain one a moment later, and the plain one wins."""
+        show the plain one a moment later, and the plain one wins. A label that holds a Redactor
+        token ('[yoursubscription]', the guide's placeholder) is looked up by the name the token
+        stands for (redactor.restore, the name matcher() matches), so the run's own subscription
+        link is a match."""
         started = time.monotonic()
+        label = self.redactor.restore(label)
 
         def look() -> Locator | None:
             settled = time.monotonic() - started >= SETTLE_MS / 1000
             element = find_exact(self.page, label, field=(kind == "field"), decorated=settled)
             if element is None and kind in ("navigation", "action") and settled:
                 self.expand_menu_groups(label)
+                self.open_overflow(label)
             return element
         return look
 
@@ -2175,7 +2877,9 @@ class Runner:
         has waited. Returns (the seconds it waited, what it found); (None, None) at once when no
         deployment is running, so a step without one waits no longer. An Ambiguous look counts as
         none while the deployment runs, and so does a read of the screen that says nothing
-        (texts_of: the main frame unreadable or empty): the wait goes on.
+        (texts_of: the main frame unreadable or empty): the wait goes on. While the last readable
+        screen shows the overview's running title (DEPLOYMENT_OVERVIEW_RUNNING), it is refreshed
+        every DEPLOYMENT_REFRESH_S between polls (refresh_overview), saying so once.
 
         A failure (DEPLOYMENT_FAILED_TEXT) raises DeploymentStopped with the Portal's text, which
         write() scrubs as any observed text, but only a failure that is new. The failures on screen
@@ -2207,7 +2911,9 @@ class Runner:
         limit = self.deployment_minutes
         print(f"A Portal deployment is still running: waiting up to {limit} min for it to end "
               f"before giving up on {what}.")
-        started = said = time.monotonic()
+        started = said = refreshed = time.monotonic()
+        overview = any(DEPLOYMENT_OVERVIEW_RUNNING.match(text.strip()) for text in texts)
+        told = False
         while True:
             try:
                 found = look()
@@ -2219,6 +2925,7 @@ class Runner:
                 return waited, found
             texts = screen_texts(self.page)
             if texts is not None:
+                overview = any(DEPLOYMENT_OVERVIEW_RUNNING.match(text.strip()) for text in texts)
                 running, failures = deployment_state(texts)
                 if running is None:
                     new = [failure for failure in failures if failure not in earlier]
@@ -2236,14 +2943,117 @@ class Runner:
                 print(f"  still waiting for the deployment: {duration(waited)} of up to {limit} min")
             if self.page.is_closed():
                 raise PageClosed("the browser window was closed")
+            if overview and time.monotonic() - refreshed >= DEPLOYMENT_REFRESH_S:
+                refreshed = time.monotonic()
+                how = self.refresh_overview()
+                if how and not told:
+                    told = True
+                    print(f"The overview still says the deployment is in progress: {how}, "
+                          f"and again every {DEPLOYMENT_REFRESH_S} s while it does.")
             self.page.wait_for_timeout(DEPLOYMENT_POLL_MS)
+
+    def refresh_overview(self) -> str | None:
+        """Refresh a deployment overview that may lag ARM (#328): click the last visible Refresh
+        button of the frame that holds the 'Deployment is in progress' heading (the newest blade's;
+        another frame's Refresh belongs to another blade), or reload the page when that frame shows
+        none. What it did, or None when the click or reload failed (the next poll reads the screen
+        as it is)."""
+        try:
+            buttons: list[Locator] = []
+            for frame in all_frames(self.page):
+                try:
+                    snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+                    if not any(DEPLOYMENT_OVERVIEW_RUNNING.match(snapshot_text(line).strip())
+                               for line in snapshot.splitlines()):
+                        continue
+                    buttons = visible_in(frame.get_by_role("button", name=REFRESH, exact=True),
+                                         self.page.viewport_size)
+                except PlaywrightError:     # the frame detached or navigated: not the overview's
+                    continue
+                break
+            if buttons:
+                buttons[-1].click(timeout=FIND_TIMEOUT_MS)
+                return f"clicked its {REFRESH}"
+            self.page.reload(wait_until="domcontentloaded")
+            return "reloaded the page"
+        except PlaywrightError:
+            return None
+
+    def wait_for_late_view(self, step: dict, item: dict, label: str,
+                           look: Callable[[], Locator | None]) -> Locator | None:
+        """After the lookup (wait_for_blade) found nothing: when the recording lets step `step` wait
+        for a view that lists `label` only later (recording.late_minutes, "lateLabels", #342),
+        say once how long, then every LATE_POLL_S refresh the view (refresh_view: the newest
+        blade's one visible 'Refresh', else a reload of the page) and look for FIND_TIMEOUT_MS,
+        saying every DEPLOYMENT_SAY_S how long it has waited. The refresh comes before the limit
+        is checked, so N minutes give N refreshes, the last one at the limit and looked at too
+        (one minute: one refresh, one look, then the deciders). Returns what `look` found; None
+        once the last look after the limit has found nothing, and at once without an entry for the
+        label, so the deciders and the person come as before. A window that closes raises
+        PageClosed."""
+        minutes = late_minutes(self.recording, step["id"], label)
+        if minutes is None:
+            return None
+        print(f"'{label}' may be listed only later: refreshing the view every {duration(LATE_POLL_S)} "
+              f"for up to {minutes} min before asking about it.")
+        started = said = time.monotonic()
+        refreshes = 0
+        while True:
+            due = started + (refreshes + 1) * LATE_POLL_S
+            while time.monotonic() < due:
+                if self.page.is_closed():
+                    raise PageClosed("the browser window was closed")
+                if time.monotonic() - said >= DEPLOYMENT_SAY_S:
+                    said = time.monotonic()
+                    print(f"  still waiting for '{label}': {duration(said - started)} of up to {minutes} min")
+                self.page.wait_for_timeout(min(DEPLOYMENT_POLL_MS, max(1, int((due - time.monotonic()) * 1000))))
+            self.refresh_view()
+            refreshes += 1
+            found = in_time(self.page, look)
+            if found is not None:
+                print(f"Found '{label}' after refreshing for {duration(time.monotonic() - started)}.")
+                return found
+            if refreshes * LATE_POLL_S >= minutes * 60:
+                print(f"'{label}' is still not listed after {duration(time.monotonic() - started)} "
+                      f"(the recording's {minutes} min): asking about it.")
+                return None
+
+    def refresh_view(self) -> None:
+        """Refresh the view: click the newest blade's one visible 'Refresh', a button or a menu
+        item alike (the Compliance blade's is a menu item, and a blade parked left of it may show a
+        button), chosen among both roles together by newest_blade, so the newest blade's wins
+        whatever its role. When the screen shows none, or several that newest_blade cannot tell
+        apart, or the click fails, the page is reloaded instead. A reload that fails (it timed out)
+        is reported on the console, scrubbed, and the wait goes on; a closed window raises
+        PageClosed, as anywhere else."""
+        found = [element for role in ("button", "menuitem")
+                 for element in visible_across_frames(
+                     self.page, lambda f, role=role: f.get_by_role(role, name=REFRESH, exact=True))]
+        try:
+            button = newest_blade(found)
+        except Ambiguous:
+            button = None
+        if button is not None:
+            try:
+                button.click(timeout=FIND_TIMEOUT_MS)
+                return
+            except PlaywrightError:
+                if self.page.is_closed():
+                    raise PageClosed("the browser window was closed") from None
+        try:
+            self.page.reload()
+        except PlaywrightError as error:
+            if self.page.is_closed():
+                raise PageClosed("the browser window was closed") from None
+            print(f"The page did not reload ({scrub(error_text(error), self.redactor, self.secrets)}): "
+                  "looking again all the same.")
 
     def wait_for_blade(self, step: dict, item: dict, label: str, look: Callable[[], Locator | None],
                        renew: Callable[[], Callable[[], Locator | None]] | None = None) -> Locator | None:
         """After `look` found nothing for FIND_TIMEOUT_MS: when a blade is still loading
         (blade_still_loading), say so once and go on looking until it has rendered or its limit
         has passed (BLADE_LOAD_TIMEOUT_MS while a title reads 'undefined', BLADE_EMPTY_TIMEOUT_MS
-        for a titled blade without content); once it has rendered, look for FIND_TIMEOUT_MS again,
+        for a titled blade without content, or when no frame could be read); once it has rendered, look for FIND_TIMEOUT_MS again,
         as its controls come a moment after it, with a fresh look from `renew` when it is given
         (looking_for: a decorated name, #244, counts again only after SETTLE_MS on the rendered
         blade). None at once when no blade is loading, so a label missing from a rendered blade is
@@ -2309,7 +3119,7 @@ class Runner:
             return
         if outline is None:
             outline = aria_outline(self.page)
-        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        lines = [f'{role} "{name}"' if name else role for role, name in outline] or [UNREAD_OUTLINE]
         path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
         # Every line kept, scrubbed as a record is (ids, secrets, tenant data; #212).
         path.write_text(scrub("\n".join(lines), self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
@@ -2318,22 +3128,82 @@ class Runner:
     def expand_menu_groups(self, label: str) -> None:
         """Open every collapsed group of the blade's menu with its 'Expand all headers' button.
         Entra ID blades fold menu entries into groups ('Manage', 'Monitoring'), so a link such as
-        'Users' is not on screen until its group opens. The button is clicked at most once per
-        item (run_step resets the flag), and only when exactly one is visible."""
-        if self.expanded:
+        'Users' is not on screen until its group opens. Several blades may show the button (a list
+        and the pane opened from it): the newest blade's is clicked (newest_blade), and no button is
+        clicked when that cannot be told. The groups count as open once that blade shows 'Collapse
+        all headers' within SETTLE_MS; a click while the menu still reads 'Loading...' changes
+        nothing, so the button may be clicked again on a later look, at most EXPAND_TRIES times per
+        item (run_step resets both)."""
+        if self.expanded or self.expand_tries >= EXPAND_TRIES:
             return
         try:
-            button = unique_visible(self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True))
+            button = newest_blade(visible_across_frames(
+                self.page, lambda f: f.get_by_role("button", name=EXPAND_ALL, exact=True)))
         except Ambiguous:
             return
         if button is None:
             return
-        self.expanded = True
+        self.expand_tries += 1
+        try:
+            blade = button.evaluate(BLADE_OF_JS, timeout=1000)
+        except PlaywrightError:
+            blade = None
         try:
             button.click(timeout=FIND_TIMEOUT_MS)
-        except PlaywrightError:
+        except PlaywrightError as error:
+            print(f"Could not click '{EXPAND_ALL}' ({scrub(error_text(error), self.redactor, self.secrets)}).")
             return
         print(f"Opened the menu groups ('{EXPAND_ALL}') to look for '{label}' again.")
+        for _ in range(5):      # five reads over SETTLE_MS
+            if self.groups_open(blade):
+                self.expanded = True
+                return
+            self.page.wait_for_timeout(SETTLE_MS // 5)
+
+    def open_overflow(self, label: str) -> None:
+        """Open the newest blade's toolbar overflow ('More commands', MORE_COMMANDS) once per item,
+        when the label is not on screen after SETTLE_MS: a narrow pane moves the commands that do
+        not fit there ('Delete resource group' in a resource group's pane beside the list, run
+        20261017-123546). The newest blade's button is clicked (newest_blade, blade_of); none when
+        that cannot be told. The looks then go on to the same deadline."""
+        if self.overflow_opened:
+            return
+        found: list[Locator] = []
+        for role in OVERFLOW_ROLES:
+            found += visible_across_frames(self.page, lambda f, role=role: f.get_by_role(role, name=MORE_COMMANDS,
+                                                                                         exact=True))
+        try:
+            button = newest_blade(found)
+        except Ambiguous:
+            return
+        if button is None:
+            return
+        self.overflow_opened = True
+        try:
+            button.click(timeout=FIND_TIMEOUT_MS)
+        except PlaywrightError as error:
+            print(f"Could not click '{MORE_COMMANDS}' ({scrub(error_text(error), self.redactor, self.secrets)}).")
+            return
+        print(f"Opened the toolbar's '{MORE_COMMANDS}' to look for '{label}' again.")
+
+    def groups_open(self, blade: list | None) -> bool:
+        """Whether 'Collapse all headers' is shown in the blade `blade` (BLADE_OF_JS) names."""
+        for found in visible_across_frames(self.page, lambda f: f.get_by_role("button", name=COLLAPSE_ALL, exact=True)):
+            try:
+                if found.evaluate(BLADE_OF_JS, timeout=1000) == blade:
+                    return True
+            except PlaywrightError:
+                continue
+        return False
+
+    def save_list_tree(self, step: dict, item: dict, tree: str) -> None:
+        """Keep the open list's accessibility tree, scrubbed as the blade outlines are (every line
+        kept), as list-<step>-<guide line>.aria.txt in the run folder: an option that was not found
+        shows there what the list offered (a prefix, a filter box, a list that scrolls), so the
+        lookup can be fixed without another live run."""
+        path = self.run_dir / f"list-{step['id']}-{item.get('line')}.aria.txt"
+        path.write_text(scrub(tree, self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
+        print(f"The open list's structure is in {path}")
 
     def save_search_tree(self, step: dict, tree: str) -> None:
         """Keep the search dropdown's accessibility tree, scrubbed (recording.scrub, every line
@@ -2427,7 +3297,7 @@ class Runner:
 
     def act_on_label(self, step: dict, item: dict, label: str, value: str | None = None,
                      form_start: bool = False, open_field: bool = False, state: bool | None = None,
-                     state_only: bool = False) -> dict:
+                     state_only: bool = False, looked_again: bool = False) -> dict:
         """Find the element the guide calls `label`, act on it, return the result record.
         `form_start`: the label is the first field of a form, which must be open (find_form)
         unless the recording holds a decision for the label (replay finds the field).
@@ -2443,7 +3313,26 @@ class Runner:
         it is disabled in that state. Any other element (a button named 'Enable ...') is clicked
         as without a state, unless `state_only` (parse.py's "stateOnly": a switch's value, 'Leave
         **X** unchecked', 'Make sure **X** is checked', whose words are no click): then it is
-        unknown, as the guide sets a state the element cannot hold."""
+        unknown, as the guide sets a state the element cannot hold. An entry of a multi-select list
+        (OPTION_ROLES: option, treeitem, menuitemcheckbox, menuitemradio) is set by its
+        aria-selected or aria-checked (toggle_kind, set_state; #342, 1.3.9's North Europe): one
+        already in the state is 'already set' and not clicked, so it is never cleared; one that
+        holds exactly one check box is set through the box (option_box).
+
+        A picker row's control (find_row_control, #342: its 'Select' radio, marked with
+        ROW_CONTROL_MARK) is selected as a stated 'Check' is, even when the guide states no state:
+        a row already selected is 'already set'.
+
+        A label of an action or navigation item whose control opens a list (opens_a_list, read
+        before the click) keeps that control as Runner.open_list for the rest of the item; a later
+        label of the item is looked for in that list first (find_in_list), and on screen as before
+        when the list does not hold it (Runner.list_consulted then lets close_list close the list
+        when the item ends).
+
+        When the lookup and the blade check found nothing, a label the recording lists under the
+        step's "lateLabels" is waited for (wait_for_late_view: the view refreshed every
+        LATE_POLL_S, for up to its minutes) before the recording's decision or the person is
+        asked."""
         kind, line = item["kind"], item["line"]
         self.failure_on_screen = False
         record = self.new_record(step, kind, label)
@@ -2458,13 +3347,20 @@ class Runner:
                 def renew() -> Callable[[], Locator | None]:     # a fresh SETTLE_MS for a view just rendered
                     return self.looking_for(label, lookup)
 
-                look = renew()
-                if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
-                    element = self.find_form(step, item, label, value or "", look, renew)
-                else:
-                    element = in_time(self.page, look)
+                element = None
+                if self.open_list is not None and kind in ("navigation", "action") and not open_field:
+                    self.list_consulted = True
+                    element = find_in_list(self.page, self.open_list, label)
+                if element is None:
+                    look = renew()
+                    if form_start and label not in self.recording["steps"].get(step["id"], {}).get("labels", {}):
+                        element = self.find_form(step, item, label, value or "", look, renew)
+                    else:
+                        element = in_time(self.page, look)
+                        if element is None:
+                            element = self.wait_for_blade(step, item, label, look, renew)
                     if element is None:
-                        element = self.wait_for_blade(step, item, label, look, renew)
+                        element = self.wait_for_late_view(step, item, label, renew())
         except Ambiguous as error:
             record.update(outcome="unknown", observed=f"ambiguous: {error} named '{label}'")
             return record
@@ -2530,11 +3426,16 @@ class Runner:
             record.update(outcome="unknown", observed=f"refused: destructive element '{acted_on}'")
             return record
         note = None
+        acted = False       # whether the element was clicked, filled or set: then it is never looked for again
         try:
             # Found anywhere in the window's columns, maybe below the fold: bring it into view first.
             element.scroll_into_view_if_needed(timeout=FIND_TIMEOUT_MS)
-            toggle = toggle_kind(element)[0] if kind != "field" and state is not None else None
-            if toggle and element.is_checked(timeout=FIND_TIMEOUT_MS) == state:
+            if state is None and getattr(element, ROW_CONTROL_MARK, False):
+                state = True       # a picker row is selected (#342), so a row already selected is left as it is
+            toggle, role, _ = toggle_kind(element) if kind != "field" and state is not None else (None, "", "")
+            if toggle == "check" and role in OPTION_ROLES:
+                element = option_box(element)      # an option holding one check box: set through the box
+            if toggle and toggle_state(element, toggle) == state:
                 note = "already set"      # nothing to do, also on a box greyed out in that state (#296)
             elif state_only and not toggle:
                 record.update(outcome="unknown",
@@ -2552,16 +3453,35 @@ class Runner:
                 record.update(outcome="unknown", observed=f"disabled: '{acted_on}'")
                 return record
             elif kind == "field":
-                note = fill_field(self.page, element, value or "")
+                acted = True
+                note = fill_field(self.page, element, value or "",
+                                  diagnose=lambda tree: self.save_list_tree(step, item, tree))
             elif toggle:
+                acted = True
                 note = set_state(self.page, element, state, toggle)
             else:
-                element.click(timeout=FIND_TIMEOUT_MS)
+                # Read before the click: a click may close a form or open a blade, and the control
+                # may be gone or re-rendered after it.
+                opens = kind in ("navigation", "action") and opens_a_list(element)
+                acted = True
+                click_target(element).click(timeout=FIND_TIMEOUT_MS)
                 self.page.wait_for_timeout(SETTLE_MS)
+                if opens:
+                    self.open_list = element      # the item's later labels are looked for in it first
         except ReadOnly:
             record.update(outcome="unknown", observed=f"read-only: '{acted_on}'")
             return record
         except (PlaywrightError, LookupError) as error:
+            if (kind in ("search", "action", "navigation") and isinstance(error, PlaywrightError) and not acted
+                    and not looked_again and not self.page.is_closed()):
+                # The view re-rendered between finding the element and acting on it, and the element
+                # went away (run 20261017-123546, 1.3.6: a search result's is_disabled() and the
+                # list's Refresh's scroll_into_view_if_needed() timed out): look for it once more.
+                print(f"'{acted_on}' went away before it was acted on: looking for it once more.")
+                if kind == "search":
+                    close_search(self.page)
+                return self.act_on_label(step, item, label, value, form_start, open_field, state, state_only,
+                                         looked_again=True)
             record.update(outcome="unknown", observed=error_text(error))
             return record
         # Replay must never inherit a choice the runner could not act on.
@@ -2664,12 +3584,14 @@ class Runner:
 
     def nothing_to_save(self, step: dict, acted_on: str) -> bool:
         """Whether a disabled commit button (COMMIT_BUTTON) has nothing to save (#209): the step has
-        earlier items, and every one of them matched as 'already set'. A disabled button after any
-        real change stays unknown."""
+        earlier items, and every one of them matched as 'already set', or the form it fills holds
+        the guide's values already (form_unchanged, #342: 1.3.1 searches first). A disabled button
+        after any real change stays unknown."""
         if not COMMIT_BUTTON.match(acted_on.strip()):
             return False
         earlier = [r for r in self.records if r["step"] == step["id"] and r["kind"] != "screenshot"]
-        return bool(earlier) and all(r["outcome"] == "match" and r["observed"] == "already set" for r in earlier)
+        return ((bool(earlier) and all(r["outcome"] == "match" and r["observed"] == "already set" for r in earlier))
+                or self.form_unchanged(step))
 
     def not_proposed(self, step: dict, decision: Decision, label: str) -> str | None:
         """Why a misleading or cosmetic drift of the guide's `label` proposes no guide edit, for
@@ -2804,6 +3726,9 @@ class Runner:
                 continue
             position += 1
             self.expanded = False
+            self.expand_tries = 0
+            self.overflow_opened = False
+            self.open_list, self.list_consulted = None, False
             self.first_item = position == 0
             if item["kind"] == "tag":
                 # Decided as a field's value is (#210): a value that is no text to type is reported.
@@ -2811,8 +3736,9 @@ class Runner:
                 if action == "type":
                     record = self.new_record(step, "tag", item["name"])
                     try:
-                        fill_tag(self.page, item["name"], value)
-                        record.update(outcome="match", observed=value)      # what was typed, not the guide's
+                        note = fill_tag(self.page, item["name"], value)
+                        # What was typed, not the guide's; or that the grid had it already.
+                        record.update(outcome="match", observed=ALREADY_SET if note == ALREADY_SET else value)
                     except (PlaywrightError, LookupError) as error:
                         record.update(outcome="unknown", observed=error_text(error))
                 else:
@@ -2835,6 +3761,11 @@ class Runner:
                           **{index: True for index in item.get("checked", ())}}
                 state_only = set(item.get("stateOnly", ()))     # set and never clicked
                 labels = ([None] if picker else []) + list(item["labels"])
+                unmet = (self.condition_unmet(step, item, item["labels"][0])
+                         if item.get("conditional") and not picker and 0 not in resources else None)
+                if unmet is not None:
+                    records.append(unmet)
+                    labels = []
                 for index, label in enumerate(labels):
                     if label is None:
                         records.append(self.act_on_label(step, item, picker, open_field=True))
@@ -2847,6 +3778,7 @@ class Runner:
                                                               state_only=index in state_only))
                     if records[-1]["outcome"] == "unknown" or records[-1].get("severity") == "blocking":
                         break
+            self.close_list()
             if item["kind"] != "field":
                 in_form = False
             for record in records:
@@ -2876,6 +3808,23 @@ class Runner:
             self.record_view(step)
         self.write(self.screenshot(step))
         return not step_failed
+
+    def close_list(self) -> None:
+        """At the end of an item: close the list its first label opened (Runner.open_list) when it
+        is still open (it names a popup that is on screen, or says aria-expanded), with Escape on
+        its combo box, so the next tab click is not intercepted by it (#342). A list is left as it
+        is when no later label of the item was looked for in it (list_consulted): the item's last
+        label opened it, and the next item picks from it. The reset is the item's start."""
+        element, consulted = self.open_list, self.list_consulted
+        self.open_list, self.list_consulted = None, False
+        if element is None or not consulted:
+            return
+        try:
+            if open_list(self.page, element) is None and element.get_attribute("aria-expanded", timeout=1000) != "true":
+                return
+            element.press("Escape", timeout=FIND_TIMEOUT_MS)
+        except (PlaywrightError, Ambiguous):    # it closed itself, or the page moved on
+            return
 
     def not_typed(self, step: dict, item: dict, kind: str, label: str, action: str, value: str) -> dict:
         """The record of a field or tag item whose value the runner does not type (field_action,
@@ -2934,6 +3883,39 @@ class Runner:
         if record.get("observed") is not None:
             record["observed"] = scrub(record["observed"], self.redactor, self.secrets)
         return record
+
+    def condition_unmet(self, step: dict, item: dict, label: str) -> dict | None:
+        """For a conditional item ('If the review page opens without an error, click **Create**',
+        1.3.6; parse.CONDITIONAL): None when its first label is on screen within FIND_TIMEOUT_MS
+        and not greyed out (stays_disabled), so the item is performed as any other; otherwise
+        the record of an item whose condition does not hold, a match, and nobody is asked. In run
+        20261017-123546 Review + create failed validation at once, as the guide says it may, and
+        Create stayed greyed out."""
+        try:
+            element = in_time(self.page, self.looking_for(label, item["kind"]))
+            why = (f"'{label}' is not on screen" if element is None
+                   else f"'{label}' is greyed out" if stays_disabled(self.page, element) else None)
+        except (PlaywrightError, LookupError) as error:     # Ambiguous too: let the item report it
+            return None if isinstance(error, Ambiguous) else self.unmet_record(step, item, label, error_text(error))
+        return None if why is None else self.unmet_record(step, item, label, why)
+
+    def unmet_record(self, step: dict, item: dict, label: str, why: str) -> dict:
+        record = self.new_record(step, item["kind"], label)
+        record.update(outcome="match", observed=f"{CONDITION_UNMET}: {why}")
+        print(f"The guide's condition for '{label}' does not hold ({why}): going on.")
+        return record
+
+    def form_unchanged(self, step: dict) -> bool:
+        """Whether the form `step` is filling holds the guide's values already: the step's records
+        since its last one of another kind are tag or field records, at least one, every one of
+        them ALREADY_SET. Its 'Apply' or 'Save' is then greyed out with nothing to save, which the
+        guide says (1.3.1: the groups carry the tags already), so a disabled one is no failure."""
+        form = []
+        for record in reversed(self.records):
+            if record["step"] != step["id"] or record["kind"] not in ("tag", "field"):
+                break
+            form.append(record)
+        return bool(form) and all(record["observed"] == ALREADY_SET for record in form)
 
     def write(self, record: dict) -> None:
         """Scrub `record` (scrubbed), keep it for the summary and append it to results.jsonl."""
@@ -3514,6 +4496,18 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         print(f"The recording cannot be used: {error}.")
         return NOT_STARTED
+    problems = late_label_problems(recording)
+    if problems:
+        print(f"The recording cannot be used: {problems[0]}.")
+        return NOT_STARTED
+    # A label of the run's subscription is found, and redacted, only by its name (#342).
+    needing = subscription_steps(steps, recording)
+    if needing and len(args.subscription_name.strip()) < Redactor.PREFIX_MIN:
+        print(f"step {needing[0]} names the run's subscription as [yoursubscription], but the run has no "
+              f"--subscription-name of at least {Redactor.PREFIX_MIN} characters, so it could neither find "
+              "the subscription nor keep its name out of the recording. Run it through Invoke-GuideDrift.ps1 "
+              "-SubscriptionId <id>, or pass --subscription-name with the subscription's name.")
+        return NOT_STARTED
     # Everything that can refuse the run is checked before the browser opens and the person signs in.
     state = {"completed": [], "inFlight": None}
     if args.resume:
@@ -3535,7 +4529,8 @@ def main(argv: list[str] | None = None) -> int:
               f"continue that run with --resume (-Resume), or start a new one with another --run-id.")
         return NOT_STARTED
     # The console is pasted into issues too: an error is shown as a record keeps it (#212).
-    redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name)
+    redactor = Redactor(args.tenant_domain, args.tenant_id, env_secrets(recording), args.tenant_name,
+                        args.subscription_name)
     secrets = typed_secrets(recording, steps)
 
     def shown(error: BaseException) -> str:     # reads redactor and secrets as main() last set them
