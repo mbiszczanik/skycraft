@@ -163,6 +163,12 @@
     error (docs/powershell-standards.md rule 3), and by the time the vaults are checked their
     resource group has usually been deleted by the sweep, so a lookup scoped to it would fail.
 
+.PARAMETER BudgetProbe
+    Given an AssertAbsentBudgets entry and the subscription id, returns something truthy when that
+    subscription-scope budget still exists, nothing when it does not, and throws when it cannot
+    tell. The default lists the budgets with Get-LabArmBudget and picks by name. An entry with a
+    KeptByDesign reason is reported as kept and is not probed.
+
 .PARAMETER DiagnosticTargetProbe
     Lists vault and storage diagnostic target IDs within the named resource group.
 
@@ -277,6 +283,14 @@ param(
     [scriptblock]$ResourceGroupProbe = {
         param($Name)
         Get-AzResourceGroup -ErrorAction Stop | Where-Object { $_.ResourceGroupName -eq $Name }
+    },
+
+    [Parameter()]
+    [scriptblock]$BudgetProbe = {
+        param($Entry, $SubId)
+        # Listed by name from the whole subscription scope, so a missing budget is an empty match
+        # and only a failed listing throws. Resource group budgets go with their group.
+        Get-LabArmBudget -Scope "/subscriptions/$SubId" | Where-Object { $_.Name -eq $Entry.Name }
     },
 
     [Parameter()]
@@ -663,6 +677,33 @@ else {
             else {
                 $assertions.Add(@{ Name = "$($entry.Kind) absent"; Ok = $true; Detail = "$($entry.Name) is gone" })
                 Write-Host "    [ OK ] $($entry.Kind) '$($entry.Name)' is gone" -ForegroundColor Green
+            }
+        }
+
+        # Subscription-scope budgets a lab creates and its own teardown removes (#526). A listing
+        # that throws is a failed assertion, never 'gone'.
+        foreach ($entry in @($sweep.AssertAbsentBudgets | Where-Object { $_ })) {
+            $label = "Lab $($entry.Lab) budget '$($entry.Name)'"
+            if ($entry.KeptByDesign) {
+                $assertions.Add(@{ Name = 'budget absent'; Ok = $true; Detail = "$label is kept by design: $($entry.KeptByDesign)" })
+                Write-Host "    [KEPT] $label - $($entry.KeptByDesign)" -ForegroundColor Yellow
+                continue
+            }
+            try { $survivor = & $BudgetProbe $entry $SubscriptionId }
+            catch {
+                $detail = "Could not check whether $label is gone. A check that failed is not 'gone'; run it again once the cause is fixed. Error: $_"
+                $assertions.Add(@{ Name = 'budget absent'; Ok = $false; Detail = $detail })
+                Write-Host "    [FAIL] $detail" -ForegroundColor Red
+                continue
+            }
+            if ($survivor) {
+                $detail = "$label still exists at subscription scope. Lab $($entry.Lab)'s own Remove-LabResource.ps1 removes it, so check that lab's transcript."
+                $assertions.Add(@{ Name = 'budget absent'; Ok = $false; Detail = $detail })
+                Write-Host "    [FAIL] $detail" -ForegroundColor Red
+            }
+            else {
+                $assertions.Add(@{ Name = 'budget absent'; Ok = $true; Detail = "$($entry.Name) is gone" })
+                Write-Host "    [ OK ] $label is gone" -ForegroundColor Green
             }
         }
 
