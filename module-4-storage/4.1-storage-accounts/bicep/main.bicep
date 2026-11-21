@@ -120,7 +120,7 @@ var varSkuNames = {
 *     Modules      *
 *******************/
 
-module modStorageAccount 'br/public:avm/res/storage/storage-account:0.33.0' = [for env in varEnvironments: {
+module modStorageAccount 'br/public:avm/res/storage/storage-account:0.33.1' = [for env in varEnvironments: {
   name: 'sa-deployment-${env}'
   scope: resourceGroup('${env}-skycraft-swc-rg')
   params: {

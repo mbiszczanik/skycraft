@@ -133,7 +133,7 @@ var varLifecycleRules = [
 // Production: private containers, versioning and lifecycle tiering.
 // fileServices is omitted deliberately - an empty value makes AVM skip the file service entirely,
 // so Lab 4.1's (and later Lab 4.3's) file share configuration is left untouched.
-module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.0' = {
+module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.1' = {
   name: 'sa-deployment-prod-42'
   scope: resourceGroup(parResourceGroupNameProd)
   params: {
@@ -167,7 +167,7 @@ module modStorageProd 'br/public:avm/res/storage/storage-account:0.33.0' = {
 }
 
 // Development: one demo container, no versioning, no lifecycle rules.
-module modStorageDev 'br/public:avm/res/storage/storage-account:0.33.0' = {
+module modStorageDev 'br/public:avm/res/storage/storage-account:0.33.1' = {
   name: 'sa-deployment-dev-42'
   scope: resourceGroup(parResourceGroupNameDev)
   params: {
