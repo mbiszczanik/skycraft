@@ -567,6 +567,8 @@ $users = @(
         DisplayName       = "Malfurion Stormrage"
         Department        = "IT Operations"
         JobTitle          = "Cloud Infrastructure Manager"
+        CompanyName       = "SkyCraft"
+        OfficeLocation    = "Remote"
     },
     @{
         UserPrincipalName = "khadgar.archmage"
@@ -612,6 +614,10 @@ foreach ($user in $users) {
                     UsageLocation     = "US"
                     Department        = $user.Department
                     JobTitle          = $user.JobTitle
+                }
+                # Optional profile keys (guide step 1.1.10): left out when the entry has none.
+                foreach ($key in 'CompanyName', 'OfficeLocation') {
+                    if ($user[$key]) { $userParams[$key] = $user[$key] }
                 }
                 $newUser = New-MgUser @userParams -ErrorAction Stop
                 $createdUserUpns.Add($upn)
