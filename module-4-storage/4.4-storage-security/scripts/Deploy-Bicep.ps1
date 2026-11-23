@@ -14,6 +14,11 @@
     the optional Azure CLI commands of Lab 4.2), the template is given no assignment: ARM refuses
     a second assignment of the same role to the same principal at the same scope.
 
+    Before the deployment the script reads the blob service settings of an existing account. If point-in-time
+    restore is enabled for more days than the template's blob soft delete days (Lab 5.2's blob backup turns it
+    on), the template would lower the soft delete retention below it and ARM refuses that. The script then
+    prints an [ERROR] line and stops before the deployment; with -WhatIf it prints a [WARNING] and goes on.
+
     Creating the assignment needs Owner or User Access Administrator. An identity with only
     Contributor, which is enough for the rest of the template, fails the whole deployment on
     Microsoft.Authorization/roleAssignments/write: run it with -SkipDataRoleAssignment, and have
@@ -56,7 +61,7 @@
 #>
 
 #Requires -Version 7.0
-#Requires -Modules Az.Accounts, Az.Resources
+#Requires -Modules Az.Accounts, Az.Resources, Az.Storage
 
 [CmdletBinding()]
 param(
@@ -94,6 +99,57 @@ Import-Module (Join-Path $PSScriptRoot '../../../tools/LabCommon.psm1') -Force -
 trap { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red; Exit-Lab -FailureCount 1 }
 
 $dataRoleName = 'Storage Blob Data Contributor'
+
+# Blob soft delete days: the one value the guard compares and the template receives (parBlobSoftDeleteDays).
+# A Pester test fails when it differs from the template's default.
+$blobSoftDeleteDays = 7
+
+# Whether the template's soft delete days are below the point-in-time restore days of an existing account
+# (Lab 5.2's blob backup enables 30 days). $true means the deployment must stop; under -WhatIf the same text
+# is a warning and the answer is $false. A failed lookup warns and answers $false: the deployment then
+# reports the real error.
+function Test-LabBlobRestoreConflict {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $true)]
+        [int]$SoftDeleteDays,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$AccountExists = $true,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$WhatIfMode
+    )
+
+    if (-not $AccountExists) { return $false }
+
+    try {
+        $blobService = Get-AzStorageBlobServiceProperty -ResourceGroupName $ResourceGroupName -StorageAccountName $StorageAccountName -ErrorAction Stop
+    }
+    catch {
+        Write-Host "  -> [WARNING] Could not read the blob service settings of the account: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "     The deployment goes on and reports the real error if the settings conflict." -ForegroundColor Yellow
+        return $false
+    }
+
+    $restore = $blobService.RestorePolicy
+    if (-not $restore -or -not $restore.Enabled -or [int]$restore.Days -le $SoftDeleteDays) { return $false }
+
+    $text = "Blob soft delete retention of the template ($SoftDeleteDays days) is below the point-in-time restore of the account ($($restore.Days) days). Lab 5.2's blob backup enabled the restore, and ARM refuses a retention below it."
+    if ($WhatIfMode) {
+        Write-Host "  -> [WARNING] $text The real deployment stops here." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host " [ERROR] $text Stopping before the deployment." -ForegroundColor Red
+    return $true
+}
 
 # The object id (oid claim) of the identity the Az session is signed in as, read from an Azure
 # Resource Manager access token: no Microsoft Graph call, so it works for a user, a service
@@ -217,6 +273,11 @@ if (-not (Test-LabGlobalName -Kind StorageAccount -Name $StorageAccountName -Par
 $accountScope = "/subscriptions/$($context.Subscription.Id)/resourceGroups/$Environment-skycraft-swc-rg/providers/Microsoft.Storage/storageAccounts/$StorageAccountName"
 $assignPrincipalId = Resolve-LabDataPrincipalId -Scope $accountScope -PrincipalId $DataPrincipalId -Skip:$SkipDataRoleAssignment
 
+# 3c. Lab 5.2's point-in-time restore outlives its backup and locks the soft delete retention above the template's.
+if (Test-LabBlobRestoreConflict -ResourceGroupName "$Environment-skycraft-swc-rg" -StorageAccountName $StorageAccountName -SoftDeleteDays $blobSoftDeleteDays -AccountExists $accountOwned -WhatIfMode:$WhatIf) {
+    Exit-Lab -FailureCount 1
+}
+
 # 4. Deploy Bicep
 try {
     Write-Host "Deploying main.bicep to subscription level..." -ForegroundColor Yellow
@@ -229,6 +290,7 @@ try {
         parEnvironment                = $Environment
         parStorageAccountName         = $StorageAccountName
         parClientIp                   = $ClientIp
+        parBlobSoftDeleteDays         = $blobSoftDeleteDays
         parDataContributorPrincipalId = $assignPrincipalId
         ErrorAction                   = 'Stop'
     }
