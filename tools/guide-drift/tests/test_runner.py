@@ -3264,6 +3264,64 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(sorted(path.name for path in (self.tmp / "logs" / "test").glob("blade-*")),
                          ["blade-9.9.1-3.aria.txt", "blade-9.9.1-4.aria.txt"])
 
+    # Run 20261123-172651 (#614): the blade's frame held the Portal's error screen, not its list.
+    ASSIGNMENTS = ('- heading "Policy | Assignments" [level=2]\n'
+                   "- button \"Close content 'Policy | Assignments'\"\n"
+                   '- searchbox "Search box"\n'
+                   '- link "Assignments"\n')
+    ERROR_SCREEN = ('- button "Refresh"\n'
+                    '- button "Get support"\n'
+                    '- button "Perform self-diagnostics"\n'
+                    '- heading "Summary" [level=2]\n'
+                    '- button "Copy to clipboard the value for Copy error summary to clipboard"\n'
+                    '- text: The blade failed to load.\n')
+    ASSIGN = {"kind": "action", "labels": ["Assign policy"], "line": 483}
+
+    def error_screen(self, clears: bool) -> tuple[Screen, ScreenNode, ScreenNode]:
+        """The Assignments blade showing the Portal's error screen; its Refresh brings the list
+        and 'Assign policy' back when `clears`."""
+        screen = Screen(tree=self.TOP_BAR + self.ASSIGNMENTS + self.ERROR_SCREEN)
+        assign = ScreenNode()
+
+        def refreshed() -> None:
+            if clears:
+                screen.tree = self.TOP_BAR + self.ASSIGNMENTS + '- button "Assign policy"\n- table\n'
+                screen.add(("button", "Assign policy", assign))
+
+        refresh = ScreenNode(on_click=refreshed)
+        screen.add(("button", "Refresh", refresh))
+        return screen, refresh, assign
+
+    def test_the_portals_error_screen_is_refreshed_once_and_the_label_found_after_it(self) -> None:
+        screen, refresh, assign = self.error_screen(clears=True)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, assign.clicked, r.ask.prompts),
+                         ("match", 1, 1, []))
+        self.assertEqual(list((self.tmp / "logs" / "test").glob("blade-*")), [])
+
+    def test_an_error_screen_a_refresh_does_not_clear_ends_the_item_without_asking(self) -> None:
+        screen, refresh, _ = self.error_screen(clears=False)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, r.ask.prompts), ("unknown", 1, []))
+        self.assertEqual(record["observed"], "the Portal showed its error screen in the blade, still after "
+                                             "one Refresh: The blade failed to load.")
+        self.assertIn('button "Perform self-diagnostics"', self.blade_outline(483))
+        error = (self.tmp / "logs" / "test" / "blade-9.9.1-483.error.txt").read_text(encoding="utf-8")
+        self.assertIn("The blade failed to load.", error)
+
+    def test_an_error_screen_without_a_single_refresh_ends_the_item_without_a_click(self) -> None:
+        screen, refresh, _ = self.error_screen(clears=False)
+        other = ScreenNode()
+        screen.add(("button", "Refresh", other))             # two blades' Refresh: none is guessed
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, other.clicked, r.ask.prompts),
+                         ("unknown", 0, 0, []))
+        self.assertTrue(record["observed"].startswith(
+            "the Portal showed its error screen in the blade, with no single Refresh to retry"))
+
     def test_a_blade_that_never_gets_its_title_is_asked_about_after_the_longer_limit(self) -> None:
         screen = Screen(tree=self.TOP_BAR + "- button \"Close content 'undefined'\"\n")
         with mock.patch("builtins.print") as said:

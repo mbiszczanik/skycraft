@@ -113,7 +113,10 @@ the looking goes on to the same deadline. When the deadline passes while a blade
 loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
 blade's title heading has no content after it), the console says so once and the label is looked
 for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
-has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
+has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked. A blade
+showing the Portal's error screen instead (blade_shows_error, #614) gets its Refresh clicked once
+and the label looked for again; still missing, the item is unknown with the screen's text, kept as
+blade-<step>-<line>.error.txt, and nobody is asked.
 
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
@@ -687,6 +690,28 @@ def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
     return running, failures
 
 
+# The Portal's error screen in a blade's frame (#614, run 20261123-172651): self-diagnostics and a
+# copy of the error summary where the blade's content belongs.
+BLADE_ERROR_DIAGNOSE = "Perform self-diagnostics"
+BLADE_ERROR_SUMMARY = re.compile(r"\bcopy error summary\b", re.IGNORECASE)
+BLADE_ERROR_HEADING = "Summary"
+
+
+def blade_shows_error(outline: list[tuple[str, str]]) -> bool:
+    """Whether the screen (aria_outline) holds the Portal's error screen: both of its buttons."""
+    buttons = [name for role, name in outline if role == "button"]
+    return BLADE_ERROR_DIAGNOSE in buttons and any(BLADE_ERROR_SUMMARY.search(name) for name in buttons)
+
+
+def blade_error_text(texts: list[str] | None) -> str:
+    """The first text after the error screen's 'Summary' heading (texts_of), '' when there is none."""
+    texts = [text.strip() for text in texts or []]
+    if BLADE_ERROR_HEADING not in texts:
+        return ""
+    after = texts[texts.index(BLADE_ERROR_HEADING) + 1:]
+    return next((text for text in after if text and not BLADE_ERROR_SUMMARY.search(text)), "")
+
+
 def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     """Whether a blade's frame is open while its content has not rendered yet (issue #233), from
     aria_outline(): BLADE_UNTITLED when any close button reads "Close content 'undefined'";
@@ -815,6 +840,12 @@ class DeploymentStopped(Exception):
     """A lookup gave up on a Portal deployment (#328): it failed, or it was still running after the
     longest wait. Its message is the record's 'observed'; the step is unknown, and the person is
     not asked about the label, as nothing about it is missing yet."""
+
+
+class BladeError(DeploymentStopped):
+    """The blade shows the Portal's error screen (blade_shows_error, #614) and one Refresh did not
+    clear it. Handled as DeploymentStopped: the item is unknown, and nobody is asked about a label
+    the Portal never rendered."""
 
 
 class ReadOnly(LookupError):
@@ -2269,6 +2300,8 @@ class Runner:
                 return found
             snapshots = frame_snapshots(self.page)
         outline = outline_of(snapshots)
+        if blade_shows_error(outline):
+            return self.refresh_error_screen(step, item, label, renew() if renew else look)
         loading = blade_still_loading(outline)
         if loading is None:
             self.save_blade_outline(step, item, label, outline)
@@ -2295,8 +2328,43 @@ class Runner:
         if found is rendered:
             found = in_time(self.page, renew() if renew else look)
         if found is None:
+            if blade_shows_error(aria_outline(self.page)):
+                return self.refresh_error_screen(step, item, label, renew() if renew else look)
             self.save_blade_outline(step, item, label)
         return found
+
+    def refresh_error_screen(self, step: dict, item: dict, label: str,
+                             look: Callable[[], Locator | None]) -> Locator:
+        """The blade shows the Portal's error screen (#614): click its Refresh once, the Portal's
+        own retry, and look for BLADE_EMPTY_TIMEOUT_MS. Still missing, or no single Refresh on
+        screen to click: keep the outline and the screen's text (blade-<step>-<line>.error.txt)
+        and raise BladeError, so the person is not asked about a label the Portal never showed."""
+        print(f"The blade shows the Portal's error screen: clicking its Refresh once before "
+              f"looking for '{label}' again.")
+        try:
+            refresh = unique_visible(self.page, lambda f: f.get_by_role("button", name="Refresh", exact=True))
+        except Ambiguous:
+            refresh = None
+        if refresh is not None:
+            try:
+                refresh.click(timeout=FIND_TIMEOUT_MS)
+            except PlaywrightError:
+                refresh = None
+        if refresh is not None:
+            found = in_time(self.page, look, ms=BLADE_EMPTY_TIMEOUT_MS)
+            if found is not None:
+                return found
+        snapshots = frame_snapshots(self.page)
+        self.save_blade_outline(step, item, label, outline_of(snapshots))
+        texts = texts_of(snapshots) or []
+        if not self.page.is_closed():
+            path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.error.txt"
+            path.write_text(scrub("\n".join(t for t in texts if t.strip()), self.redactor, self.secrets,
+                                  whole=True) + "\n", encoding="utf-8")
+            print(f"The error screen's text is in {path}")
+        why = "still after one Refresh" if refresh is not None else "with no single Refresh to retry"
+        detail = blade_error_text(texts)
+        raise BladeError(f"the Portal showed its error screen in the blade, {why}" + (f": {detail}" if detail else ""))
 
     def save_blade_outline(self, step: dict, item: dict, label: str,
                            outline: list[tuple[str, str]] | None = None) -> None:
