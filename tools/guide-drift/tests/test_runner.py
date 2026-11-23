@@ -1286,6 +1286,20 @@ class ResumeViewTests(RunnerTestCase):
         self.assertEqual(r.ask.prompts[-1], "> ")
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
 
+    # Batch 6 (#614): runs 3 to 5 of step 1.3.9 met the Entra ID overview, the view of step 1.3.8
+    # naming the subscription by id; the blade 1.3.9 starts on names none.
+    def test_a_view_the_run_cannot_open_gives_way_to_the_blade_the_step_starts_on(self) -> None:
+        blade = "Microsoft_Azure_Policy/PolicyMenuBlade.MenuView/~/Assignments"
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Group/groupId/<id>"}
+        self.recording["steps"]["9.9.4"] = {"startBlade": blade}
+        r, out, code = self.resume(["y", ""])
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited[0], f"https://portal.azure.com/#@{TENANT_ID}/view/{blade}")
+        self.assertIn(f"Opened the blade step 9.9.4 starts on, as the view step 9.9.2 ended on cannot be "
+                      f"opened (it names an object by id, which the recording leaves out):\n"
+                      f"  https://portal.azure.com/#view/{blade}\nCheck the Portal shows it, then press Enter.", out)
+        self.assertEqual(r.ask.prompts[-1], "> ")
+
     def test_a_step_without_a_view_is_named_and_waited_for(self) -> None:
         r, out, code = self.resume(["y", ""])          # 9.9.2 has no entry in the recording
         self.assertEqual(code, 0)

@@ -201,7 +201,8 @@ on, so that it is redone from there; after s, the skipped step's own view when i
 an earlier run), or else the view it started from, as a failed step records none. The run opens
 that view itself, pinned to the tenant, when it can: not when the view names an object by id
 ('<id>': the recording leaves ids out), keeps a '[token]' or '${NAME}' this run cannot fill in
-(an environment variable that is not set), or is no Portal view. Otherwise it prints the view
+(an environment variable that is not set), or is no Portal view; then it opens the blade the
+recording says the step starts on, when that one can be opened (#614). Otherwise it prints the view
 and why it cannot open it, or says that no view is recorded for that step. Either way it waits
 for Enter, as the recording keeps no query string and a view opened on its own has none of the
 blades the guide opened before it: the person checks the Portal and corrects it. The answer to
@@ -3252,9 +3253,28 @@ class Runner:
                           f"string, and the blades the guide opened before it are not open: if the step "
                           f"needs them, bring the Portal there by hand first.")
                     return self.prompt("> ") is not None
+            if blade is not None and self.open_start_blade(head, step, previous, why, blade):
+                return self.prompt("> ") is not None
             print(f"{head} Bring the Portal to the view step {previous} ended on, then press Enter "
                   f"(the run cannot open it: {scrub(why, self.redactor, self.secrets)}):\n  {view}")
         return self.prompt("> ") is not None
+
+    def open_start_blade(self, head: str, step: dict, previous: str, why: str, blade: str) -> bool:
+        """Open the blade the recording says `step` starts on (#207) when the view `previous` ended
+        on cannot be opened (#614: step 1.3.8's names the subscription by id, while 1.3.9's
+        Assignments blade names nothing). False when that blade cannot be opened either."""
+        view = f"{PORTAL}/#view/{blade}"
+        address = self.view_address(view)
+        if address is None:
+            return False
+        try:
+            self.page.goto(address, wait_until="domcontentloaded")
+        except PlaywrightError:
+            return False
+        print(f"{head} Opened the blade step {step['id']} starts on, as the view step {previous} ended on "
+              f"cannot be opened ({scrub(why, self.redactor, self.secrets)}):\n  {view}\n"
+              f"Check the Portal shows it, then press Enter.")
+        return True
 
     # -- the run ---------------------------------------------------------------------------
 
