@@ -618,6 +618,26 @@ def frame_snapshots(page: Page) -> list[str | None]:
     return snapshots
 
 
+def frame_facts(page: Page) -> list[str]:
+    """One line per child frame for a kept outline (#614): its URL's host, whether its iframe is in
+    the window's columns, and what its snapshot gave (lines, empty, unreadable)."""
+    try:
+        frames = all_frames(page)[1:]
+    except (PlaywrightError, AttributeError):
+        return []
+    facts = []
+    for number, frame in enumerate(frames, 1):
+        host = urlsplit(getattr(frame, "url", "") or "").hostname or "no URL"
+        where = "in the window" if frame_in_window(frame, getattr(page, "viewport_size", None)) else "outside the window"
+        try:
+            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+            got = f"{len(snapshot.splitlines())} lines" if snapshot.strip() else "empty"
+        except PlaywrightError:
+            got = "unreadable"
+        facts.append(f"# child frame {number}: {host}, {where}, snapshot {got}")
+    return facts
+
+
 def outline_of(snapshots: list[str | None]) -> list[tuple[str, str]]:
     """aria_outline() of the frames frame_snapshots() read; a frame that could not be read is left out."""
     return [key for snapshot in snapshots if snapshot is not None
@@ -731,7 +751,13 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     if not headings:
         return None
     start = max(close_at, headings[-1])
-    return None if any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:]) else BLADE_EMPTY
+    rest = outline[start + 1:]
+    # A blade menu's search box comes before the blade's frame (#614): a bare iframe with nothing
+    # after it is a frame not rendered yet, whatever came before it.
+    frames = [index for index, (role, _) in enumerate(rest) if role == "iframe"]
+    if frames:
+        rest = rest[frames[-1] + 1:]
+    return None if any(role in BLADE_CONTENT_ROLES for role, _ in rest) else BLADE_EMPTY
 
 
 # A list's entry (#317): what an element inside one is named after is the entry's data (a user's
@@ -2377,7 +2403,7 @@ class Runner:
             return
         if outline is None:
             outline = aria_outline(self.page)
-        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        lines = [f'{role} "{name}"' if name else role for role, name in outline] + frame_facts(self.page)
         path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
         # Every line kept, scrubbed as a record is (ids, secrets, tenant data; #212).
         path.write_text(scrub("\n".join(lines), self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")

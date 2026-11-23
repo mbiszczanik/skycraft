@@ -1083,6 +1083,22 @@ class RunLogRedactionTests(RunnerTestCase):
             with self.subTest(name=name):
                 self.assertIsNone(r.proposed_edit(3, "+ New group", name))
 
+    def test_the_blade_outline_ends_with_what_each_child_frame_gave(self) -> None:
+        r = self.runner()
+        frame = BladeStillLoadingTests.Frame
+        main = frame('- heading "Policy | Assignments"\n')
+        unread = frame(None, {"x": 265, "y": 0, "width": 1269, "height": 891})
+        parked = frame("", {"x": -2000, "y": 0, "width": 800, "height": 891})
+        main.url, unread.url, parked.url = ("https://portal.azure.com/", "https://reactblade.portal.azure.net/x?t=1",
+                                            "https://portal.azure.com/frame")
+        r.page.viewport_size = {"width": 1440, "height": 900}
+        with mock.patch.object(run, "all_frames", lambda _page: [main, unread, parked]):
+            self.quietly(lambda: r.save_blade_outline({"id": "9.9.1"}, {"line": 7}, "Missing", [("heading", "X")]))
+        self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
+                         'heading "X"\n'
+                         "# child frame 1: reactblade.portal.azure.net, in the window, snapshot unreadable\n"
+                         "# child frame 2: portal.azure.com, outside the window, snapshot empty\n")
+
     def test_the_aria_files_mask_ids_and_secret_values_and_keep_every_line(self) -> None:
         r = self.runner()
         # As aria_snapshot() writes a text field: its value after the colon, an auto-generated
@@ -2024,6 +2040,17 @@ class BladeStillLoadingTests(unittest.TestCase):
                                    ("textbox", "Group name"), ("heading", "Add members"),
                                    ("button", "Close content 'Add members'")])
         self.assertEqual(run.blade_still_loading(outline), run.BLADE_EMPTY)
+
+    # Run 20261123-185036 (#614): the blade menu's search box came before the blade's frame, still
+    # a bare iframe, and passed for the blade's content.
+    def test_a_bare_iframe_after_a_blade_menu_is_still_loading(self) -> None:
+        blade = [("heading", "Policy | Assignments"), ("button", "Close content 'Policy | Assignments'"),
+                 ("searchbox", "Search box"), ("link", "Assignments")]
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + blade + [("iframe", ""), ("text", "")]),
+                         run.BLADE_EMPTY)
+        self.assertIsNone(run.blade_still_loading(       # the frame was read: its rows follow it
+            self.TOP_BAR + blade + [("iframe", ""), ("button", "Assign policy"), ("table", "")]))
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + blade))      # a menu blade, no frame
 
     def test_without_a_titled_blade_frame_nothing_is_loading(self) -> None:
         self.assertIsNone(run.blade_still_loading([]))
