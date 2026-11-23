@@ -28,3 +28,10 @@ PowerShell 7 (`pwsh`), Bicep CLI, Pester, PSScriptAnalyzer. Install the pre-comm
 - A PR that touches lab content declares `Live-verified: <what ran, where, date, exit codes>` or `Live-verification: deferred -> #<issue>` (ADR-0006). A deferred PR is a draft and uses `Refs #N`, never `Closes #N`.
 - Offline evidence is the full CI test set plus the green CI run id at the PR head, never a subset.
 - Never commit secrets, subscription or tenant ids, or personal e-mail addresses.
+
+## Lab steps and live runs
+
+- Before patching a lab step that cannot be completed as written, trace where it came from (`git log -S`, the tracking issue) and state: whether the exam's skills-measured outline names it (Microsoft Learn study guide, the repository's study guide and question bank, never from memory); whether the course material uses it; how many commands the working path needs beyond the guide and whether `Test-Lab.ps1` can check it; what removing it touches (checklist, objectives, script comments, linked anchors). A step outside the outline and unused by the course whose only working path is an undocumented workaround is proposed for removal with a short explanatory note; the maintainer decides.
+- Before running a lab script live, read its `param(` block and the lab's entry in `tools/lab-cycle-manifest.psd1` and use their switches and defaults.
+- Before building an estate for a target lab, read the comment and `TimeoutMs` of every lab in the chain in the manifest and skip each step over 15 minutes the target does not need with the lab's own switch (for example `-SkipEncryption` for Lab 3.2, about 2 hours).
+- A lab script asks for the ARM token with `Get-AzAccessToken -ResourceTypeName Arm`, never `-ResourceUrl 'https://management.azure.com/'` (a token-only session cannot read its identity otherwise, #529).
