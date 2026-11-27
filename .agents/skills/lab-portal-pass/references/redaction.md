@@ -17,9 +17,13 @@ The skycraft repository is public. Issues, comments, PR bodies, commit messages 
 | `Connected to Tenant: <id> as <account>` | `Connected to Tenant: <test-tenant-id> as the test tenant's admin account` |
 
 - Built-in Azure ids (policy and role definition GUIDs) are fine.
-- `render_report.py` scans the comments it writes with the publication guard, if installed: set
-  `PUBLIC_CONTENT_GUARD` to the path of its `guard-public-content.py` (its `public-content.json`
-  sits next to it). Do not assume the guard is installed or that every publish is guarded. If the guard is unavailable, the
+- `render_report.py` scans the comments it writes with the publication guard: set
+  `PUBLIC_CONTENT_GUARD` to the full path of the installed `guard-public-content.py` (its
+  `public-content.json` sits next to it), e.g. `export PUBLIC_CONTENT_GUARD=<guard-dir>/guard-public-content.py`
+  in bash or `$env:PUBLIC_CONTENT_GUARD = '<guard-dir>\guard-public-content.py'` in PowerShell.
+  Unset or not loadable, the script writes nothing and exits 4; `--no-scan` renders without the
+  scan, and every comment is then reviewed by hand before posting. Do not assume that every
+  publish is guarded. If the guard is unavailable, the
   pass shall report the gap and still review and redact every proposed publication.
   Propose new deny terms to the maintainer; do not change live configuration during a pass.
 - The private HTML report may name the user's own environment; the GitHub comments may not.

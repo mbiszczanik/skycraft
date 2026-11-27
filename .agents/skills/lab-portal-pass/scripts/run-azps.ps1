@@ -21,9 +21,24 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-if ((Split-Path $Script -Leaf) -eq 'Deploy-Bicep.ps1' -and -not $WhatIf) {
+$Script = (Resolve-Path -LiteralPath $Script).Path
+$leaf = Split-Path $Script -Leaf
+if ($leaf -notin 'Test-Lab.ps1', 'Deploy-Bicep.ps1') { throw "Only Test-Lab.ps1 or Deploy-Bicep.ps1 run here, not $leaf." }
+$isDeploy = $leaf -eq 'Deploy-Bicep.ps1'
+if ($isDeploy -and -not $WhatIf) {
     throw 'Deploy-Bicep.ps1 runs here only with -WhatIf; a real deploy is a separate, approved step.'
 }
+
+$splat = @{}
+foreach ($p in $Param) {
+    $name = ($p -split '=', 2)[0]
+    # Binding accepts prefixes and the aliases wi/cf, so block those too.
+    if ($name -in 'wi', 'cf' -or 'whatif'.StartsWith($name.ToLower()) -or 'confirm'.StartsWith($name.ToLower())) {
+        throw "-Param may not set WhatIf or Confirm ($p)."
+    }
+    if ($p -match '^([A-Za-z][A-Za-z0-9]*)=(.*)$') { $splat[$Matches[1]] = $Matches[2] } else { $splat[$p] = $true }
+}
+if ($isDeploy) { $splat['WhatIf'] = $true }
 
 $tok = az account get-access-token --subscription $SubscriptionId --resource https://management.azure.com/ --query accessToken -o tsv
 $acct = az account show --subscription $SubscriptionId --query user.name -o tsv
@@ -32,11 +47,6 @@ Connect-AzAccount -AccessToken $tok -AccountId $acct -Subscription $Subscription
 if ((Get-AzContext).Subscription.Id -ne $SubscriptionId) { throw 'Az context is on the wrong subscription.' }
 
 try {
-    $splat = @{}
-    foreach ($p in $Param) {
-        if ($p -match '^([A-Za-z][A-Za-z0-9]*)=(.*)$') { $splat[$Matches[1]] = $Matches[2] } else { $splat[$p] = $true }
-    }
-    if ($WhatIf) { $splat['WhatIf'] = $true }
     & $Script @splat
     exit $LASTEXITCODE
 } catch {

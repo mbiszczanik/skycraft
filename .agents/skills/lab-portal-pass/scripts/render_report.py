@@ -1,6 +1,6 @@
 """Render an agent Portal pass from pass.json.
 
-Usage: python render_report.py <pass.json> <out-dir>
+Usage: python render_report.py [--no-scan] <pass.json> <out-dir>
 
 Writes:
   <out-dir>/report.html        - the full report page (templates/report.html with the data embedded),
@@ -11,8 +11,10 @@ Writes:
 
 Text fields in pass.json are either a string or {"en": ..., "pl": ...}; comments use "en",
 the page uses "lang" with "en" as fallback. After writing, the comments are scanned with the
-publication guard named by PUBLIC_CONTENT_GUARD (path to guard-public-content.py), if set; any
-hit is printed and the exit code is 1, so nothing identifying is posted by accident.
+publication guard named by PUBLIC_CONTENT_GUARD (path to guard-public-content.py); any
+hit is printed and the exit code is 1, so nothing identifying is posted by accident. Without
+a loadable guard the run writes nothing and exits 4, unless --no-scan is given (comments then
+must not be posted unreviewed).
 
 Before writing, pass.json is validated: unknown keys, step results outside OK/DRIFT/WRONG/
 BLOCKED/NA, and Test-Lab passed/failed counts that are not numbers or disagree with testlab.log (the full saved
@@ -277,7 +279,8 @@ def panel_report(p, now=None):
 
 def scanner():
     if not HOOK:
-        print("warning: PUBLIC_CONTENT_GUARD not set; comments were NOT scanned for identifying data", file=sys.stderr)
+        print("error: PUBLIC_CONTENT_GUARD is not set; set it to the path of guard-public-content.py "
+              "or pass --no-scan for a run whose comments will not be posted", file=sys.stderr)
         return None
     try:
         spec = importlib.util.spec_from_file_location("guard", HOOK)
@@ -285,20 +288,31 @@ def scanner():
         spec.loader.exec_module(mod)
         cfg = mod.load_config()
         return lambda text: mod.findings(text, cfg)
-    except Exception:
-        print(f"warning: {HOOK} not loadable; comments were NOT scanned for identifying data", file=sys.stderr)
+    except Exception as exc:
+        print(f"error: PUBLIC_CONTENT_GUARD={HOOK} not loadable ({type(exc).__name__}: {exc})", file=sys.stderr)
         return None
 
 
 def main():
-    if len(sys.argv) != 3:
+    no_scan = "--no-scan" in sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != "--no-scan"]
+    if len(args) != 2:
         print(__doc__)
         return 2
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    src, out_dir = sys.argv[1], sys.argv[2]
+    src, out_dir = args
+    if no_scan:
+        scan = None
+        print("warning: --no-scan: comments are NOT scanned for identifying data; do not post them unreviewed",
+              file=sys.stderr)
+    else:
+        scan = scanner()
+        if scan is None:
+            print("nothing written", file=sys.stderr)
+            return 4
     with io.open(src, encoding="utf-8") as f:
         p = json.load(f)
     BASE[0] = os.path.dirname(os.path.abspath(src))
@@ -323,7 +337,6 @@ def main():
         f.write(html)
     with io.open(os.path.join(out_dir, "panel-report.json"), "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(panel_report(p), ensure_ascii=False, indent=1) + "\n")
-    scan = scanner()
     problems = 0
     for lab in p["labs"]:
         if not lab.get("walked"):
