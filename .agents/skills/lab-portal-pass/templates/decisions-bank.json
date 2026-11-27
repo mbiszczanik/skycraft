@@ -1,0 +1,30 @@
+[
+  {"id": "cleanup", "q": {"en": "Clean up this module's objects in the subscription now?", "pl": "Czy teraz posprzątać obiekty modułu w subskrypcji?"},
+   "why": {"en": "Name what is live, what blocks other work (deny policies, locks) and whether the next module needs it.", "pl": "Wymień, co działa, co blokuje inną pracę (polityki deny, blokady) i czy następny moduł tego potrzebuje."},
+   "options": [
+     {"value": "remove-redeploy", "rec": true, "label": {"en": "Remove what the Portal pass made; redeploy by script when needed", "pl": "Usunąć to, co powstało w Portalu; wdrożyć skryptem, gdy będzie potrzebne"}, "desc": {"en": "Script-made objects have the names the next labs and scripts expect.", "pl": "Obiekty ze skryptu mają nazwy, których oczekują kolejne laby i skrypty."}},
+     {"value": "remove-all", "label": {"en": "Remove everything the pass created", "pl": "Usunąć wszystko, co powstało w przejściu"}, "desc": {"en": "Back to the pre-pass state.", "pl": "Powrót do stanu sprzed przejścia."}},
+     {"value": "keep", "label": {"en": "Keep everything for the next pass", "pl": "Zostawić wszystko na następne przejście"}, "desc": {"en": "Say what stays active and who it affects.", "pl": "Napisz, co zostaje aktywne i kogo dotyczy."}}]},
+  {"id": "estate", "q": {"en": "What happens to the live estate the pass did not create?", "pl": "Co z żywym środowiskiem, którego przejście nie utworzyło?"},
+   "why": {"en": "Name where it came from (load-game, lab cycle) and what it costs.", "pl": "Podaj, skąd pochodzi (load-game, cykl labów) i ile kosztuje."},
+   "options": [
+     {"value": "keep", "rec": true, "label": {"en": "Leave it running", "pl": "Zostawić"}, "desc": {"en": "Not part of this pass.", "pl": "Nie jest częścią tego przejścia."}},
+     {"value": "teardown", "label": {"en": "Tear it down after the cleanup", "pl": "Usunąć po sprzątaniu"}, "desc": {"en": "Locks, backup protected items and service links first.", "pl": "Najpierw blokady, chronione elementy kopii zapasowej i powiązania usług."}}]},
+  {"id": "priority", "q": {"en": "What goes first before the next course session?", "pl": "Co naprawić najpierw przed następną sesją kursu?"},
+   "why": {"en": "List the script/class issues and the guide-PR issue filed in this pass.", "pl": "Wymień issues klasowe i skryptowe oraz issue z PR-em przewodnika z tego przejścia."},
+   "options": [
+     {"value": "scripts", "rec": true, "label": {"en": "Script defects first, then the guide PR", "pl": "Najpierw błędy skryptów, potem PR przewodnika"}, "desc": {"en": "Script defects break later labs silently.", "pl": "Błędy skryptów po cichu psują kolejne laby."}},
+     {"value": "guide", "label": {"en": "Guide PR first", "pl": "Najpierw PR przewodnika"}, "desc": {"en": "Learners meet the guide first.", "pl": "Kursanci najpierw trafiają na przewodnik."}},
+     {"value": "parallel", "label": {"en": "Both in parallel sessions", "pl": "Oba równolegle w osobnych sesjach"}, "desc": {"en": "Separate worktrees, no shared files.", "pl": "Osobne worktree, bez wspólnych plików."}}]},
+  {"id": "paths", "q": {"en": "CLI and PowerShell paths for these labs?", "pl": "Ścieżki CLI i PowerShell dla tych labów?"},
+   "why": {"en": "This pass covered the Portal only.", "pl": "To przejście obejmowało tylko Portal."},
+   "options": [
+     {"value": "later", "rec": true, "label": {"en": "Later, after the fixes land", "pl": "Później, gdy poprawki trafią do repo"}, "desc": {"en": "Avoids walking paths the fixes change.", "pl": "Żeby nie przechodzić ścieżek, które poprawki zmienią."}},
+     {"value": "now", "label": {"en": "Now", "pl": "Teraz"}, "desc": {"en": "Creates need a yes per lab.", "pl": "Tworzenie zasobów wymaga zgody dla każdego labu."}},
+     {"value": "skip", "label": {"en": "Skip", "pl": "Pominąć"}, "desc": {"en": "The tri-modal steps stay unverified for this module.", "pl": "Kroki w trzech wariantach zostają niesprawdzone dla tego modułu."}}]},
+  {"id": "next", "q": {"en": "Which module next?", "pl": "Który moduł następny?"},
+   "why": {"en": "Follow #329's table unless something blocks it.", "pl": "Według tabeli w #329, chyba że coś blokuje."},
+   "options": [
+     {"value": "next-in-order", "rec": true, "label": {"en": "The next module in #329's order", "pl": "Następny moduł według kolejności w #329"}, "desc": {"en": "Prerequisites deployed by script first.", "pl": "Wymagania wstępne najpierw wdrożone skryptem."}},
+     {"value": "wait", "label": {"en": "Wait for this module's fixes", "pl": "Poczekać na poprawki tego modułu"}, "desc": {"en": "When later labs depend on the broken objects.", "pl": "Gdy kolejne laby zależą od zepsutych obiektów."}}]}
+]
