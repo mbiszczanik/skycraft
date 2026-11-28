@@ -314,7 +314,7 @@ After a refresh, `rg-test-with-tag` is no longer listed in **Resource groups**.
 ### Step 1.3.7: Configure Advisor Alerts
 
 > [!IMPORTANT]
-> This step belongs to Section 5 (Azure Advisor), but you do it here, before the next policy step. Step 1.3.8 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`, and `Inherit-Project-Tag`, which adds that tag from the resource group. The **Create Advisor Alerts** form has no tags, so after Step 1.3.8 the alert is created only while `Inherit-Project-Tag` is in effect and `prod-skycraft-swc-rg` carries `Project` = `SkyCraft`. Created here, it does not depend on either. It stays without tags, and Step 1.3.10 shows it as the resource a remediation task tags.
+> This step belongs to Section 5 (Azure Advisor), but you do it here, before the next policy step. Step 1.3.8 assigns `Enforce-Project-Tag`, which refuses every new resource without the tag `Project` = `SkyCraft`, and `Inherit-Project-Tag`, which adds that tag from the resource group. The **Create Advisor Alerts** form has no tags, so after Step 1.3.8 the alert is created only while `Inherit-Project-Tag` is in effect and `prod-skycraft-swc-rg` carries `Project` = `SkyCraft`. Created here, it does not depend on either. It stays without tags, and Step 1.3.10 shows it as the resource a remediation task tags. On a subscription where `Inherit-Project-Tag` is already assigned (the lab's policies from an earlier run), the alert is created with `Project` = `SkyCraft` already set.
 
 1. In Azure Portal, search for **Advisor**
 2. In the left menu, under **Monitoring** (expand it if it is collapsed), click **Alerts (Preview)**
@@ -784,7 +784,7 @@ Create a more specific budget for the production environment. A budget belongs t
 1. In Azure Portal, search for **Subscriptions**
 2. Click your subscription
 3. In the left menu, under **Cost Management** (expand it if it is collapsed), click **Cost analysis**
-4. Open the **VIEW** menu and, under **Built-in views**, explore:
+4. Open the **All views** tab of Cost analysis and, from the views listed there, explore:
    - **Cost by resource** - See spending per resource
    - **Cost by service** - See spending per Azure service
    - **Daily costs** - Trend over time
@@ -801,7 +801,7 @@ Create a more specific budget for the production environment. A budget belongs t
 
 ![Manage Costs with Budgets and Alerts](./images/step-1.3.18b.png)
 
-**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts (a day later: empty charts and "No cost reported during this period"), and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **VIEW** menu and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
+**Note**: On a subscription created the same day, Cost analysis can show **Unable to load** instead of the charts (a day later: empty charts and "No cost reported during this period"), and no **Add filter**, for up to 48 hours: Microsoft says a new subscription may wait that long for all Cost Management features. The **All views** tab and **Last 30 days** still work, but items 6-7 cannot be done yet. The budget chart of Step 1.3.15 shows **Cannot load data** for the same reason. Nothing is wrong with the lab: come back to this step later. `Test-Lab.ps1` does not check it.
 
 ---
 
