@@ -112,8 +112,8 @@
     },
     {
       "type": "text", "id": "c2d", "x": 300, "y": 180, "width": 270, "height": 69,
-      "text": "blocks deletion\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
-      "originalText": "blocks deletion\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
+      "text": "blocks deletion, 1.3.11-13\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
+      "originalText": "blocks deletion, 1.3.11-13\n\nCanNotDelete on\n  prod-skycraft-swc-rg\n  platform-skycraft-swc-rg",
       "fontSize": 11, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
