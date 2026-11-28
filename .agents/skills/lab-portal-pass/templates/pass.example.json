@@ -1,0 +1,111 @@
+{
+  "lang": "pl",
+  "page_title": "Module 1 Portal Pass",
+  "title": {"en": "Module 1 Portal pass", "pl": "Przejście Modułu 1 w Portalu"},
+  "date": "2026-10-14",
+  "guide_commit": "b4c7f06",
+  "repo": "mbiszczanik/skycraft",
+  "tracking_issue": 300,
+  "intro": {
+    "en": "Labs 1.1 and 1.3 were followed step by step in the Azure Portal, as a learner would. This was an **agent pass** (automated browser), not a learner pass. Lab 1.2 was not walked.",
+    "pl": "Laby 1.1 i 1.3 przeszedłem w Portalu Azure krok po kroku, tak jak zrobiłby to kursant. To było **przejście agenta** (automatyczna przeglądarka), nie przejście kursanta. Labu 1.2 nie przechodziłem."
+  },
+  "meta": [
+    {"label": {"en": "1.1 account", "pl": "Konto dla 1.1"}, "value": {"en": "test tenant admin", "pl": "admin tenanta testowego"}},
+    {"label": {"en": "1.3 account", "pl": "Konto dla 1.3"}, "value": {"en": "subscription owner", "pl": "właściciel subskrypcji"}}
+  ],
+  "header_note": {"en": "Portal labels are quoted in English, as the Portal shows them.", "pl": "Nazwy przycisków i pól podaję po angielsku, tak jak wyświetla je Portal."},
+  "account_role": "account: the subscription owner's",
+  "labs": [
+    {
+      "id": "1.1", "name": {"en": "Entra users and groups", "pl": "Użytkownicy i grupy Entra"}, "walked": true,
+      "account_role": "account: the test tenant's admin (test tenant)",
+      "summary": {"en": "Test-Lab: 10 of 10 passed; exit code not captured.", "pl": "Test-Lab: 10 z 10 zaliczonych; kod wyjścia nieprzechwycony."},
+      "steps": [
+        {"step": "1.1.1", "result": "OK", "guide": "Search **Microsoft Entra ID**, open it", "portal": "Tenant overview; Manage > Users, Groups, Roles and administrators", "evidence": "screen read"},
+        {"step": "1.1.2", "result": "OK", "guide": "**+ New user** > **Create new user**, Review + create, Create, Refresh", "portal": "Same labels; UPN split into name + domain; clearing Auto-generate unlocks Password", "evidence": "toast \"Successfully created user\""},
+        {"step": "1.1.3-1.1.4", "result": "OK", "guide": "as 1.1.2", "portal": "new user appears only after Refresh (covered by the 1.1.2 note)", "evidence": "toasts"},
+        {"step": "1.1.5", "result": "OK", "guide": "**Invite external user**, Review + invite, Invite", "portal": "same labels; also Cc recipient and Invite redirect URL", "evidence": "toast \"Successfully invited user\""},
+        {"step": "1.1.6-1.1.9", "result": "OK", "guide": "Groups > All groups, + New group, members, Create, Refresh", "portal": "Groups opens on Overview, All groups one click; Security/Assigned defaults", "evidence": "All groups after Refresh"},
+        {"step": "1.1.10", "result": "OK", "guide": "Edit properties > Job Information, Save, Properties tab", "portal": "Job Information is below the fold on Properties", "evidence": "toast \"Successfully updated user\""},
+        {"step": "1.1.11-1.1.14", "result": "OK", "guide": "Licenses; Password reset All; User type Guest; External collaboration settings", "portal": "as described", "evidence": "screen read"}
+      ],
+      "deviations": ["Passwords left auto-generated (the agent does not type passwords).", "1.1.5: **Send invite message** cleared at the maintainer's request."],
+      "environment": ["React views stalled twice in the automated tab; F5 fixed them."],
+      "testlab": {"how": "run by the maintainer, interactive Graph sign-in", "exit": null, "passed": 10, "failed": 0,
+                  "output": "Connected to Tenant: <test-tenant-id> as the test tenant's admin account\n  Passed: 10\n  Failed: 0",
+                  "note": "The exit code was not captured (the command ran in bash)."}
+    },
+    {
+      "id": "1.2", "name": "RBAC", "walked": false,
+      "summary": {"en": "Not walked: the lab users live in the test tenant, the subscription in another. #325 stays unconfirmed.", "pl": "Nieprzechodzony: użytkownicy labu są w tenancie testowym, a subskrypcja w innym. #325 zostaje niepotwierdzone."}
+    },
+    {
+      "id": "1.3", "name": "Governance", "walked": true,
+      "context": "`dev-skycraft-swc-rg` was created first exactly as step 1.2.1 says, as setup only.",
+      "summary": {"en": "Test-Lab: exit 1, 5 passed, 3 failed (#330).", "pl": "Test-Lab: kod wyjścia 1, 5 zaliczonych, 3 niezaliczone (#330)."},
+      "steps": [
+        {"step": "1.3.1", "result": "OK", "guide": "Tags, 4 tags, Apply", "portal": "comboboxes; Apply greys out after saving", "evidence": "screen read",
+         "summary": {"en": "Tag editor works; Apply greys out after saving.", "pl": "Edytor tagów działa; po zapisaniu Apply robi się nieaktywny."}},
+        {"step": "1.3.4", "result": "DRIFT", "guide": "Tags service, click **Project**, then **SkyCraft**", "portal": "name : value pairs, one click", "evidence": "1.3.4a-tags-list-name-value-pairs.jpg",
+         "summary": {"en": "Tags service lists name : value pairs; one click.", "pl": "Usługa Tags pokazuje pary nazwa : wartość; jedno kliknięcie."}},
+        {"step": "1.3.6", "result": "WRONG", "guide": "Review + create shows the deny on the Tags tab", "portal": "review passes; deny only after Create", "evidence": "1.3.6c-deny-only-after-create.jpg; az deployment sub validate -> RequestDisallowedByPolicy",
+         "detail": "With the assignment in effect, **Review + create** reaches the review page; the deny appears only after **Create** (\"Failed to create the resource group\").",
+         "summary": {"en": "Deny only after Create; the Note's wait loop never ends.", "pl": "Odmowa dopiero po Create; pętla czekania z notatki nigdy się nie kończy."}},
+        {"step": "1.3.11", "result": "WRONG", "guide": "Delete resource group shows the lock error, then Cancel", "portal": "no warning until the name is typed and confirmed twice", "evidence": "1.3.11a-delete-pane-no-lock-warning.jpg",
+         "detail": "After confirming: notification \"Failed to delete resource group ... has locks applied. Remove the locks before deleting.\"",
+         "summary": {"en": "No lock warning before confirming; guide says Cancel.", "pl": "Brak ostrzeżenia przed potwierdzeniem; przewodnik każe kliknąć Cancel."}},
+        {"step": "1.3.16", "result": "BLOCKED", "guide": "+ Add, click Scope, select prod-skycraft-swc-rg", "portal": "Scope is plain text in Create budget", "evidence": "1.3.16a-wizard-scope-not-clickable.jpg",
+         "detail": "Scope cannot be changed in the wizard; working route: the resource group's **Cost Management > Budgets**.",
+         "summary": {"en": "Scope not selectable in the wizard.", "pl": "W kreatorze nie da się wybrać zakresu."}},
+        {"step": "1.3.21", "result": "BLOCKED", "guide": "New Advisor alert, action group, Review + Create", "portal": "Region East US refused; alert refused for missing tags, form has none", "evidence": "activity log RequestDisallowedByPolicy",
+         "detail": "Action group refused by `Restrict-Azure-Regions` (default East US); the alert rule refused by `Enforce-Project-Tag` - its form has no tags field (#331, #232).",
+         "summary": {"en": "Region refused, then the alert refused for missing tags.", "pl": "Region odrzucony, potem alert odrzucony z braku tagów."}},
+        {"step": "1.3.22", "result": "OK", "guide": "Management groups, Tenant Root Group", "portal": "as described", "evidence": "screen read",
+         "summary": {"en": "Tenant Root Group visible.", "pl": "Tenant Root Group widoczna."}}
+      ],
+      "testlab": {"how": "run by the agent, read-only, ARM token from az CLI", "exit": 1, "passed": 5, "failed": 3,
+                  "output": "  Policy: Require-Environment-Tag-RG [FAIL] Not found or unreadable: [PolicyAssignmentNotFound] ...\n  Passed: 5\n  Failed: 3",
+                  "note": "The three failures are #330, not #237 or #273."},
+      "checklist_rows": [
+        {"row": "1.3.4", "verdict": "confirmed", "note": "name : value pairs"},
+        {"row": "1.3.22", "verdict": "cleared"}
+      ],
+      "filed_line": "**Filed:** #330, #331, #332. Evidence added to #232, #268, #225.",
+      "not_done": ["the CLI and PowerShell paths"]
+    }
+  ],
+  "findings": [
+    {"severity": "critical", "title": {"en": "Lab 1.3 cleanup leaves the deny policies in place (#330)", "pl": "Sprzątanie po Lab 1.3 zostawia polityki deny (#330)"},
+     "text": {"en": "**Assignment name** sets only the display name; the scripts look assignments up by resource name.", "pl": "**Assignment name** ustawia tylko nazwę wyświetlaną; skrypty szukają przypisań po nazwie zasobu."}},
+    {"severity": "BLOCKED", "title": {"en": "1.3.21 Advisor alert cannot be created (#331, #232)", "pl": "1.3.21: alertu Advisora nie da się utworzyć (#331, #232)"},
+     "text": {"en": "Default region refused, then the alert refused for missing tags; the form has no tags field.", "pl": "Domyślny region odrzucony, potem alert odrzucony z braku tagów; formularz nie ma pola tagów."}}
+  ],
+  "issues": {
+    "filed": [
+      {"n": 330, "title": {"en": "Lab 1.3 scripts look policy assignments up by a name the Portal does not set", "pl": "Skrypty Lab 1.3 szukają przypisań polityk po nazwie, której Portal nie ustawia"}},
+      {"n": 331, "title": {"en": "Portal steps leave Region at a refused default", "pl": "Kroki w Portalu zostawiają domyślny region, który polityka odrzuca"}},
+      {"n": 332, "title": {"en": "Lab 1.3: guide steps no longer match the Portal", "pl": "Lab 1.3: kroki przewodnika nie pasują już do Portalu"}}
+    ],
+    "updated": [
+      {"n": 232, "text": {"en": "Advisor alert form has no tags", "pl": "formularz alertu Advisora nie ma pola tagów"}},
+      {"text": {"en": "Nothing closed. No commits.", "pl": "Nic nie zamknąłem. Żadnych commitów."}}
+    ]
+  },
+  "state": [
+    {"title": {"en": "Rehearsal subscription", "pl": "Subskrypcja testowa"},
+     "items": [
+       {"live": true, "text": {"en": "3 active policy assignments with generated names", "pl": "3 aktywne przypisania polityk z wygenerowanymi nazwami"}},
+       {"text": {"en": "CanNotDelete locks on prod and platform", "pl": "Blokady CanNotDelete na prod i platform"}}
+     ]}
+  ],
+  "state_note": {"en": "The deny policies affect anything created in this subscription until removed.", "pl": "Dopóki polityki deny są aktywne, dotyczą wszystkiego, co powstaje w tej subskrypcji."},
+  "decisions": [
+    {"id": "fix1321", "q": {"en": "How should step 1.3.21 be made doable?", "pl": "Jak sprawić, żeby krok 1.3.21 był wykonalny?"},
+     "why": {"en": "The alert form has no tags; Enforce-Project-Tag denies untagged resources.", "pl": "Formularz alertu nie ma tagów; Enforce-Project-Tag odrzuca zasoby bez tagów."},
+     "options": [
+       {"value": "order", "rec": true, "label": {"en": "Move the Advisor alert before 1.3.7", "pl": "Przenieść alert Advisora przed krok 1.3.7"}, "desc": {"en": "Smallest change.", "pl": "Najmniejsza zmiana."}},
+       {"value": "exempt", "label": {"en": "Policy exemption in the step", "pl": "Wyjątek od polityki w tym kroku"}, "desc": {"en": "Teaches exemptions.", "pl": "Uczy wyjątków."}}
+     ]}
+  ]
+}

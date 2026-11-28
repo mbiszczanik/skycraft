@@ -1,0 +1,199 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; lab summary, findings, step ledgers, issues, live state, then the decision form with a sticky copy bar */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --ink:#18212b; --muted:#5b6673; --line:#d9dee4;
+  --accent:#1f5f8b; --accent-soft:#e3eef6;
+  --ok:#2f7a4a; --ok-soft:#e4f2e8; --drift:#8a6a12; --drift-soft:#f6efd8;
+  --wrong:#b2452c; --wrong-soft:#f8e5df; --blocked:#7a2e6e; --blocked-soft:#f3e3ef;
+  --f-display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --f-body:"Public Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12171d; --surface:#1a2129; --ink:#e4e9ee; --muted:#9aa6b2; --line:#2e3843;
+  --accent:#7db7e0; --accent-soft:#1d3142;
+  --ok:#7fc79a; --ok-soft:#1c3226; --drift:#e0c070; --drift-soft:#352d17;
+  --wrong:#f09a80; --wrong-soft:#3b2119; --blocked:#e1a2d5; --blocked-soft:#38213a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12171d; --surface:#1a2129; --ink:#e4e9ee; --muted:#9aa6b2; --line:#2e3843;
+  --accent:#7db7e0; --accent-soft:#1d3142;
+  --ok:#7fc79a; --ok-soft:#1c3226; --drift:#e0c070; --drift-soft:#352d17;
+  --wrong:#f09a80; --wrong-soft:#3b2119; --blocked:#e1a2d5; --blocked-soft:#38213a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55;padding-inline:16px;padding-block:0 96px}
+.wrap{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:40px;padding-block:32px 0}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.2}
+h1{font-size:clamp(28px,5vw,40px);font-weight:700}
+h2{font-size:24px;font-weight:600}
+h3{font-size:17px;font-weight:600;font-family:var(--f-body)}
+p{margin:0;max-width:68ch}
+a{color:var(--accent)}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+section{display:flex;flex-direction:column;gap:16px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--muted);font-size:13.5px}
+.meta b{color:var(--ink);font-weight:600}
+.note{background:var(--accent-soft);border-left:3px solid var(--accent);padding:12px 14px;border-radius:4px;font-size:14px}
+.labs{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.lab{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.lab .name{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.lab .name strong{font-family:var(--f-display);font-size:19px}
+.counts{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.c-OK{background:var(--ok-soft);color:var(--ok)}
+.c-DRIFT{background:var(--drift-soft);color:var(--drift)}
+.c-WRONG,.c-critical{background:var(--wrong-soft);color:var(--wrong)}
+.c-BLOCKED{background:var(--blocked-soft);color:var(--blocked)}
+.c-NA{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--line)}
+.bar span{display:block;height:100%}
+.small{font-size:13px;color:var(--muted)}
+.findings{display:flex;flex-direction:column;gap:12px}
+.finding{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;min-width:0}
+.finding .sev{grid-row:span 2;align-self:start}
+.finding p{font-size:14.5px}
+.finding .ttl{font-weight:600}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg)}
+td.step{font-family:var(--f-mono);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.state{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.state ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:8px}
+.live{color:var(--wrong);font-weight:600}
+.decisions{display:flex;flex-direction:column;gap:14px}
+fieldset{border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:14px 16px 16px;margin:0;display:flex;flex-direction:column;gap:10px;min-width:0}
+legend{padding:0 6px;font-weight:600;font-size:15.5px}
+fieldset .why{font-size:14px;color:var(--muted)}
+.opt{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:start;padding:8px 10px;border:1px solid var(--line);border-radius:5px;cursor:pointer}
+.opt:hover{border-color:var(--accent)}
+.opt input{margin-top:4px;accent-color:var(--accent)}
+.opt .lbl{font-weight:600;font-size:14.5px}
+.opt .desc{grid-column:2;font-size:13.5px;color:var(--muted)}
+.rec{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);margin-left:6px}
+.opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+input:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+textarea{width:100%;min-height:56px;font-family:var(--f-body);font-size:14px;border:1px solid var(--line);border-radius:5px;padding:8px;background:var(--bg);color:var(--ink)}
+.dock{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
+.dock .in{max-width:920px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;justify-content:space-between}
+button{font-family:var(--f-body);font-size:14px;font-weight:600;border-radius:5px;padding:9px 16px;cursor:pointer;border:1px solid var(--accent)}
+.primary{background:var(--accent);color:var(--surface)}
+.ghost{background:transparent;color:var(--accent)}
+#out{width:100%;min-height:150px;font-family:var(--f-mono);font-size:12.5px}
+footer{color:var(--muted);font-size:12.5px}
+</style>
+
+<div class="wrap" id="app"></div>
+<div class="dock"><div class="in">
+  <span class="small" id="progress"></span>
+  <span style="display:flex;gap:8px;flex-wrap:wrap">
+    <button type="button" class="ghost" id="reset"></button>
+    <button type="button" class="primary" id="copy"></button>
+  </span>
+</div></div>
+
+<script>
+const PASS = /*PASS_JSON*/null;
+const L = {
+  en:{eyebrow:"SkyCraft · Course readiness",date:"Date",commit:"Guide commit",results:"Results by lab",notWalked:"Not walked",
+      legend:"OK: matches the guide. Drift: wording or navigation differs, step still doable. Wrong: the result differs from the Expected Result, or a policy error the guide does not prepare for. Blocked: a learner cannot complete the step from the text.",
+      most:"What matters most",ledger:"Step ledger",step:"Step",result:"Result",diff:"What the Portal does differently",issues:"Issues",filed:"Filed",updated:"Evidence added",
+      live:"What is live right now",decisions:"Decisions",decIntro:"Pick an option for each question, then copy your answers and paste them into the chat. Your picks are remembered in this browser only.",
+      answers:"Your answers",note:"Optional note",rec:"Recommended",copy:"Copy answers",copied:"Copied",selected:"Selected: press Ctrl+C",clear:"Clear",
+      answered:(n,t)=>n+" of "+t+" answered",noAnswer:"(no answer)",noteLbl:"note",testlab:"Test-Lab",
+      chip:{OK:"OK",DRIFT:"drift",WRONG:"wrong",BLOCKED:"blocked",NA:"n/a",critical:"Critical"},
+      footer:"Agent pass in an automated browser. Evidence and screenshots are referenced, not embedded."},
+  pl:{eyebrow:"SkyCraft · Gotowość kursu",date:"Data",commit:"Commit przewodników",results:"Wyniki per lab",notWalked:"Nieprzechodzony",
+      legend:"OK: zgodne z przewodnikiem. Dryf: inne nazwy lub nawigacja, ale krok da się wykonać. Błąd: wynik inny niż „Expected Result” albo błąd polityki, na który przewodnik nie przygotowuje. Blokada: kursant nie wykona kroku na podstawie tekstu.",
+      most:"Najważniejsze",ledger:"Kroki",step:"Krok",result:"Wynik",diff:"Co Portal robi inaczej",issues:"Issues",filed:"Założone",updated:"Dopisane dowody",
+      live:"Co teraz działa",decisions:"Decyzje",decIntro:"Przy każdym pytaniu wybierz jedną opcję, skopiuj odpowiedzi i wklej je na czacie. Wybory zapamiętuje tylko ta przeglądarka.",
+      answers:"Twoje odpowiedzi",note:"Uwagi (opcjonalnie)",rec:"Rekomendacja",copy:"Kopiuj odpowiedzi",copied:"Skopiowano",selected:"Zaznaczono: naciśnij Ctrl+C",clear:"Wyczyść",
+      answered:(n,t)=>"Odpowiedzi: "+n+" z "+t,noAnswer:"(brak odpowiedzi)",noteLbl:"uwagi",testlab:"Test-Lab",
+      chip:{OK:"OK",DRIFT:"dryf",WRONG:"błąd",BLOCKED:"blokada",NA:"n/d",critical:"Krytyczne"},
+      footer:"Przejście agenta w automatycznej przeglądarce. Dowody i zrzuty ekranu są podlinkowane, nie wklejone."}
+};
+const lang = PASS.lang in L ? PASS.lang : "en", T = L[lang];
+const t = v => v == null ? "" : (typeof v === "object" && !Array.isArray(v) ? (v[lang] ?? v.en ?? "") : String(v));
+const el = (tag, attrs, ...kids) => { const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "html") e.innerHTML = v; else if (k === "class") e.className = v; else e.setAttribute(k, v); }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k)); return e; };
+// Inline markup allowed in data: **bold**, `code`, #123 issue links.
+const rich = s => { const esc = String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return esc.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/(^|[\s(])#(\d+)\b/g,(m,p,n)=>p+'<a href="https://github.com/'+PASS.repo+'/issues/'+n+'">#'+n+'</a>'); };
+const R = (tag, attrs, s) => el(tag, Object.assign({}, attrs, {html: rich(t(s))}));
+const ORDER = ["OK","DRIFT","WRONG","BLOCKED"], COLOR = {OK:"var(--ok)",DRIFT:"var(--drift)",WRONG:"var(--wrong)",BLOCKED:"var(--blocked)"};
+const counts = lab => { const c = {OK:0,DRIFT:0,WRONG:0,BLOCKED:0,NA:0}; (lab.steps||[]).forEach(s => c[s.result] = (c[s.result]||0) + 1); return c; };
+const app = document.getElementById("app");
+document.documentElement.lang = lang;
+
+app.append(el("header", {style:"display:flex;flex-direction:column;gap:12px"},
+  el("span", {class:"eyebrow"}, T.eyebrow + (PASS.tracking_issue ? " · #" + PASS.tracking_issue : "")),
+  el("h1", {}, t(PASS.title)),
+  R("p", {}, PASS.intro),
+  el("div", {class:"meta"}, el("span", {}, T.date + " ", el("b", {}, PASS.date)), el("span", {}, T.commit + " ", el("b", {class:"mono"}, PASS.guide_commit)),
+    ...(PASS.meta||[]).map(m => el("span", {}, t(m.label) + " ", el("b", {}, t(m.value))))),
+  PASS.header_note ? R("p", {class:"small"}, PASS.header_note) : null));
+
+if (PASS.labs.length) app.append(el("section", {}, el("h2", {}, T.results),
+  el("div", {class:"labs"}, ...PASS.labs.map(lab => { const c = counts(lab), total = ORDER.reduce((a,k)=>a+c[k],0);
+    return el("div", {class:"lab"},
+      el("div", {class:"name"}, el("strong", {}, "Lab " + lab.id), el("span", {class:"small"}, t(lab.name))),
+      el("div", {class:"bar","aria-hidden":"true"}, ...(lab.walked && total ? ORDER.filter(k=>c[k]).map(k => el("span", {style:"width:"+(100*c[k]/total).toFixed(1)+"%;background:"+COLOR[k]})) : [])),
+      el("div", {class:"counts"}, ...(lab.walked ? ORDER.map(k => el("span", {class:"chip c-"+k}, c[k] + " " + T.chip[k])) : [el("span", {class:"chip c-NA"}, T.notWalked)])),
+      lab.summary ? R("p", {class:"small"}, lab.summary) : null); })),
+  el("p", {class:"small"}, T.legend)));
+
+if ((PASS.findings||[]).length) app.append(el("section", {}, el("h2", {}, T.most),
+  el("div", {class:"findings"}, ...PASS.findings.map(f => el("div", {class:"finding"},
+    el("span", {class:"chip sev c-"+f.severity}, T.chip[f.severity] || f.severity),
+    R("span", {class:"ttl"}, f.title), R("p", {}, f.text))))));
+
+PASS.labs.filter(l => l.walked && (l.steps||[]).length).forEach(lab => app.append(el("section", {},
+  el("h2", {}, T.ledger + " · Lab " + lab.id),
+  el("div", {class:"tablebox"}, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, T.step), el("th", {}, T.result), el("th", {}, T.diff))),
+    el("tbody", {}, ...lab.steps.map(s => el("tr", {}, el("td", {class:"step"}, s.step), el("td", {}, el("span", {class:"chip c-"+s.result}, T.chip[s.result])), R("td", {}, s.summary || s.portal)))))),
+  lab.ledger_note ? R("p", {class:"small"}, lab.ledger_note) : null)));
+
+if (PASS.issues) app.append(el("section", {}, el("h2", {}, T.issues), el("div", {class:"state"},
+  el("div", {class:"box"}, el("h3", {}, T.filed), el("ul", {}, ...(PASS.issues.filed||[]).map(i => R("li", {}, "#" + i.n + " " + t(i.title))))),
+  el("div", {class:"box"}, el("h3", {}, T.updated), el("ul", {}, ...(PASS.issues.updated||[]).map(i => R("li", {}, (i.n ? "#" + i.n + " " : "") + t(i.text))))))));
+
+if (PASS.state) app.append(el("section", {}, el("h2", {}, T.live), el("div", {class:"state"},
+  ...PASS.state.map(b => el("div", {class:"box"}, R("h3", {}, b.title), el("ul", {}, ...b.items.map(i => R("li", i.live ? {class:"live"} : {}, i.text)))))),
+  PASS.state_note ? R("p", {class:"note"}, PASS.state_note) : null));
+
+const D = PASS.decisions || [], KEY = "lab-portal-pass:" + PASS.title_id;
+let state = {}; try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { state = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+const form = el("form", {class:"decisions", onsubmit:"return false"});
+D.forEach((d, i) => { const fs = el("fieldset", {}, el("legend", {}, (i+1) + ". " + t(d.q)), R("p", {class:"why"}, d.why));
+  d.options.forEach(o => { const id = d.id + "-" + o.value;
+    const inp = el("input", {type:"radio", name:d.id, id, value:o.value}); if (state[d.id] === o.value) inp.checked = true;
+    inp.addEventListener("change", () => { state[d.id] = o.value; save(); render(); });
+    fs.append(el("label", {class:"opt", for:id}, inp, el("span", {class:"lbl"}, t(o.label), o.rec ? el("span", {class:"rec"}, T.rec) : null), R("span", {class:"desc"}, o.desc))); });
+  const ta = el("textarea", {id:d.id+"-note", placeholder:T.note, "aria-label":T.note + " " + (i+1)}); ta.value = state[d.id+"_note"] || "";
+  ta.addEventListener("input", () => { state[d.id+"_note"] = ta.value; save(); render(); }); fs.append(ta); form.append(fs); });
+if (D.length) app.append(el("section", {}, el("h2", {}, T.decisions), el("p", {}, T.decIntro), form,
+  el("section", {class:"box"}, el("h3", {}, T.answers), el("textarea", {id:"out", readonly:"", "aria-label":T.answers}))));
+app.append(el("footer", {}, T.footer + " " + PASS.date + "."));
+
+function render() { if (!D.length) { document.querySelector(".dock").hidden = true; return; }
+  let n = 0; const lines = [t(PASS.title) + ": " + T.decisions + " (" + PASS.date + ")"];
+  D.forEach((d, i) => { const o = d.options.find(x => x.value === state[d.id]); if (o) n++;
+    lines.push((i+1) + ". " + t(d.q) + " -> " + (o ? t(o.label) : T.noAnswer) + (state[d.id+"_note"] ? " | " + T.noteLbl + ": " + state[d.id+"_note"] : "")); });
+  document.getElementById("out").value = lines.join("\n"); document.getElementById("progress").textContent = T.answered(n, D.length); }
+const copyBtn = document.getElementById("copy"), resetBtn = document.getElementById("reset");
+copyBtn.textContent = T.copy; resetBtn.textContent = T.clear;
+copyBtn.addEventListener("click", () => { const o = document.getElementById("out");
+  const sel = () => { o.focus(); o.select(); copyBtn.textContent = T.selected; };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(o.value).then(() => { copyBtn.textContent = T.copied; setTimeout(() => copyBtn.textContent = T.copy, 1600); }).catch(sel); else sel(); });
+resetBtn.addEventListener("click", () => { state = {}; save(); form.querySelectorAll("input").forEach(i => i.checked = false); form.querySelectorAll("textarea").forEach(x => x.value = ""); render(); });
+render();
+</script>
