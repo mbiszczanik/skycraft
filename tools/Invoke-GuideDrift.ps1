@@ -17,8 +17,10 @@
     on the Entra ID overview of the tenant of -SubscriptionId (or of -TenantId), waits for you to sign in (until
     the overview shows 'Tenant ID'), refuses to start unless the Portal is in English and the
     overview shows that tenant's id, then performs every portal step for real: later
-    steps depend on what earlier ones created. It never clicks one of several matching elements,
-    and never an element whose name contains delete, remove, reset, revoke, disable, block, purge
+    steps depend on what earlier ones created. It never clicks one of several matching elements
+    (except the only match in the newest of several open blades: the pane opened beside a list
+    shows the same menu entries as the list), and never an element whose name contains delete,
+    remove, reset, revoke, disable, block, purge
     or sign out unless the guide's own label contains that word too. Every check ends as match,
     drift (blocking, misleading or cosmetic), unknown or skipped, so 'could not check' is never
     reported as 'fine'.
@@ -43,7 +45,9 @@
     `dev-skycraft-swc-lb`') is never asked about: it is opened from the screen, or else, when it
     opens the chain, from the Portal's global search; when it is not found under that exact name,
     the step fails as blocking drift of the step (missing-resource), with no proposed guide edit
-    (issue #199).
+    (issue #199). The same search finds a 'Search for **Resource groups**' step's result when the
+    Portal lists it as 'Resource groups Resource Manager' under Services, and types the label
+    once more when the results do not load the first time (issue #342).
 
     WHAT YOU ANSWER, AND WHICH EDITS ARE PROPOSED (issue #211). For a field, the label prompt
     shows the value the run will type, not the guide's (issue #210): after the recording's
@@ -63,7 +67,7 @@
     the reason, when the element was used as a workaround; when the step started on the wrong
     blade (a wrong-blade record) or is excused (the first step after -Resume or -FromStep, after a
     recorded skip or a step skipped with s); or when the Portal's name holds a redaction token
-    ([tenantname], <id>, [secret] or any other), as it carries tenant or personal data.
+    ([tenantname], [yoursubscription], <id>, [secret] or any other), as it carries tenant or personal data.
 
     STEPS THE RECORDING SKIPS. A step that is optional or conceptual by its heading and would
     create resources, or that follows the other option of a lettered pair, is left out by
@@ -86,10 +90,13 @@
     start, exit 254), a full-window screenshot of every step,
     summary.md, for a 'Search for' step that found no single result, search-<step>.aria.txt
     (the search dropdown's accessibility tree, redacted) and, for a label that was not found,
-    blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted).
+    blade-<step>-<guide line>.aria.txt (the outline the blade loading check read, redacted) and,
+    for a list option that was not found, list-<step>-<guide line>.aria.txt (the open list's
+    accessibility tree, redacted).
     summary.md and results.jsonl are meant to be copied into an issue or a pull request: each
     record keeps what it observed on one line, as the failure prompt shows it, without
-    Playwright's call log, with the tenant domain, id and name, the guest address, object ids and
+    Playwright's call log, with the tenant domain, id and name, the subscription's name (as
+    [yoursubscription], also in the *.aria.txt files), the guest address, object ids and
     any other e-mail address as tokens, and every value typed into a password or credential
     field, and every key in a connection string or SAS address, as [secret] (#212). The summary
     names the run folder relative to the repository. A results.jsonl written before #212 keeps
@@ -139,8 +146,9 @@
     the environment variable set?); then it prints the view and the reason, or says no view is
     recorded for that step, and you bring the Portal there by hand. Either way it waits for Enter:
     check the Portal first, as an opened view has none of the blades the guide opened before it.
-    A view is recorded only without tenant or personal data, also once percent-decoded; one that
-    cannot be is recorded as none.
+    A view is recorded only without tenant or personal data, also once percent-decoded: an id,
+    and a generated resource name (a path segment of 20 or more hex digits, such as a Policy
+    assignment's name), becomes <id>; one that cannot be is recorded as none.
 
     A STEP ON THE WRONG BLADE (issue #207). The recording keeps the blade each step starts on
     ("startBlade": the blade part of the redacted view, such as
@@ -156,7 +164,10 @@
     after it is not checked. A step that opens with a global search, or with a resource name, may
     start anywhere and is not checked. Before the first field of a form, the run checks a field of
     that name can be filled in, so it never types into a list; when none can, it reports the same
-    drift (once per cause) and waits for you to open the form. A wrong recorded blade is deleted
+    drift (once per cause) and waits for you to open the form. A field whose label is plain text
+    with the control right after it (the Advisor alert's unnamed 'Category' combo box, a budget's
+    'Name' text box named by its placeholder) is that field: found, nothing recorded, and its form
+    counts as open. A wrong recorded blade is deleted
     from the recording by hand; the next run records it again.
 
     A PORTAL DEPLOYMENT IS WAITED FOR (issue #328). A Create starts a deployment that takes from
@@ -173,6 +184,18 @@
     that misses reads the screen once more for the Expected Result), and a recording needs nothing
     for it. The texts come from Microsoft Learn: the first supervised run of a lab that deploys
     confirms them.
+
+    A VIEW THAT FILLS IN LATER (issue #342). Some views list a label minutes after the step before
+    it: Policy's Compliance grid shows a new assignment only after the next evaluation (step
+    1.3.10). A step entry of the recording says so with "lateLabels": {"<label>": <minutes>},
+    whole minutes from 1 to 60 (a label of that step; the run refuses to start on any other
+    value). For that label only, when it is not found in its usual time, the run says how long it
+    waits, then every minute clicks the newest blade's Refresh, a button or a menu item (or
+    reloads the page when none is on screen), and looks again, saying every minute how long it
+    has waited: N minutes are N refreshes, the last one at the limit and looked at too. A reload
+    that times out is reported and the wait goes on. After that last look it goes on as usual:
+    the recorded decision, or you are asked. A label without an entry is never waited for, so a
+    real drift costs no minutes.
 
     CLEANUP IS THE LAB'S OWN, AND ONLY AFTER A FINISHED RUN. This script has no deletion logic.
     Unless -SkipCleanup, and only when run.py ended normally and the state file confirms it
@@ -199,7 +222,12 @@
     The subscription whose tenant the run is for. Mandatory and compared by id against the Az
     context through Test-LabCycleSubscription, for the reason Invoke-LabCycle.ps1 gives
     (2026-08-02). The tenant id, its initial *.onmicrosoft.com domain and its display name are
-    read from it; the display name is kept out of the recording as '[tenantname]'.
+    read from it; the display name is kept out of the recording as '[tenantname]'. The
+    subscription's own name, read from the Az context, is passed to run.py (--subscription-name)
+    and kept out of the recording as '[yoursubscription]', which a guide's bold label of that
+    token finds as the run's subscription link; not passed in tenant mode or when empty. Without
+    it (or with a name shorter than 4 characters, which is not redacted), a run of a guide with
+    such a label (lab 1.3, step 1.3.18) refuses to start (exit 254) before the browser opens.
 
 .PARAMETER TenantId
     The tenant to run an Entra-only lab against, when it has no subscription (tenant mode, see
@@ -464,6 +492,9 @@ if (-not $tenantId -or -not $domain) {
 }
 # The display name ('Contoso Ltd'), shown by the Portal; run.py keeps it out of the recording.
 $tenantName = [string]$tenant.Name
+# The subscription's name, shown by the Portal on its blades; run.py keeps it out of the recording
+# and finds the guide's '[yoursubscription]' by it. Subscription mode only: tenant mode has none.
+$subscriptionName = if ($tenantMode) { '' } else { [string](Get-AzContext).Subscription.Name }
 
 # --- Which run this is ---------------------------------------------------------------------
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -548,6 +579,7 @@ try {
     )
     # Not passed when empty: an empty native argument is easy to lose on the way to Python.
     if ($tenantName) { $runArgs += @('--tenant-name', $tenantName) }
+    if ($subscriptionName) { $runArgs += @('--subscription-name', $subscriptionName) }
     if ($FromStep) { $runArgs += @('--from-step', $FromStep) }
     if ($Resume)   { $runArgs += '--resume' }
 

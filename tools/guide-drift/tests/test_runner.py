@@ -446,6 +446,9 @@ class FakeElement:
     def scroll_into_view_if_needed(self, timeout=None) -> None:
         self.calls.append("scroll")
 
+    def evaluate(self, script, arg=None, timeout=None):
+        raise run.PlaywrightError("a bare element cannot be inspected")     # opens_a_list: not a list
+
     def click(self, timeout=None) -> None:
         self.calls.append("click")
         if self.fail:
@@ -471,9 +474,16 @@ class FakePage:
         self.main_frame = Screen()       # an empty screen unless a test patches run.all_frames
         self.frames = [self.main_frame]
         self.now = 0.0                   # seconds; only waits move it (FindOnScreenTests' clock)
+        self.reloads = 0
+        self.on_reload = None            # what a reload changes on screen
 
     def is_closed(self) -> bool:
         return self.closed
+
+    def reload(self, wait_until=None) -> None:
+        self.reloads += 1
+        if self.on_reload:
+            self.on_reload()
 
     def goto(self, url, wait_until=None) -> None:
         self.visited.append(url)
@@ -496,8 +506,9 @@ class DecisionRecordingTests(RunnerTestCase):
         super().setUp()
         (self.tmp / "guide.md").write_text("# Lab\n\n2. Click **+ New group**\n", encoding="utf-8")
 
-    def act(self, answers, element, label="+ New group", exact=None, extra=()):
+    def act(self, answers, element, label="+ New group", exact=None, extra=(), records=()):
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers(*answers))
+        r.records.extend(records)       # what the step's earlier items recorded
         candidates = [run.Candidate("button", "New group"), run.Candidate("link", "Groups"),
                       run.Candidate("button", "Delete group"), run.Candidate("link", "Contoso Ltd"),
                       run.Candidate("menuitem", "Bulk delete"), *extra]
@@ -570,6 +581,51 @@ class DecisionRecordingTests(RunnerTestCase):
         self.assertEqual((element.clicked, labels), (0, {}))
         self.assertGreater(element.calls.count("is_disabled"), 1)               # asked again until the deadline
         self.assertNotIn("click", element.calls)
+
+    def test_a_conditional_item_whose_first_label_is_missing_or_greyed_out_is_passed(self) -> None:
+        # Run 20261017-123546, 1.3.6: Review + create failed validation at once, and Create stayed
+        # greyed out; the guide clicks it only 'If the review page opens without an error'.
+        item = {"kind": "action", "labels": ["Create", "Failed to create the resource group"],
+                "conditional": True, "line": 5}
+        for found, disabled, observed in ((None, False, "condition not met: 'Create' is not on screen"),
+                                          (FakeElement(), True, "condition not met: 'Create' is greyed out"),
+                                          (FakeElement(), False, None)):
+            with self.subTest(observed=observed):
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+                with mock.patch.object(run, "in_time", return_value=found),                         mock.patch.object(run, "stays_disabled", return_value=disabled):
+                    record = self.quietly(lambda: r.condition_unmet(self.STEP, item, "Create"))
+                if observed is None:
+                    self.assertIsNone(record)
+                else:
+                    self.assertEqual((record["outcome"], record["observed"], r.ask.prompts), ("match", observed, []))
+
+    def test_a_conditional_item_that_does_not_hold_acts_on_none_of_its_labels(self) -> None:
+        item = {"kind": "action", "labels": ["Create", "Failed to create the resource group"],
+                "conditional": True, "line": 5}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+        unmet = {**r.new_record(step, "action", "Create"), "outcome": "match", "observed": "condition not met: x"}
+        with mock.patch.object(run.Runner, "condition_unmet", return_value=unmet),                 mock.patch.object(run.Runner, "act_on_label") as act, mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        act.assert_not_called()
+        self.assertIn(unmet["observed"], [record["observed"] for record in r.records])
+
+    def test_a_disabled_submit_after_a_form_whose_values_were_all_set_is_a_match(self) -> None:
+        # Run 20261017-123546, 1.3.1: Lab 1.2's Bicep path made the group with the four tags, so
+        # 'Apply' stayed greyed out, as the guide's note says.
+        def tag(observed, step="9.9.1"):
+            return {"step": step, "kind": "tag", "label": "Owner", "outcome": "match", "observed": observed}
+        search = {"step": "9.9.1", "kind": "search", "label": "Resource groups", "outcome": "match", "observed": "x"}
+        for records, outcome in (([search, tag(run.ALREADY_SET), tag(run.ALREADY_SET)], "match"),
+                                 ([search, tag(run.ALREADY_SET), tag("SkyCraft")], "unknown"),   # one was typed
+                                 ([search], "unknown"),                                          # no form
+                                 ([tag(run.ALREADY_SET, step="9.9.0")], "unknown")):             # another step's
+            with self.subTest(records=[r["observed"] for r in records]):
+                element = FakeElement(disabled=True)
+                record, labels = self.act([], None, label="Apply", exact=element, records=records)
+                self.assertEqual(record["outcome"], outcome)
+                self.assertEqual(record["observed"], run.NOTHING_TO_SAVE if outcome == "match" else "disabled: 'Apply'")
+                self.assertNotIn("click", element.calls)
 
     def test_an_element_greyed_out_while_the_blade_loads_is_clicked_once_enabled(self) -> None:
         element = FakeElement(disabled_for=3)
@@ -742,6 +798,33 @@ class SummaryTests(RunnerTestCase):
         args = self.args(tenant_name="Contoso Ltd")
         r = ScriptedRunner(None, STEPS, self.recording, args, ask=Answers())
         self.assertEqual(r.redactor.redact("Contoso Ltd"), "[tenantname]")
+
+    def test_subscription_name_is_an_optional_argument_the_redactor_uses(self) -> None:
+        base = ["--steps", "s", "--recording", "r", "--log-dir", "l", "--run-id", "i", "--tenant-id", "t",
+                "--tenant-domain", "contoso.onmicrosoft.com", "--state", "st", "--auth-state", "a"]
+        self.assertEqual(run.parse_args(base).subscription_name, "")
+        self.assertEqual(run.parse_args(base + ["--subscription-name", "Example Subscription"]).subscription_name,
+                         "Example Subscription")
+
+    def test_yoursubscription_finds_the_runs_subscription_link(self) -> None:
+        r = self.runner(subscription_name="Example Subscription")
+        link = FakeElement()
+        looked_up = []
+
+        def find_exact(page, label, field=False, decorated=True):
+            looked_up.append(label)
+            return link if label == "Example Subscription" else None
+        with mock.patch.object(run, "find_exact", find_exact):
+            self.assertIs(r.looking_for("[yoursubscription]", "navigation")(), link)
+            self.assertIsNone(r.looking_for("Subscriptions", "navigation")())
+        self.assertEqual(looked_up, ["Example Subscription", "Subscriptions"])
+
+    def test_a_blade_outline_scrubs_the_subscription_name(self) -> None:
+        r = self.runner(subscription_name="Example Subscription")
+        outline = [("heading", "Example Subscription | Cost analysis"), ("link", "Example Subscription")]
+        self.quietly(lambda: r.save_blade_outline({"id": "9.9.1"}, {"line": 7}, "Missing", outline))
+        self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
+                         'heading "[yoursubscription] | Cost analysis"\nlink "[yoursubscription]"\n')
 
     def test_finish_says_none_for_empty_sections_and_caps_the_exit_code(self) -> None:
         self.assertEqual(self.quietly(self.r.finish), 0)
@@ -1659,6 +1742,53 @@ class RunFolderTests(RunnerTestCase):
                 self.assertEqual((folder / "results.jsonl").read_text(encoding="utf-8"), '{"step": "9.9.1"}\n')
 
 
+class SubscriptionNameTests(RunnerTestCase):
+    """A guide label holding '[yoursubscription]' (1.3.18 item 2, #342) is found, and the person's
+    pick of it redacted, only by the run's subscription name: without one (run.py run directly, or
+    an empty Az context name) the run refuses to start (254) before the browser opens, rather than
+    ask and write the literal name into the public recording."""
+
+    Console = RunFolderTests.Console
+
+    def setUp(self) -> None:
+        super().setUp()
+        steps = json.loads(json.dumps(STEPS))
+        steps["steps"][3]["items"] = [{"kind": "navigation", "labels": ["Subscriptions", "[yoursubscription]"],
+                                       "line": 7}]
+        self.steps = steps
+
+    def main(self, *extra: str) -> tuple[int, str, mock.MagicMock]:
+        (self.tmp / "steps.json").write_text(json.dumps(self.steps), encoding="utf-8")
+        argv = ["--steps", str(self.tmp / "steps.json"), "--recording", str(self.tmp / "rec.json"),
+                "--log-dir", str(self.tmp / "logs"), "--run-id", "x", "--tenant-id", "t", "--tenant-domain", "d",
+                "--state", str(self.tmp / "state.json"), "--auth-state", str(self.tmp / "auth.json"), *extra]
+        out = self.Console()
+        with mock.patch.object(run, "sync_playwright") as playwright, redirect_stdout(out), \
+                mock.patch.object(run, "open_portal", side_effect=OSError("the browser opened")):
+            code = run.main(argv)
+        return code, out.getvalue(), playwright
+
+    def test_a_label_naming_the_subscription_without_its_name_refuses_to_start(self) -> None:
+        for extra in ((), ("--subscription-name", "   "), ("--subscription-name", "Dev")):
+            with self.subTest(extra=extra):
+                code, out, playwright = self.main(*extra)
+                self.assertEqual(code, run.NOT_STARTED)
+                playwright.assert_not_called()
+                self.assertIn("step 9.9.4", out)
+                self.assertIn("[yoursubscription]", out)
+                self.assertIn("--subscription-name", out)
+                self.assertFalse((self.tmp / "logs" / "x" / "results.jsonl").exists())
+
+    def test_with_the_subscription_name_it_starts(self) -> None:
+        code, out, _ = self.main("--subscription-name", "Example Subscription")
+        self.assertIn("Could not open the Portal", out)                 # past every refusal
+
+    def test_steps_without_the_token_need_no_name(self) -> None:
+        self.steps = STEPS
+        code, out, _ = self.main()
+        self.assertIn("Could not open the Portal", out)
+
+
 class GuardAndLookupTests(RunnerTestCase):
     def test_tree_text_reads_text_and_text_boxes_but_never_link_targets(self) -> None:
         snapshot = ('- link "Switch directory":\n'
@@ -2026,10 +2156,29 @@ class BladeStillLoadingTests(unittest.TestCase):
         self.assertEqual(run.blade_still_loading(outline), run.BLADE_EMPTY)
 
     def test_without_a_titled_blade_frame_nothing_is_loading(self) -> None:
-        self.assertIsNone(run.blade_still_loading([]))
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR))
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("heading", "Overview")]))      # no frame
         self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("button", "Close content 'Users'")]))  # no heading
+
+    def test_a_part_named_loading_after_the_newest_blade_s_close_button_is_still_loading(self) -> None:
+        # Run 20261017-095926, 1.3.18: Cost analysis showed its title and menu while its iframe's
+        # date range button read 'Loading... '; the VIEW list came about 13 s after the blade.
+        cost = [("heading", "Subscription | Cost analysis"), ("button", "Close content 'Subscription | Cost analysis'"),
+                ("link", "Overview"), ("button", "Scope: Subscription"), ("combobox", "Select")]
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Loading... ")]), run.BLADE_BUSY)
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Loading…")]), run.BLADE_BUSY)
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + cost + [("button", "Invoice (Azure) : Sep 26-Oct 25 ")]))
+        # Only a whole name counts, and only after the newest blade's close button.
+        self.assertIsNone(run.blade_still_loading(
+            self.TOP_BAR + cost + [("button", "Copy to clipboard the value for Current billing period Loading...")]))
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + [("button", "Loading...")] + cost))
+
+    def test_a_screen_no_frame_could_be_read_is_still_loading(self) -> None:
+        # Run 20261017-003656, 1.3.18: the main frame's snapshot timed out while the subscription's
+        # overview rendered, the empty outline passed for a rendered blade, and 'Cost analysis' was
+        # asked about before the menu with its collapsed group was there to expand.
+        self.assertEqual(run.blade_still_loading([]), run.BLADE_UNREAD)
+        self.assertEqual(run.outline_of([None]), [])
 
     class Frame:
         """A frame with an accessibility snapshot (None: unreadable) and its iframe's bounding box
@@ -2118,7 +2267,12 @@ class ScreenNode(FakeElement):
     state; `check_error`: what set_checked() raises (Fluent's tick mark intercepting the click);
     `label`: the node label_of() finds for it, and `more_labels` any others it finds; `flips_after`:
     the number of reads after which `checked` turns over, as a click that went through late. As a
-    label: `label_for`, the input it belongs to; `has_link`, whether it holds a link."""
+    label: `label_for`, the input it belongs to; `has_link`, whether it holds a link. As an option
+    of a list: `selects_on_click` turns its aria-selected over on click. `blade`: what BLADE_OF_JS
+    reads, the aria-label and left edge of the region it sits in (None: in no region).
+    `next_control`: as a text, the control NEXT_CONTROL_JS finds after it (None: other text comes
+    first, or no control), which the script marks with the token it is given. `on_scroll`: as a
+    list, what LIST_SCROLL_JS answers (true: the list moved); it shows the options of the next page."""
 
     def __init__(self, interactive: bool = True, on_click=None, on_fill=None, attrs=None, children=None,
                  rect=None, section=("", "", ""), unreadable: int = 0, tree: str = "", tag: str = "div",
@@ -2126,8 +2280,14 @@ class ScreenNode(FakeElement):
                  read_only: bool = False, in_header: bool = False, controls_role: str = "",
                  editable: bool = False, uninspectable: bool = False, checked: bool = False,
                  check_error: Exception | None = None, label: "ScreenNode | None" = None,
-                 label_for: "ScreenNode | None" = None, has_link: bool = False) -> None:
+                 label_for: "ScreenNode | None" = None, has_link: bool = False,
+                 selects_on_click: bool = False, blade: tuple[str, float] | None = None,
+                 next_control: "ScreenNode | None" = None, on_scroll=None) -> None:
         super().__init__()
+        self.on_scroll = on_scroll
+        self.next_control = next_control
+        self.blade = blade
+        self.selects_on_click = selects_on_click
         self.label_for = label_for
         self.has_link = has_link
         self.more_labels: list = []
@@ -2182,8 +2342,21 @@ class ScreenNode(FakeElement):
             return self.read_only
         if script == run.LABEL_CHECK_JS:
             return [self.label_for is arg, self.has_link]
+        if script == run.BLADE_OF_JS:
+            return list(self.blade) if self.blade else None
+        if script == run.NEXT_CONTROL_JS:
+            if self.next_control is None or self.interactive:
+                return False
+            self.next_control.attrs[run.NEXT_CONTROL_ATTR] = arg
+            return True
         if script == run.IN_TOP_BAR_JS:
             return self.in_top_bar
+        if script == run.ZERO_SIZE_COMBOBOX_JS:       # a box of its own (test_browser_js has the rest)
+            return None
+        if script == run.HIT_TEST_JS:                  # a click reaches it (test_browser_js has the rest)
+            return True
+        if script == run.LIST_SCROLL_JS:
+            return bool(self.on_scroll()) if self.on_scroll else False
         if script == run.FIELD_KIND_JS:
             if self.uninspectable:
                 raise run.PlaywrightError("element was detached")
@@ -2208,6 +2381,9 @@ class ScreenNode(FakeElement):
 
     def element_handle(self, timeout=None):
         return self
+
+    def owner_frame(self):          # blade_of: the screen's nodes are the main frame's
+        return None
 
     def dispose(self) -> None:
         pass
@@ -2248,6 +2424,8 @@ class ScreenNode(FakeElement):
 
     def click(self, timeout=None) -> None:
         super().click(timeout)
+        if self.selects_on_click:
+            self.attrs["aria-selected"] = "false" if self.attrs.get("aria-selected") == "true" else "true"
         if self.on_click:
             self.on_click()
 
@@ -2331,6 +2509,9 @@ class Screen:
         list of '[role=x]' (POPUP_ROLES)."""
         if selector.startswith(":is("):
             return ScreenLocator([node for _, _, node in self.everything() if node.interactive])
+        m = re.match(r'^\[(data-[\w-]+)="([^"]*)"\]$', selector)
+        if m:
+            return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get(m.group(1)) == m.group(2)])
         m = self.ID.match(selector)
         if m:
             return ScreenLocator([node for _, _, node in self.everything() if node.attrs.get("id") == m.group(1)])
@@ -2538,6 +2719,88 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(self.recording["steps"]["9.9.1"]["labels"][self.ENTRA]["name"], "Entra ID")
         self.assertTrue(self.tree_file().is_file())
 
+    RG = "Resource groups"
+    RM = " Resource Manager"
+
+    def test_resource_groups_resource_manager_is_the_resource_groups_result(self) -> None:
+        wanted = self.result("Services (67)", whole="Resource groups Resource Manager")
+        keywords = self.result("Services (67)", whole="Subscriptions Keywords: resource groups")
+        includes = self.result("Services (67)", whole="Resource Manager Includes: Resource groups")
+        offer = self.result("Marketplace (22)", whole="Resource group")
+        screen, box = self.search_screen(("option", "Subscriptions Keywords: resource groups", keywords),
+                                         ("option", "Resource Manager Includes: Resource groups", includes),
+                                         ("option", "Resource groups Resource Manager", wanted),
+                                         ("option", "Resource group", offer))
+        record, r = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], record["kind"]), ("match", "search"))
+        self.assertEqual((wanted.clicked, keywords.clicked, includes.clicked, offer.clicked), (1, 0, 0, 0))
+        self.assertEqual((r.ask.prompts, box.filled), ([], [self.RG]))
+        self.assertFalse(self.tree_file().exists())
+
+    def test_tags_and_management_groups_resource_manager_too(self) -> None:
+        for label in ("Tags", "Management groups"):
+            with self.subTest(label=label):
+                wanted = self.result("Services (67)", whole=f"{label} Resource Manager")
+                other = self.result("Services (67)", whole=f"Policy Includes: {label}")
+                screen, _ = self.search_screen(("option", f"Policy Includes: {label}", other),
+                                               ("option", f"{label} Resource Manager", wanted))
+                record, _ = self.act(screen, self.SEARCH, label)
+                self.assertEqual((record["outcome"], wanted.clicked, other.clicked), ("match", 1, 0))
+
+    def test_an_exact_result_wins_over_a_category_one(self) -> None:
+        exact = self.result("Services (67)", whole=self.RG)
+        category = self.result("Services (67)", whole=self.RG + self.RM)
+        screen, _ = self.search_screen(("option", self.RG + self.RM, category), ("option", self.RG, exact))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], exact.clicked, category.clicked), ("match", 1, 0))
+
+    def test_a_category_result_outside_services_never_counts(self) -> None:
+        market = self.result("Marketplace (22)", whole=self.RG + self.RM)
+        docs = self.result("Documentation (99+)", whole=self.RG + self.RM)
+        screen, _ = self.search_screen(("option", self.RG + self.RM, market), ("option", self.RG + self.RM, docs))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], market.clicked, docs.clicked), ("unknown", 0, 0))
+        self.assertTrue(self.tree_file().is_file())
+
+    def test_two_category_results_in_services_are_ambiguous(self) -> None:
+        one, two = (self.result("Services (67)", whole=self.RG + self.RM) for _ in range(2))
+        screen, _ = self.search_screen(("option", self.RG + self.RM, one), ("option", self.RG + self.RM, two))
+        record, _ = self.act(screen, self.SEARCH, self.RG)
+        self.assertEqual((record["outcome"], one.clicked, two.clicked), ("unknown", 0, 0))
+        self.assertIn("ambiguous", record["observed"])
+
+    def typed_again_screen(self, appears_on: int):
+        """A search whose results list appears only after the `appears_on`th time the label is typed."""
+        screen, box = self.search_screen(self.EXACT_ENTRY)
+        box.on_fill()                                        # the dropdown the first typing would add:
+        listbox = screen.entries.pop()                       # held back until the label is typed again
+        typed = []
+
+        def on_fill() -> None:
+            if box.text:
+                typed.append(box.text)
+                if len(typed) == appears_on:
+                    screen.add(listbox)
+        box.on_fill = on_fill
+        return screen, box
+
+    def test_a_search_without_a_results_list_is_typed_again_once(self) -> None:
+        self.EXACT_ENTRY = ("option", self.ENTRA, services := self.result("Services (67)"))
+        screen, box = self.typed_again_screen(appears_on=2)
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked), ("match", 1))
+        self.assertEqual((box.filled, box.pressed), ([self.ENTRA, "", self.ENTRA], ["Escape"]))
+        self.assertEqual(r.ask.prompts, [])
+        self.assertFalse(self.tree_file().exists())
+
+    def test_a_second_miss_saves_the_tree_and_asks(self) -> None:
+        self.EXACT_ENTRY = ("option", self.ENTRA, services := self.result("Services (67)"))
+        screen, box = self.typed_again_screen(appears_on=3)
+        record, r = self.act(screen, self.SEARCH, self.ENTRA)
+        self.assertEqual((record["outcome"], services.clicked, len(r.ask.prompts)), ("unknown", 0, 1))
+        self.assertEqual(box.filled.count(self.ENTRA), 2)       # typed twice, not a third time
+        self.assertIn("no results list identified", self.tree_file().read_text(encoding="utf-8"))
+
     def test_a_closed_window_is_not_a_missing_search_box(self) -> None:
         with self.assertRaises(run.PageClosed):
             self.act(Screen(), self.SEARCH, self.ENTRA, page=FakePage(closed=True))
@@ -2627,6 +2890,39 @@ class FindOnScreenTests(RunnerTestCase):
         record, r = self.act(two, self.BLADE_SEARCH, "Owner")
         self.assertEqual((record["outcome"], record["observed"], r.ask.prompts),
                          ("unknown", "ambiguous: 2 search boxes ('Search', 'Filter by name')", []))
+
+    def test_a_search_result_gone_before_the_click_is_searched_for_once_more(self) -> None:
+        # Run 20261017-123546, 1.3.6: the dropdown re-rendered and is_disabled() timed out on the
+        # result it had found.
+        class Gone(FakeElement):
+            def is_disabled(self, timeout=None) -> bool:
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+        for results, outcome, searches in (([Gone(), FakeElement()], "match", 2), ([Gone(), Gone()], "unknown", 2)):
+            with self.subTest(outcome=outcome):
+                with mock.patch.object(run, "search_portal", side_effect=results) as search,                         mock.patch.object(run, "close_search") as close:
+                    record, _ = self.act(Screen(), self.SEARCH, self.ENTRA)
+                self.assertEqual((record["outcome"], search.call_count, close.call_count), (outcome, searches, 1))
+                self.assertEqual(results[1].clicked, 1 if outcome == "match" else 0)
+
+    def test_an_action_gone_before_the_click_is_looked_for_once_more_and_never_clicked_twice(self) -> None:
+        # Run 20261017-123546, 1.3.6: the Resource groups list re-rendered after a group was
+        # created, and scroll_into_view_if_needed() timed out on the Refresh it had found.
+        class Gone(FakeElement):
+            def scroll_into_view_if_needed(self, timeout=None) -> None:
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+
+        class ClickFails(FakeElement):
+            def click(self, timeout=None) -> None:
+                self.clicked += 1
+                raise run.PlaywrightError("Timeout 8000ms exceeded.")
+        item = {"kind": "action", "labels": ["Refresh"], "line": 5}
+        for found, outcome, looks in (([Gone(), FakeElement()], "match", 2), ([Gone(), Gone()], "unknown", 2),
+                                      ([ClickFails(), FakeElement()], "unknown", 1)):     # a click is not redone
+            with self.subTest(found=[type(f).__name__ for f in found]):
+                with mock.patch.object(run, "find_exact", side_effect=found) as find:
+                    record, _ = self.act(Screen(), item, "Refresh")
+                self.assertEqual((record["outcome"], find.call_count), (outcome, looks))
+                self.assertEqual(found[1].clicked, 1 if outcome == "match" else 0)
 
     def test_a_search_without_a_scope_is_the_global_search(self) -> None:
         self.assertNotIn("scope", self.SEARCH)                               # steps.json from before scopes
@@ -2936,6 +3232,41 @@ class FindOnScreenTests(RunnerTestCase):
         record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Premium")
         self.assertEqual((record["outcome"], premium.checked, premium.label.clicked), ("match", True, 1))
 
+    ENFORCEMENT = {"kind": "field", "label": "Policy enforcement", "value": "x", "line": 8}
+
+    def enforcement(self, groups: int = 1) -> tuple[Screen, list[ScreenNode], list[ScreenNode]]:
+        """Run B's blade-1.3.5: a <label>, a wrapper <div> and `groups` radiogroup(s) of one name,
+        'Default (enforcement)' selected among Default, Do not enforce and Enroll."""
+        screen = Screen(("label", "Policy enforcement", ScreenNode(tag="label")),
+                        ("label", "Policy enforcement", ScreenNode(tag="div")))
+        radios, groupnodes = [], []
+        for _ in range(groups):
+            options = [self.radio("Default (enforcement)", checked=True), self.radio("Do not enforce"),
+                       self.radio("Enroll")]
+            group = ScreenNode(attrs={"role": "radiogroup"}, children=Screen(*options))
+            screen.add(("label", "Policy enforcement", group))
+            radios.append([node for _, _, node in options])
+            groupnodes.append(group)
+        return screen, radios[0], groupnodes
+
+    def test_policy_enforcement_label_div_and_radiogroup_take_the_radiogroup(self) -> None:
+        screen, radios, _ = self.enforcement()
+        radios[0].check_error = AssertionError("set_checked() called on the radio already selected")
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Default (enforcement)")
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_do_not_enforce_is_selected(self) -> None:
+        screen, radios, _ = self.enforcement()
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Do not enforce")
+        self.assertEqual((record["outcome"], radios[1].checked, radios[2].checked), ("match", True, False))
+
+    def test_two_radiogroups_of_the_name_stay_ambiguous(self) -> None:
+        screen, radios, _ = self.enforcement(groups=2)
+        record, _ = self.act(screen, self.ENFORCEMENT, "Policy enforcement", value="Do not enforce")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIn("4 visible elements match", record["observed"])
+        self.assertFalse(radios[1].checked)
+
     def test_a_radio_group_without_the_value_names_its_options(self) -> None:
         screen, radios = self.radio_group(self.radio("Standard", checked=True), self.radio("Premium"))
         record, _ = self.act(screen, self.PERFORMANCE, "Performance", value="Hot (for daily use)")
@@ -3102,7 +3433,8 @@ class FindOnScreenTests(RunnerTestCase):
     def test_collapsed_menu_groups_are_expanded_once_before_the_person_is_asked(self) -> None:
         users, all_users = ScreenNode(), ScreenNode()
         screen = Screen(("text", "Users", ScreenNode(interactive=False)))
-        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users),
+                                                        ("button", "Collapse all headers", ScreenNode())))
         screen.add(("button", "Expand all headers", expand), ("button", "Toggle Manage", ScreenNode()))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], record["observed"]), ("match", "Users"))
@@ -3115,6 +3447,22 @@ class FindOnScreenTests(RunnerTestCase):
         record, _ = self.act(screen, self.NAVIGATION, "All users", runner=r)
         self.assertEqual((record["outcome"], all_users.clicked), ("match", 1))
         self.assertIsNone(run.DESTRUCTIVE.search(run.EXPAND_ALL))
+
+    def test_a_command_in_the_toolbar_s_overflow_is_found_after_opening_it_once(self) -> None:
+        # Run 20261017-123546, 1.3.6: the resource group's pane beside the list was narrow, and
+        # 'Delete resource group' was under 'More commands'.
+        delete = ScreenNode()
+        screen = Screen()
+        more = ScreenNode(on_click=lambda: screen.add(("menuitem", "Delete resource group", delete)))
+        screen.add(("menuitem", "More commands", more))
+        item = {"kind": "action", "labels": ["Delete resource group"], "line": 1}
+        record, r = self.act(screen, item, "Delete resource group")
+        self.assertEqual((record["outcome"], more.clicked, delete.clicked, r.ask.prompts), ("match", 1, 1, []))
+        # A label that is in no overflow: opened once, then the person is asked.
+        record, r = self.act(Screen(("button", "More commands", ScreenNode())), item, "Delete resource group",
+                             candidates=[run.Candidate("button", "More commands")])
+        self.assertEqual((record["outcome"], len(r.ask.prompts)), ("unknown", 1))
+        self.assertTrue(r.overflow_opened)
 
     def test_without_an_expand_button_the_person_is_asked_at_once(self) -> None:
         toggle = ScreenNode()
@@ -3140,7 +3488,8 @@ class FindOnScreenTests(RunnerTestCase):
     def test_a_label_behind_a_collapsed_group_is_found_soon_after_expanding(self) -> None:
         users = ScreenNode()
         screen = Screen()
-        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users)))
+        expand = ScreenNode(on_click=lambda: screen.add(("link", "Users", users),
+                                                        ("button", "Collapse all headers", ScreenNode())))
         screen.add(("button", "Expand all headers", expand))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], users.clicked, expand.clicked, r.ask.prompts), ("match", 1, 1, []))
@@ -3148,8 +3497,9 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertLess(found_at, run.SETTLE_MS / 1000 + 0.6)            # not the whole FIND_TIMEOUT_MS
 
     def test_a_label_that_never_appears_expands_once_and_asks_at_the_deadline(self) -> None:
-        expand = ScreenNode()
-        screen = Screen(("button", "Expand all headers", expand))
+        screen = Screen()
+        expand = ScreenNode(on_click=lambda: screen.add(("button", "Collapse all headers", ScreenNode())))
+        screen.add(("button", "Expand all headers", expand))
         record, r = self.act(screen, self.NAVIGATION, "Users")
         self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", 1, 1))
         self.assertGreaterEqual(r.page.now, run.FIND_TIMEOUT_MS / 1000)
@@ -3323,6 +3673,105 @@ class FindOnScreenTests(RunnerTestCase):
         self.assertEqual(r.ask.prompts, [])
 
 
+class NewestBladeTests(RunnerTestCase):
+    """Two blades show the same menu entry (a resource group list and the pane opened from it, run B
+    of #342): the step works on the newest, right-most blade; its collapsed groups are opened."""
+
+    act = FindOnScreenTests.act
+    LIST = ("Resource Manager | Resource groups [tenantname]", 0)
+    PANE = ("prod-skycraft-swc-rg Resource group", 700)
+    ACTION = {"kind": "action", "labels": ["Tags"], "line": 1}
+
+    def blade_screen(self, **kwargs) -> tuple[Screen, dict[str, ScreenNode]]:
+        nodes = {"list_tags": ScreenNode(blade=self.LIST), "pane_tags": ScreenNode(blade=self.PANE)}
+        return Screen(("link", "Tags", nodes["list_tags"]), ("link", "Tags", nodes["pane_tags"])), nodes
+
+    def test_tags_in_the_list_menu_and_the_open_pane_takes_the_pane(self) -> None:
+        screen, nodes = self.blade_screen()
+        screen.add(("button", "Close content 'prod-skycraft-swc-rg'", ScreenNode(blade=self.PANE)))
+        record, r = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual((record["outcome"], nodes["pane_tags"].clicked, nodes["list_tags"].clicked, r.ask.prompts),
+                         ("match", 1, 0, []))
+
+    def test_two_matches_in_the_newest_blade_stay_ambiguous(self) -> None:
+        screen, nodes = self.blade_screen()
+        second = ScreenNode(blade=self.PANE)
+        screen.add(("link", "Tags", second))
+        record, _ = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertEqual((nodes["pane_tags"].clicked, nodes["list_tags"].clicked, second.clicked), (0, 0, 0))
+
+    def test_a_match_outside_any_region_keeps_it_ambiguous(self) -> None:
+        outside = ScreenNode()
+        screen = Screen(("link", "Tags", outside), ("link", "Tags", ScreenNode(blade=self.PANE)))
+        record, _ = self.act(screen, self.ACTION, "Tags")
+        self.assertEqual((record["outcome"], outside.clicked), ("unknown", 0))
+
+    def two_menus(self, entry: str, pane_toggle: str | None = None):
+        """The list's and the pane's menus, each with an 'Expand all headers' button; the pane's
+        opens its groups and shows `entry` (under `pane_toggle`'s group when given)."""
+        screen, nodes = self.blade_screen()
+        shown = ScreenNode(blade=self.PANE)
+        nodes["entry"] = shown
+        nodes["list_expand"] = ScreenNode(blade=self.LIST)
+        nodes["pane_expand"] = ScreenNode(blade=self.PANE, on_click=lambda: screen.add(
+            ("link", entry, shown), ("button", "Collapse all headers", ScreenNode(blade=self.PANE))))
+        screen.add(("button", "Expand all headers", nodes["list_expand"]),
+                   ("button", "Expand all headers", nodes["pane_expand"]))
+        if pane_toggle:
+            screen.add(("button", pane_toggle, ScreenNode(blade=self.PANE)))
+        return screen, nodes
+
+    def test_locks_shows_after_the_panes_expand_all_headers(self) -> None:
+        screen, nodes = self.two_menus("Locks", "Toggle Settings")
+        record, r = self.act(screen, {"kind": "action", "labels": ["Locks"], "line": 1}, "Locks")
+        self.assertEqual((record["outcome"], nodes["entry"].clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((nodes["pane_expand"].clicked, nodes["list_expand"].clicked), (1, 0))
+
+    def test_budgets_under_the_panes_cost_management_group(self) -> None:
+        screen, nodes = self.two_menus("Budgets", "Toggle Cost Management")
+        record, r = self.act(screen, {"kind": "navigation", "labels": ["Budgets"], "line": 1}, "Budgets")
+        self.assertEqual((record["outcome"], nodes["entry"].clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((nodes["pane_expand"].clicked, nodes["list_expand"].clicked), (1, 0))
+
+    def test_an_expand_click_while_the_menu_loads_is_tried_again(self) -> None:
+        # Run B, 1.3.15: the click landed while the menu read 'Loading...' and changed nothing.
+        monitoring = ScreenNode(blade=self.PANE)
+        screen = Screen()
+        clicks = []
+
+        def opens() -> None:
+            clicks.append(1)
+            if len(clicks) == 2:
+                screen.add(("link", "Monitoring", monitoring), ("button", "Collapse all headers",
+                                                                   ScreenNode(blade=self.PANE)))
+        expand = ScreenNode(blade=self.PANE, on_click=opens)
+        screen.add(("button", "Expand all headers", expand))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Monitoring"], "line": 1}, "Monitoring")
+        self.assertEqual((record["outcome"], expand.clicked, monitoring.clicked, r.ask.prompts), ("match", 2, 1, []))
+
+    def test_expand_is_clicked_at_most_three_times(self) -> None:
+        expand = ScreenNode(blade=self.PANE)
+        screen = Screen(("button", "Expand all headers", expand))
+        record, r = self.act(screen, {"kind": "action", "labels": ["Monitoring"], "line": 1}, "Monitoring")
+        self.assertEqual((record["outcome"], expand.clicked, len(r.ask.prompts)), ("unknown", run.EXPAND_TRIES, 1))
+        self.assertEqual(run.EXPAND_TRIES, 3)
+        self.assertFalse(r.expanded)
+
+    def test_the_groups_are_read_five_times_after_an_expand_click_whatever_settle_ms_is(self) -> None:
+        for settle in (3, run.SETTLE_MS):
+            with self.subTest(settle=settle):
+                expand = ScreenNode(blade=self.PANE)
+                screen = Screen(("button", "Expand all headers", expand))
+                r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+                reads = []
+                with mock.patch.object(run, "SETTLE_MS", settle), \
+                        mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                        mock.patch.object(run.Runner, "groups_open", lambda self, blade: reads.append(blade) and False):
+                    self.quietly(lambda: r.expand_menu_groups("Monitoring"))
+                self.assertEqual((expand.clicked, len(reads)), (1, 5))
+
+
 class DeploymentStateTests(unittest.TestCase):
     """snapshot_text and deployment_state (#328): what one snapshot line shows, and whether the
     screen shows a Portal deployment that is still running or has failed."""
@@ -3340,7 +3789,8 @@ class DeploymentStateTests(unittest.TestCase):
                 self.assertEqual(run.snapshot_text(line), text)
 
     def test_a_running_deployment_is_read_from_the_overview_or_a_notification(self) -> None:
-        for text in ("Deployment is in progress", "Deployment in progress...", "deployment is in progress"):
+        for text in ("Deployment is in progress", "Deployment in progress...", "deployment is in progress",
+                     "Initializing deployment..."):
             with self.subTest(text=text):
                 self.assertEqual(run.deployment_state(["Home", text, "Deployment name: x"]), (text, []))
 
@@ -3492,6 +3942,100 @@ class DeploymentWaitTests(RunnerTestCase):
         self.assertIn("The deployment has ended after 55 s: looking for 'Go to resource' again.", self.said(printed))
         self.assertGreaterEqual(page.now, 60 + run.FIND_TIMEOUT_MS / 1000)
         self.assertLess(page.now, 60 + run.DEPLOYMENT_POLL_MS / 1000 + run.FIND_TIMEOUT_MS / 1000 + 1)
+
+    def stuck_overview(self) -> tuple[Screen, ScreenNode, ScreenNode]:
+        """An overview that keeps 'Deployment is in progress' until its Refresh is clicked, as the
+        Bastion overview did on 2026-10-15: the screen, the Refresh button and 'Go to resource'."""
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+
+        def complete() -> None:
+            screen.tree = self.COMPLETE
+            screen.add(("button", "Go to resource", go))
+
+        refresh = ScreenNode(on_click=complete)
+        screen.add(("button", "Refresh", refresh))
+        return screen, refresh, go
+
+    def test_an_overview_that_lags_is_refreshed_between_polls(self) -> None:
+        screen, refresh, go = self.stuck_overview()
+        page = FakePage()
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, refresh.clicked, page.reloads, r.ask.prompts),
+                         ("match", 1, 1, 0, []))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(page.now, start + run.DEPLOYMENT_REFRESH_S)
+        self.assertLess(page.now, start + run.DEPLOYMENT_REFRESH_S + run.DEPLOYMENT_POLL_MS / 1000
+                        + run.SETTLE_MS / 1000 + 1)
+        self.assertIn("The overview still says the deployment is in progress: clicked its Refresh, "
+                      f"and again every {run.DEPLOYMENT_REFRESH_S} s while it does.", self.said(printed))
+
+    def test_an_overview_is_refreshed_every_interval_and_said_once(self) -> None:
+        refresh = ScreenNode()                                            # the overview never catches up
+        screen = Screen(("button", "Refresh", refresh), tree=self.RUNNING)
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(deployment_timeout_minutes=2), ask=Answers())
+        with mock.patch("builtins.print") as printed:
+            record, _ = self.act(screen, self.GO, "Go to resource", runner=r)
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertEqual((refresh.clicked, r.page.reloads), (120 // run.DEPLOYMENT_REFRESH_S - 1, 0))
+        self.assertEqual(len([line for line in self.said(printed) if "clicked its Refresh" in line]), 1)
+
+    def test_the_newest_refresh_button_is_clicked(self) -> None:
+        screen, refresh, go = self.stuck_overview()
+        older = ScreenNode()                                              # a blade behind the overview
+        screen.entries.insert(0, ("button", "Refresh", older))
+        with mock.patch("builtins.print"):
+            record, _ = self.act(screen, self.GO, "Go to resource")
+        self.assertEqual((record["outcome"], older.clicked, refresh.clicked), ("match", 0, 1))
+
+    def test_the_refresh_of_the_overviews_frame_is_clicked_not_a_child_frames(self) -> None:
+        screen, refresh, go = self.stuck_overview()                       # the overview is in the main frame
+        unrelated = ScreenNode()
+        child = Screen(("button", "Refresh", unrelated), tree=self.TOP_BAR)   # an Entra blade's own Refresh
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.GO], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen, child]),                 mock.patch.object(run.time, "monotonic", lambda: r.page.now),                 mock.patch.object(run, "candidates_on_screen", return_value=[]),                 mock.patch("builtins.print"):
+            record = self.quietly(lambda: r.act_on_label(step, self.GO, "Go to resource", None))
+        self.assertEqual((record["outcome"], unrelated.clicked, refresh.clicked), ("match", 0, 1))
+
+    def test_an_overview_without_a_refresh_button_is_reloaded(self) -> None:
+        go = ScreenNode()
+        screen = Screen(tree=self.RUNNING)
+        page = FakePage()
+
+        def complete() -> None:
+            screen.tree = self.COMPLETE
+            screen.add(("button", "Go to resource", go))
+
+        page.on_reload = complete
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], go.clicked, page.reloads, r.ask.prompts), ("match", 1, 1, []))
+        self.assertTrue(any("reloaded the page" in line for line in self.said(printed)))
+
+    def test_a_refresh_that_fails_does_not_end_the_wait(self) -> None:
+        refresh = ScreenNode()
+        refresh.fail = run.PlaywrightError("Element is not attached to the DOM")
+        screen = Screen(("button", "Refresh", refresh), tree=self.RUNNING)
+        page = self.ending(screen, 100, self.COMPLETE, ("button", "Go to resource", ScreenNode()))
+        with mock.patch("builtins.print") as printed:
+            record, _ = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], page.reloads), ("match", 0))
+        self.assertGreaterEqual(refresh.calls.count("click"), 1)
+        self.assertFalse([line for line in self.said(printed) if "overview still says" in line])
+
+    def test_a_running_notification_alone_is_waited_for_without_a_refresh(self) -> None:
+        # 'Initializing deployment...' is a notification, which updates by itself: no click, no reload.
+        notification = self.TOP_BAR + "- text: Initializing deployment...\n"
+        other = ScreenNode()                                              # the blade under the pane
+        screen = Screen(("button", "Refresh", other), tree=notification)
+        page = self.ending(screen, 100, self.COMPLETE, ("button", "Go to resource", ScreenNode()))
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.GO, "Go to resource", page=page)
+        self.assertEqual((record["outcome"], other.clicked, page.reloads, r.ask.prompts), ("match", 0, 0, []))
+        self.assertGreaterEqual(page.now, 100)
+        self.assertEqual(len([line for line in self.said(printed) if "deployment is still running" in line]), 1)
 
     def on(self, screen: Screen, r: run.Runner, call):
         """`call()` with `screen` as the page's only frame and the page's clock for time."""
@@ -4172,6 +4716,15 @@ class PromptValueTests(RunnerTestCase):
         [tag] = [record for record in r.records if record["kind"] == "tag"]
         results = (self.tmp / "logs" / "test" / "results.jsonl").read_text(encoding="utf-8")
         return done, tag, fill, results
+
+    def test_a_tag_the_grid_has_already_is_recorded_as_already_set(self) -> None:
+        item = {"kind": "tag", "name": "Owner", "value": "SkyCraft-Admins", "line": 3}
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": [item]}
+        r = run.Runner(FakePage(), {**STEPS, "steps": [step]}, self.recording, self.args(), ask=Answers())
+        with mock.patch.object(run, "fill_tag", return_value=run.ALREADY_SET),                 mock.patch.object(run.Runner, "check_result"):
+            self.assertTrue(self.quietly(lambda: r.run_step(step)))
+        [tag] = [record for record in r.records if record["kind"] == "tag"]
+        self.assertEqual((tag["outcome"], tag["observed"]), ("match", run.ALREADY_SET))
 
     def test_a_tag_record_observes_the_value_typed_not_the_guides(self) -> None:
         done, tag, fill, _ = self.run_tag("SkyCraft-Admins", override="Contoso-Admins")
@@ -5247,6 +5800,64 @@ class StatedStateTests(RunnerTestCase):
         record = self.act(screen, False)
         self.assertEqual((record["outcome"], record["observed"], node.checked), ("match", "already set", False))
 
+    def option(self, selected: bool | None, role: str = "option", selects: bool = True) -> tuple[Screen, ScreenNode]:
+        """An entry of a multi-select list (1.3.9's 'North Europe') whose state is aria-selected."""
+        attrs = {"role": role} if selected is None else {"role": role, "aria-selected": str(selected).lower()}
+        node = ScreenNode(tag="div", attrs=attrs, selects_on_click=selects)
+        return Screen((role, self.LABEL, node)), node
+
+    def test_an_option_already_selected_is_already_set_and_not_clicked(self) -> None:
+        for role in ("option", "treeitem"):
+            with self.subTest(role=role):
+                screen, node = self.option(True, role)
+                record = self.act(screen, True)
+                self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", "already set", 0))
+
+    def test_toggle_kind_reads_the_state_of_every_option_role(self) -> None:
+        for role in run.OPTION_ROLES:
+            for attr in ("aria-selected", "aria-checked"):
+                with self.subTest(role=role, attr=attr):
+                    node = ScreenNode(tag="div", attrs={"role": role, attr: "true"})
+                    self.assertEqual(run.toggle_kind(node)[0], "option")
+                    self.assertTrue(run.toggle_state(node, "option"))
+
+    def test_an_unselected_option_is_clicked_once_and_read_back(self) -> None:
+        screen, node = self.option(False)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", self.LABEL, 1))
+        self.assertEqual(node.attrs["aria-selected"], "true")
+
+    def test_an_option_whose_state_does_not_change_is_unknown(self) -> None:
+        screen, node = self.option(False, selects=False)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.clicked), ("unknown", 1))
+        self.assertIn("it was clicked to make it checked, but it is still unchecked", record["observed"])
+
+    def test_unchecked_clears_a_selected_option(self) -> None:
+        screen, node = self.option(True)
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], node.clicked, node.attrs["aria-selected"]), ("match", 1, "false"))
+        screen, node = self.option(False)                      # already clear: left as it is
+        record = self.act(screen, False)
+        self.assertEqual((record["outcome"], record["observed"], node.clicked), ("match", "already set", 0))
+
+    def test_an_option_holding_one_check_box_sets_the_box(self) -> None:
+        box = ScreenNode(tag="input", attrs={"type": "checkbox"}, checked=False)
+        node = ScreenNode(tag="div", attrs={"role": "option"}, children=Screen(("checkbox", "", box)))
+        record = self.act(Screen(("option", self.LABEL, node)), True)
+        self.assertEqual((record["outcome"], box.checked, node.clicked), ("match", True, 0))
+        box.check_error = AssertionError("set_checked() called on a box already in the state")
+        record = self.act(Screen(("option", self.LABEL, node)), True)
+        self.assertEqual((record["outcome"], record["observed"]), ("match", "already set"))
+
+    def test_an_option_without_a_state_attribute_is_clicked_as_before(self) -> None:
+        screen, node = self.option(None)
+        record = self.act(screen, True)
+        self.assertEqual((record["outcome"], node.clicked), ("match", 1))
+        screen, node = self.option(None)                       # stateOnly: the words are no click
+        record = self.act(screen, True, state_only=True)
+        self.assertEqual((record["outcome"], node.clicked), ("unknown", 0))
+
     def test_run_step_gives_each_label_the_state_the_item_marks(self) -> None:
         r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
         items = [{"kind": "navigation", "labels": ["Upload", "Overwrite if files already exist", "Upload"],
@@ -5724,6 +6335,702 @@ class DisplayNameTests(RunnerTestCase):
         self.assertEqual(self.recording["steps"]["9.9.1"]["viewUrl"],
                          f"https://portal.azure.com/#{USERS}")
 
+
+class PickerRowTests(RunnerTestCase):
+    """A policy picker's row names its policy in a cell and holds a radio named 'Select' (1.3.5,
+    1.3.9; #342): that radio is the element the guide's 'select **X**' names (find_row_control),
+    a match with nobody asked, nothing recorded and no guide edit."""
+
+    PICK = {"kind": "action", "labels": ["Allowed locations"], "line": 3}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n\n3. Select **Allowed locations**\n", encoding="utf-8")
+
+    @staticmethod
+    def radio(checked: bool = False) -> ScreenNode:
+        return ScreenNode(attrs={"role": "radio"}, tag="input", checked=checked, tree='- radio "Select"')
+
+    @staticmethod
+    def box(name: str = "Select") -> ScreenNode:
+        return ScreenNode(attrs={"role": "checkbox"}, tag="input", tree=f'- checkbox "{name}"')
+
+    @staticmethod
+    def row(name: str, *controls: tuple[str, ScreenNode], cell: str = "gridcell") -> tuple[str, str, ScreenNode]:
+        parts = [(role, "Select", node) for role, node in controls] + [(cell, name, ScreenNode(interactive=False))]
+        return "row", f"Select {name} 1.1.0 General BuiltIn", ScreenNode(children=Screen(*parts))
+
+    HEADER = ("row", "Name Version Category Type",
+              ScreenNode(children=Screen(("columnheader", "Name", ScreenNode()), ("columnheader", "Version", ScreenNode()))))
+
+    @staticmethod
+    def find(screen: Screen, label: str = "Allowed locations"):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label)
+
+    def act(self, screen: Screen, state=None):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.PICK], "images": []}
+        listed = [run.Candidate(role, name) for role, name, _ in screen.everything() if name]
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=listed):
+            record = self.quietly(lambda: r.act_on_label(step, self.PICK, "Allowed locations", state=state))
+        return record, r
+
+    def test_a_picker_row_is_selected_by_its_select_radio(self) -> None:
+        radio = self.radio()
+        screen = Screen(self.HEADER, self.row("Require a tag on resource groups", ("radio", ScreenNode())),
+                        self.row("Allowed locations", ("radio", radio)))
+        self.assertIs(self.find(screen), radio)
+        record, r = self.act(screen)
+        self.assertEqual((record["outcome"], record["severity"], record.get("proposedEdit")), ("match", None, None))
+        self.assertEqual((r.ask.prompts, self.recording["steps"]["9.9.1"]["labels"]), ([], {}))
+        self.assertTrue(radio.checked)
+
+    def test_the_row_named_exactly_wins_among_three(self) -> None:
+        radio = self.radio()
+        screen = Screen(self.HEADER,
+                        self.row("Azure Cosmos DB allowed locations", ("radio", ScreenNode())),
+                        self.row("Allowed locations", ("radio", radio)),
+                        self.row("Allowed locations for resource groups", ("radio", ScreenNode())))
+        self.assertIs(self.find(screen), radio)
+
+    def test_a_cell_role_row_counts_as_well(self) -> None:
+        radio = self.radio()
+        self.assertIs(self.find(Screen(self.row("Allowed locations", ("radio", radio), cell="cell"))), radio)
+
+    def test_two_rows_of_that_exact_name_are_ambiguous(self) -> None:
+        screen = Screen(self.row("Allowed locations", ("radio", self.radio())),
+                        self.row("Allowed locations", ("radio", self.radio())))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen)
+
+    def test_a_row_already_selected_is_already_set(self) -> None:
+        radio = self.radio(checked=True)
+        record, _ = self.act(Screen(self.row("Allowed locations", ("radio", radio))))
+        self.assertEqual((record["outcome"], record["observed"], radio.clicked), ("match", "already set", 0))
+
+    def test_a_check_box_row_is_ticked_never_cleared(self) -> None:
+        box = self.box()
+        box.checked = True
+        record, _ = self.act(Screen(self.row("Allowed locations", ("checkbox", box))))
+        self.assertEqual((record["outcome"], record["observed"], box.checked, box.clicked), ("match", "already set", True, 0))
+        box = self.box()
+        record, _ = self.act(Screen(self.row("Allowed locations", ("checkbox", box))))
+        self.assertEqual((record["outcome"], box.checked), ("match", True))
+
+    def test_a_check_box_that_only_decorates_the_label_is_no_row_control(self) -> None:
+        screen = Screen(self.row("Allowed locations", ("checkbox", self.box("Allowed locations *"))))
+        self.assertIsNone(self.find(screen))
+
+    def test_a_row_without_one_selection_control_is_not_found(self) -> None:
+        for controls in ((), (("radio", self.radio()), ("radio", self.radio())),
+                         (("checkbox", self.box()), ("checkbox", self.box()))):
+            with self.subTest(controls=len(controls)):
+                self.assertIsNone(self.find(Screen(self.row("Allowed locations", *controls))))
+
+    def test_the_header_row_is_no_row(self) -> None:
+        header = ("row", "Allowed locations",
+                  ScreenNode(children=Screen(("columnheader", "Allowed locations", ScreenNode()),
+                                             ("gridcell", "Allowed locations", ScreenNode()),
+                                             ("radio", "Select", self.radio()))))
+        self.assertIsNone(self.find(Screen(header)))
+
+    def test_a_hidden_row_is_no_row(self) -> None:
+        hidden = self.row("Allowed locations", ("radio", self.radio()))
+        hidden[2].shown = False
+        self.assertIsNone(self.find(Screen(hidden)))
+
+    def test_the_plain_name_still_wins_over_a_row(self) -> None:
+        link = ScreenNode()
+        screen = Screen(("link", "Allowed locations", link), self.row("Allowed locations", ("radio", self.radio())))
+        self.assertIs(self.find(screen), link)
+
+
+class TextLabelTests(RunnerTestCase):
+    """A field whose label is plain text beside it, not its accessible name (1.3.7's unnamed
+    combo boxes under 'Category', 'Sub-category', 'Impact level'; 1.3.15's 'Name' above a text
+    box named by its placeholder; #342): find_by_text_label, the guide's element, nothing recorded."""
+
+    @staticmethod
+    def label(text: str, control: ScreenNode | None) -> tuple[str, str, ScreenNode]:
+        return "text", text, ScreenNode(interactive=False, next_control=control)
+
+    @staticmethod
+    def combo() -> ScreenNode:
+        return ScreenNode(attrs={"role": "combobox"}, tag="div")
+
+    def advisor(self) -> tuple[Screen, list[ScreenNode]]:
+        """Run B's Create Advisor Alerts iframe: three combo boxes without a name; their labels
+        are the text before each (Step-1.3.7.png)."""
+        boxes = [self.combo() for _ in range(3)]
+        screen = Screen(("radiogroup", "Configured by", ScreenNode()),
+                        self.label("Category", boxes[0]), ("combobox", "", boxes[0]),
+                        self.label("Sub-category", boxes[1]), ("combobox", "", boxes[1]),
+                        self.label("Impact level", boxes[2]), ("combobox", "", boxes[2]))
+        return screen, boxes
+
+    @staticmethod
+    def find(screen: Screen, label: str, field: bool = True, **kwargs):
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            return run.find_exact(FakePage(), label, field=field, **kwargs)
+
+    def test_category_is_the_unnamed_combobox_after_its_text(self) -> None:
+        screen, boxes = self.advisor()
+        for text, box in zip(("Category", "Sub-category", "Impact level"), boxes):
+            with self.subTest(label=text):
+                self.assertIs(self.find(screen, text), box)
+
+    def test_name_is_the_textbox_named_by_its_placeholder(self) -> None:
+        # blade-1.3.16: textbox "Enter a unique name" under the text "Name"
+        box = ScreenNode(attrs={"role": "textbox"}, tag="input")
+        screen = Screen(self.label("Name", box), ("textbox", "Enter a unique name", box))
+        self.assertIs(self.find(screen, "Name"), box)
+
+    def test_text_with_other_text_before_the_control_is_no_label(self) -> None:
+        screen = Screen(self.label("Category", None), ("text", "Choose carefully", ScreenNode(interactive=False)),
+                        ("combobox", "", self.combo()))
+        self.assertIsNone(self.find(screen, "Category"))
+
+    def test_a_text_label_on_screen_twice_is_ambiguous(self) -> None:
+        first, second = self.combo(), self.combo()
+        screen = Screen(self.label("Category", first), ("combobox", "", first),
+                        self.label("Category", second), ("combobox", "", second))
+        with self.assertRaises(run.Ambiguous):
+            self.find(screen, "Category")
+
+    def test_a_field_named_by_its_accessible_name_still_wins(self) -> None:
+        named, other = ScreenNode(attrs={"role": "textbox"}, tag="input"), self.combo()
+        screen = Screen(self.label("Name", other), ("textbox", "Name", named))
+        self.assertIs(self.find(screen, "Name"), named)
+
+    def test_it_counts_only_once_the_decorated_names_may(self) -> None:
+        screen, _ = self.advisor()
+        self.assertIsNone(self.find(screen, "Category", decorated=False))
+
+    def test_interactive_text_is_no_label(self) -> None:
+        screen = Screen(("text", "Category", ScreenNode(interactive=True, next_control=self.combo())))
+        self.assertIsNone(self.find(screen, "Category"))
+
+    def test_the_newest_blade_wins_among_equal_labels(self) -> None:
+        old, new = self.combo(), self.combo()
+        old.blade, new.blade = ("Earlier", 0.0), ("Newest", 500.0)
+        screen = Screen(self.label("Category", old), ("combobox", "", old),
+                        self.label("Category", new), ("combobox", "", new))
+        self.assertIs(self.find(screen, "Category"), new)
+
+    def test_an_action_uses_it_only_for_a_control_that_opens_a_list(self) -> None:
+        box, button = self.combo(), ScreenNode(attrs={"role": "button"}, tag="button")
+        self.assertIs(self.find(Screen(self.label("Category", box), ("combobox", "", box)), "Category", field=False), box)
+        self.assertIsNone(self.find(Screen(self.label("Category", button), ("button", "", button)), "Category", field=False))
+        listbox = ScreenNode(attrs={"role": "button", "aria-haspopup": "listbox"}, tag="button")
+        self.assertIs(self.find(Screen(self.label("Category", listbox), ("button", "", listbox)), "Category", field=False), listbox)
+
+    FIELD = {"kind": "field", "label": "Name", "value": "budget", "line": 4}
+
+    def test_a_form_whose_first_field_is_found_by_its_text_is_open(self) -> None:
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        box = ScreenNode(attrs={"role": "textbox"}, tag="input")
+        screen = Screen(self.label("Name", box), ("textbox", "Enter a unique name", box))
+        r = run.Runner(page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [self.FIELD], "images": []}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            record = self.quietly(lambda: r.act_on_label(step, self.FIELD, "Name", "budget", form_start=True))
+        self.assertEqual((record["outcome"], box.filled, r.ask.prompts, r.records, self.recording["steps"]["9.9.1"]["labels"]),
+                         ("match", ["budget"], [], [], {}))
+
+
+class ListOptionTests(RunnerTestCase):
+    """A list option picked by its name (#342): the roles option and treeitem, a region prefix
+    ('(Europe) Sweden Central'), a filter box, a list that scrolls, and the list's tree kept when
+    the option is missing."""
+
+    @staticmethod
+    def pick(page, box, value, tag="div", **kwargs):
+        with mock.patch.object(run.time, "monotonic", lambda: page.now):
+            return run.pick_option(page, box, tag, value, **kwargs)
+
+    def opened(self, role: str, names: list[str], owned: bool = False):
+        """A combo box that shows `names` as `role` entries once clicked; an option sets its text."""
+        screen, page = Screen(), FakePage()
+        box = ScreenNode(attrs={"role": "combobox"}, tag="div")
+        options = {}
+        for name in names:
+            options[name] = ScreenNode(on_click=lambda name=name: setattr(box, "text", name))
+        if owned:
+            box.attrs["aria-controls"] = "list"
+            popup = ScreenNode(attrs={"id": "list"}, children=Screen(*((role, n, o) for n, o in options.items())))
+            box.on_click = lambda: screen.add(("tree", "List of options", popup))
+        else:
+            box.on_click = lambda: screen.add(*((role, n, o) for n, o in options.items()))
+        screen.add(("combobox", "Field", box))
+        return screen, page, box, options
+
+    def test_reset_period_monthly_is_a_treeitem_under_calendar_months(self) -> None:
+        # blade-1.3.16: combobox "Reset period", dialog > tree "List of options" > treeitem "Monthly"
+        names = ["Billing month", "Monthly", "Quarterly", "Annually"]
+        for owned in (False, True):
+            with self.subTest(owned=owned):
+                screen, page, box, options = self.opened("treeitem", names, owned)
+                with mock.patch.object(run, "all_frames", lambda page: [screen]):
+                    self.assertIsNone(self.pick(page, box, "Monthly"))
+                self.assertEqual((options["Monthly"].clicked, options["Quarterly"].clicked, box.text), (1, 0, "Monthly"))
+
+    def test_region_sweden_central_finds_the_europe_prefixed_option(self) -> None:
+        # Step-1.3.6.png: a list of '(Europe) North Europe', '(Europe) Sweden Central', ...
+        names = ["(Europe) North Europe", "(Europe) Sweden Central", "(US) East US"]
+        screen, page, box, options = self.opened("option", names)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["(Europe) Sweden Central"].clicked, options["(Europe) North Europe"].clicked,
+                          box.text), (1, 0, "(Europe) Sweden Central"))
+
+    def test_region_sweden_central_finds_the_option_named_after_its_group_too(self) -> None:
+        # list-1.3.6-224 (run 20261017-123546): group 'Recommended' > option 'Recommended: (Europe)
+        # Sweden Central', with the filter box holding 'Sweden Central'.
+        names = ["Recommended: (Europe) Sweden Central", "Recommended: (Europe) North Europe"]
+        screen, page, box, options = self.opened("option", names)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options[names[0]].clicked, options[names[1]].clicked), (1, 0))
+        # The region's own entry, without the group's heading, comes first.
+        screen, page, box, options = self.opened("option", ["Recommended: (Europe) Sweden Central",
+                                                            "(Europe) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["(Europe) Sweden Central"].clicked,
+                          options["Recommended: (Europe) Sweden Central"].clicked), (1, 0))
+
+    def test_a_field_showing_the_region_on_its_first_line_shows_the_value(self) -> None:
+        # Run 20261017-123546, 1.3.6: after the click the Region field read '(Europe) Sweden
+        # Central' and more text on the next line.
+        screen, page, box, options = self.opened("option", ["Recommended: (Europe) Sweden Central"])
+        options["Recommended: (Europe) Sweden Central"].on_click = lambda: setattr(
+            box, "text", "(Europe) Sweden Central\nRecommended")
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        box.text = "(Europe) Sweden Central\nRecommended"
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertEqual(self.pick(page, box, "Sweden Central"), "already set")
+
+    def test_an_exact_name_wins_over_a_prefixed_one(self) -> None:
+        screen, page, box, options = self.opened("option", ["Sweden Central", "(Europe) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((options["Sweden Central"].clicked, options["(Europe) Sweden Central"].clicked), (1, 0))
+
+    def test_a_field_showing_the_prefixed_name_is_already_set(self) -> None:
+        screen, page, box, options = self.opened("option", ["(Europe) Sweden Central"])
+        box.text = "(Europe) Sweden Central"
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertEqual(self.pick(page, box, "Sweden Central"), "already set")
+        self.assertEqual(box.clicked, 0)
+
+    def test_two_options_after_removing_the_prefix_are_ambiguous(self) -> None:
+        screen, page, box, options = self.opened("option", ["(Europe) Sweden Central", "(Asia Pacific) Sweden Central"])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(run.Ambiguous):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual([o.clicked for o in options.values()], [0, 0])
+
+    def test_the_filter_box_is_typed_into_first(self) -> None:
+        for editable in (False, True):
+            with self.subTest(editable=editable):
+                screen, page = Screen(), FakePage()
+                box = ScreenNode(attrs={"role": "combobox", "aria-controls": "list"}, tag="input" if editable else "div")
+                option = ScreenNode(on_click=lambda: setattr(box, "text", "(Europe) Sweden Central"))
+                children = Screen()
+                popup = ScreenNode(attrs={"id": "list"}, children=children)
+                filter_box = ScreenNode(tag="input", on_fill=lambda: children.add(
+                    ("option", "(Europe) Sweden Central", option)))
+                if editable:        # the combo box is the filter: the popup has no text box of its own
+                    box.on_fill = filter_box.on_fill
+                else:
+                    children.add(("searchbox", "Filter", filter_box))
+                box.on_click = lambda: screen.add(("listbox", "Regions", popup))
+                screen.add(("combobox", "Region", box))
+                with mock.patch.object(run, "all_frames", lambda page: [screen]):
+                    self.assertIsNone(self.pick(page, box, "(Europe) Sweden Central", tag=box.tag))
+                typed = box.filled if editable else filter_box.filled
+                self.assertEqual((typed, option.clicked), (["Sweden Central"], 1))
+
+    def paged(self, pages: list[list[str]], end_scrolls: bool = True):
+        """A list that shows pages[0], and the next page after each scroll (`state['scrolls']`
+        counts them); with `end_scrolls` False the last page cannot be scrolled past."""
+        screen, page, state = Screen(), FakePage(), {"scrolls": 0}
+        box = ScreenNode(attrs={"role": "combobox", "aria-controls": "list"}, tag="div")
+        children, options = Screen(), {}
+
+        def show(index: int) -> None:
+            children.entries.clear()
+            for name in pages[index]:
+                options[name] = ScreenNode(on_click=lambda name=name: setattr(box, "text", name))
+                children.add(("option", name, options[name]))
+
+        def scroll() -> bool:
+            state["scrolls"] += 1
+            if state["scrolls"] >= len(pages) and not end_scrolls:
+                return False
+            show(min(state["scrolls"], len(pages) - 1))
+            return True
+
+        popup = ScreenNode(attrs={"id": "list"}, children=children, on_scroll=scroll)
+        show(0)
+        box.on_click = lambda: screen.add(("listbox", "Regions", popup))
+        screen.add(("combobox", "Region", box))
+        return screen, page, box, options, state, popup
+
+    def test_an_option_shown_only_after_scrolling_is_found(self) -> None:
+        screen, page, box, options, state, _ = self.paged([["(Europe) North Europe"], ["(Europe) Norway East"],
+                                                           ["(Europe) Sweden Central"]])
+        with mock.patch.object(run, "all_frames", lambda page: [screen]):
+            self.assertIsNone(self.pick(page, box, "Sweden Central"))
+        self.assertEqual((state["scrolls"], options["(Europe) Sweden Central"].clicked), (2, 1))
+
+    def test_scrolling_stops_after_twenty_pages(self) -> None:
+        pages = [[f"(Europe) Region {n}"] for n in range(40)]
+        screen, page, box, _, state, _ = self.paged(pages)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                self.assertRaisesRegex(LookupError, "option 'Sweden Central' not found"):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual((state["scrolls"], run.LIST_SCROLL_PAGES), (20, 20))
+
+    def test_scrolling_stops_when_the_list_does_not_move(self) -> None:
+        screen, page, box, _, state, _ = self.paged([["(Europe) North Europe"], ["(Europe) Norway East"]],
+                                                    end_scrolls=False)
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(LookupError):
+            self.pick(page, box, "Sweden Central")
+        self.assertEqual(state["scrolls"], 2)       # the second scroll found the end: nothing moved
+
+    def test_a_missing_option_saves_the_list_tree_scrubbed(self) -> None:
+        tree = ('- listbox "Regions":\n  - option "(Europe) North Europe"\n'
+                '  - option "Item 11111111-2222-4333-8444-555555555555"')
+        screen, page, box, _, _, popup = self.paged([["(Europe) North Europe"]])
+        popup.tree = tree
+        seen = []
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), self.assertRaises(LookupError):
+            self.pick(page, box, "Sweden Central", diagnose=seen.append)
+        self.assertEqual(len(seen), 1)
+        self.assertIn("(Europe) North Europe", seen[0])
+        # the runner keeps it as list-<step>-<line>.aria.txt, scrubbed as the blade outlines are
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        r = run.Runner(page_on(f"view/{USERS}"), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "items": [], "images": []}
+        self.quietly(lambda: r.save_list_tree(step, {"line": 7}, seen[0]))
+        saved = (r.run_dir / "list-9.9.1-7.aria.txt").read_text(encoding="utf-8")
+        self.assertIn("(Europe) North Europe", saved)
+        self.assertNotIn("11111111-2222", saved)
+        self.assertIn("<id>", saved)
+
+
+class OpenedListTests(RunnerTestCase):
+    """A multi-select list opened by the label before it (1.3.9's 'Allowed locations' above the
+    combo box 'Location'; #342): the item's later labels are options of that list, set to the
+    state the guide gives them, and the list is closed when the item ends."""
+
+    ITEM = {"kind": "action", "labels": ["Allowed locations", "Sweden Central", "North Europe"],
+            "checked": [1, 2], "line": 5}
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+
+    def parameters(self, ticked=(), late=()):
+        """Run B's Parameters tab: the text 'Allowed locations' before the combo box 'Location'; once
+        clicked, it opens a list with a Filter box and check box options under a heading (Europe).
+        Options in `late` appear only after the filter box is typed into. Returns (screen, combo box,
+        options by name, filter box)."""
+        screen, combo = Screen(), ScreenNode(attrs={"role": "combobox", "aria-controls": "locations"}, tag="div")
+        options = {name: ScreenNode(attrs={"role": "option", "aria-selected": "true" if name in ticked else "false"},
+                                    selects_on_click=True)
+                   for name in ("North Europe", "Sweden Central", "West Europe")}
+        children = Screen(("text", "Europe", ScreenNode(interactive=False)))
+        for name, option in options.items():
+            if name not in late:
+                children.add(("option", name, option))
+
+        def type_in_filter() -> None:
+            for name in late:
+                if all(entry[2] is not options[name] for entry in children.entries):
+                    children.add(("option", name, options[name]))
+
+        filter_box = ScreenNode(tag="input", on_fill=type_in_filter)
+        children.add(("searchbox", "Filter", filter_box))
+        popup = ScreenNode(attrs={"id": "locations"}, children=children)
+        shown = ("listbox", "Location", popup)
+        combo.on_click = lambda: shown in screen.entries or screen.add(shown)
+
+        def press(key, timeout=None) -> None:
+            combo.pressed.append(key)
+            if key == "Escape" and shown in screen.entries:
+                screen.entries.remove(shown)
+
+        combo.press = press
+        screen.add(("text", "Allowed locations", ScreenNode(interactive=False, next_control=combo)),
+                   ("combobox", "Location", combo))
+        return screen, combo, options, filter_box
+
+    def perform(self, screen: Screen, items: list[dict] | None = None):
+        r = run.Runner(FakePage(), STEPS, self.recording, self.args(), ask=Answers())
+        step = {"id": "9.9.1", "title": "One", "expected": None, "images": [], "items": items or [self.ITEM]}
+        with mock.patch.object(run, "all_frames", lambda page: [screen]), \
+                mock.patch.object(run.time, "monotonic", lambda: r.page.now), \
+                mock.patch.object(run, "candidates_on_screen", return_value=[]):
+            done = self.quietly(lambda: r.run_step(step))
+        return r, done
+
+    @staticmethod
+    def outcomes(r: run.Runner) -> list[tuple[str, str]]:
+        return [(x["label"], x["outcome"]) for x in r.records if x["kind"] == "action"]
+
+    def test_allowed_locations_opens_the_location_combobox_and_ticks_both_regions(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual(self.outcomes(r), [("Allowed locations", "match"), ("Sweden Central", "match"),
+                                            ("North Europe", "match")])
+        self.assertEqual((combo.clicked, options["Sweden Central"].clicked, options["North Europe"].clicked,
+                          options["West Europe"].clicked), (1, 1, 1, 0))
+        self.assertEqual([options[n].attrs["aria-selected"] for n in ("Sweden Central", "North Europe", "West Europe")],
+                         ["true", "true", "false"])
+        self.assertEqual((r.ask.prompts, self.recording["steps"]["9.9.1"]["labels"]), ([], {}))
+
+    def test_north_europe_already_ticked_stays_ticked(self) -> None:
+        # Run B clicked North Europe, which was ticked already, and unticked it.
+        screen, _, options, _ = self.parameters(ticked=("North Europe",))
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual((options["North Europe"].clicked, options["North Europe"].attrs["aria-selected"]), (0, "true"))
+        self.assertEqual((options["Sweden Central"].clicked, options["Sweden Central"].attrs["aria-selected"]), (1, "true"))
+        self.assertEqual([x["observed"] for x in r.records if x["label"] == "North Europe"], ["already set"])
+
+    def test_sweden_central_appears_after_typing_in_the_filter_box(self) -> None:
+        screen, _, options, filter_box = self.parameters(late=("Sweden Central",))
+        r, done = self.perform(screen)
+        self.assertTrue(done)
+        self.assertEqual((filter_box.filled, options["Sweden Central"].clicked, options["North Europe"].clicked),
+                         (["Sweden Central"], 1, 1))
+
+    def test_the_list_is_closed_after_the_item(self) -> None:
+        screen, combo, _, _ = self.parameters()
+        self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertEqual((combo.pressed, [e for e in screen.entries if e[0] == "listbox"]), (["Escape"], []))
+
+    def test_whether_the_control_opens_a_list_is_read_before_the_click(self) -> None:
+        # The Portal may re-render or remove the clicked control; it is read while it is there.
+        screen, combo, options, _ = self.parameters()
+        opens = combo.on_click
+
+        def click() -> None:
+            opens()
+            combo.uninspectable = True                  # FIELD_KIND_JS fails from now on
+        combo.on_click = click
+        r, done = self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertTrue(done)
+        self.assertEqual((combo.pressed, options["Sweden Central"].attrs["aria-selected"]), (["Escape"], "true"))
+
+    def test_a_list_the_last_label_opened_stays_open_for_the_next_item(self) -> None:
+        screen, combo, _, _ = self.parameters()
+        self.perform(screen, [{"kind": "action", "labels": ["Allowed locations"], "line": 5}])
+        self.assertEqual((combo.clicked, combo.pressed), (1, []))
+
+    def test_a_list_that_closed_itself_is_not_closed_again(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        options["Sweden Central"].on_click = lambda: screen.entries.remove(
+            next(e for e in screen.entries if e[0] == "listbox"))
+        self.perform(screen, [dict(self.ITEM, labels=["Allowed locations", "Sweden Central"], checked=[1])])
+        self.assertEqual(combo.pressed, [])
+
+    def test_a_label_not_in_the_list_is_looked_for_on_screen(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        save = ScreenNode()
+        screen.add(("button", "Save", save))
+        item = {"kind": "action", "labels": ["Allowed locations", "Sweden Central", "Save"], "checked": [1], "line": 5}
+        r, done = self.perform(screen, [item])
+        self.assertTrue(done)
+        self.assertEqual((save.clicked, options["Sweden Central"].clicked), (1, 1))
+
+    def test_the_list_is_forgotten_with_the_item(self) -> None:
+        screen, combo, options, _ = self.parameters()
+        other = ScreenNode()
+        screen.add(("button", "North Europe", other))
+        first = {"kind": "action", "labels": ["Allowed locations", "Sweden Central"], "checked": [1], "line": 5}
+        second = {"kind": "action", "labels": ["North Europe"], "line": 6}
+        r, done = self.perform(screen, [first, second])
+        self.assertTrue(done)
+        self.assertEqual((options["North Europe"].clicked, other.clicked), (0, 1))
+
+
+class LateViewTests(RunnerTestCase):
+    """A label the recording says a view lists only later ("lateLabels", 1.3.10's Compliance
+    grid, #342) is waited for by refreshing the view, for as long as the recording allows."""
+
+    LABEL = "Require-Environment-Tag-RG"
+    ITEM = {"kind": "action", "labels": [LABEL], "line": 4}
+    # Run A's Compliance grid, trimmed to the rows a test needs (no Scope cell: it names the
+    # subscription).
+    GRID = ('- heading "Policy | Compliance" [level=1]\n'
+            '- menuitem "Refresh"\n'
+            '- grid:\n'
+            '  - row "Name Scope Compliance state":\n'
+            '    - columnheader "Name"\n'
+            '  - row "Enforce-Project-Tag":\n'
+            '    - link "Enforce-Project-Tag"\n'
+            '  - row "Restrict-Azure-Regions":\n'
+            '    - link "Restrict-Azure-Regions"\n')
+    LEFT, RIGHT = ("Policy | Overview", 0), ("Policy | Compliance", 500)
+
+    class ReloadPage(FakePage):
+        def __init__(self, on_reload=None) -> None:
+            super().__init__()
+            self.reloads = 0
+            self.on_reload = on_reload
+
+        def reload(self, wait_until=None) -> None:
+            self.reloads += 1
+            if self.on_reload:
+                self.on_reload(self.reloads)
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.tmp / "guide.md").write_text("# Lab\n", encoding="utf-8")
+        POPUP_RECORD.update(popups=None, made=0)
+
+    act = FindOnScreenTests.act
+
+    def allow(self, minutes) -> None:
+        self.recording["steps"].setdefault("9.9.1", {})["lateLabels"] = {self.LABEL: minutes}
+
+    def refreshing(self, shows_after: int):
+        """A screen with a Refresh menu item in each of two blades; the grid row appears at the
+        `shows_after`-th click of the right-most blade's."""
+        link, clicks = ScreenNode(), []
+        screen = Screen(tree=self.GRID)
+
+        def refreshed() -> None:
+            clicks.append(1)
+            if len(clicks) == shows_after:
+                screen.add(("link", self.LABEL, link))
+        left = ScreenNode(blade=self.LEFT)
+        right = ScreenNode(blade=self.RIGHT, on_click=refreshed)
+        screen.add(("menuitem", "Refresh", left), ("menuitem", "Refresh", right))
+        return screen, link, left, right
+
+    @staticmethod
+    def said(printed) -> list[str]:
+        return [str(c.args[0]) for c in printed.call_args_list if c.args]
+
+    def test_compliance_lists_the_assignment_after_two_refreshes(self) -> None:
+        self.allow(30)
+        screen, link, left, right = self.refreshing(shows_after=2)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual((right.clicked, left.clicked), (2, 0))             # the newest blade's Refresh
+        self.assertGreaterEqual(r.page.now, 2 * run.LATE_POLL_S)
+        self.assertLess(r.page.now, 3 * run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        waiting = [line for line in self.said(printed) if "may be listed only later" in line]
+        self.assertIn("up to 30 min", waiting[0])
+        self.assertEqual(len(waiting), 1)                                  # said once, not every look
+        self.assertIn(f"'{self.LABEL}'", waiting[0])
+        self.assertEqual(self.recording["steps"]["9.9.1"]["labels"], {})
+
+    def test_the_page_is_reloaded_when_no_refresh_is_on_screen(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+        page = self.ReloadPage(lambda n: n == 1 and screen.add(("link", self.LABEL, link)))
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts), ("match", 1, []))
+        self.assertEqual(page.reloads, 1)
+
+    def test_the_label_is_asked_about_after_the_limit(self) -> None:
+        self.allow(2)
+        screen, link, left, right = self.refreshing(shows_after=99)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), link.clicked), ("unknown", 1, 0))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(r.page.now, start + 2 * 60)
+        self.assertLess(r.page.now, start + 2 * 60 + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        self.assertEqual(right.clicked, 2)                                 # one refresh a minute, the last at the limit
+        self.assertTrue(any("2 min" in line and "asking" in line for line in self.said(printed)))
+
+    def test_one_late_minute_refreshes_once_looks_once_and_then_asks(self) -> None:
+        self.allow(1)
+        screen, link, left, right = self.refreshing(shows_after=99)
+        looks = []
+        exact = run.find_exact
+        with mock.patch.object(run, "find_exact", lambda *a, **k: looks.append(right.clicked) or exact(*a, **k)):
+            record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), right.clicked, left.clicked), ("unknown", 1, 1, 0))
+        start = run.FIND_TIMEOUT_MS / 1000
+        self.assertGreaterEqual(r.page.now, start + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000)
+        self.assertLess(r.page.now, start + run.LATE_POLL_S + run.FIND_TIMEOUT_MS / 1000 + 1)
+        self.assertTrue(looks and looks[-1] == 1)                          # looked at after the refresh
+
+    def test_one_late_minute_finds_a_label_its_one_refresh_shows(self) -> None:
+        self.allow(1)
+        screen, link, left, right = self.refreshing(shows_after=1)
+        record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], link.clicked, r.ask.prompts, right.clicked), ("match", 1, [], 1))
+
+    def test_the_newest_blades_refresh_menu_item_wins_over_an_older_blades_button(self) -> None:
+        # The Compliance blade's Refresh is a menu item; the Overview blade parked left of it has a button.
+        self.allow(30)
+        link, older, clicks = ScreenNode(), ScreenNode(blade=self.LEFT), []
+        screen = Screen(tree=self.GRID)
+        newest = ScreenNode(blade=self.RIGHT, on_click=lambda: screen.add(("link", self.LABEL, link)))
+        screen.add(("button", "Refresh", older), ("menuitem", "Refresh", newest))
+        page = self.ReloadPage()
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], newest.clicked, older.clicked, page.reloads), ("match", 1, 0, 0))
+
+    def test_refresh_buttons_and_menu_items_the_newest_blade_cannot_tell_apart_reload_the_page(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+        button, item = ScreenNode(blade=self.RIGHT), ScreenNode(blade=self.RIGHT)
+        screen.add(("button", "Refresh", button), ("menuitem", "Refresh", item))
+        page = self.ReloadPage(lambda n: n == 1 and screen.add(("link", self.LABEL, link)))
+        record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], button.clicked, item.clicked, page.reloads), ("match", 0, 0, 1))
+
+    def test_a_reload_that_times_out_is_reported_and_the_wait_goes_on(self) -> None:
+        self.allow(30)
+        link, screen = ScreenNode(), Screen(tree=self.GRID)
+
+        def reloaded(n: int) -> None:
+            if n == 1:
+                raise run.PlaywrightError("Timeout 30000ms exceeded.")
+            screen.add(("link", self.LABEL, link))
+        page = self.ReloadPage(reloaded)
+        with mock.patch("builtins.print") as printed:
+            record, r = self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual((record["outcome"], link.clicked, page.reloads, r.ask.prompts), ("match", 1, 2, []))
+        said = [line for line in self.said(printed) if "reload" in line.lower()]
+        self.assertEqual(len(said), 1)
+        self.assertIn("Timeout 30000ms exceeded", said[0])
+
+    def test_a_window_closed_during_the_reload_stops_the_run(self) -> None:
+        self.allow(30)
+        screen = Screen(tree=self.GRID)
+        page = self.ReloadPage()
+
+        def closed(n: int) -> None:
+            page.closed = True
+            raise run.PlaywrightError("Target page, context or browser has been closed")
+        page.on_reload = closed
+        with self.assertRaises(run.PageClosed):
+            self.act(screen, self.ITEM, self.LABEL, page=page)
+        self.assertEqual(page.reloads, 1)
+
+    def test_no_wait_without_a_late_label(self) -> None:
+        screen, link, left, right = self.refreshing(shows_after=1)
+        self.recording["steps"].setdefault("9.9.1", {})["lateLabels"] = {"Another-Assignment": 30}
+        record, r = self.act(screen, self.ITEM, self.LABEL)
+        self.assertEqual((record["outcome"], len(r.ask.prompts), right.clicked), ("unknown", 1, 0))
+        self.assertLess(r.page.now, run.FIND_TIMEOUT_MS / 1000 + 1)
 
 
 if __name__ == "__main__":

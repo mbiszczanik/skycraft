@@ -1372,6 +1372,47 @@ class StateVerbTests(unittest.TestCase):
                 self.assertLess(time.perf_counter() - started, 2)
 
 
+class ConditionalItemTests(unittest.TestCase):
+    """An item that starts with 'If' holds only under its condition (#342): the runner performs it
+    when its first label is on screen and not greyed out. Texts from the guides."""
+
+    def test_an_item_starting_with_if_is_conditional(self) -> None:
+        for text, labels in (
+                ("If the review page opens without an error, click **Create**, then click the notification "
+                 "**Failed to create the resource group** to open the error details",
+                 ["Create", "Failed to create the resource group"]),                                   # 1.3.6
+                ("If prompted, click **Use Bastion**", ["Use Bastion"])):                              # 3.2.15
+            with self.subTest(text=text):
+                item = parse.list_item(text, 5)
+                self.assertEqual((item["labels"], item.get("conditional")), (labels, True))
+
+    def test_a_when_item_or_an_if_inside_the_sentence_is_no_condition(self) -> None:
+        for text in ("When the Portal returns to All users, click **Refresh** (the list may not show the new "
+                     "user yet)",                                                                       # 1.1
+                     "Click **Create**, if it is enabled", "Iffy wording, click **Save**"):
+            with self.subTest(text=text):
+                self.assertNotIn("conditional", parse.list_item(text, 5))
+
+
+class InPlaceTests(unittest.TestCase):
+    """A bold span between 'in the' and a container's kind (dialog, blade, pane, panel, window) is
+    where the next label is, no label (#342): run 20261017-123546 looked for 'Delete confirmation'
+    to click, a dialog. Texts from the guides."""
+
+    def test_the_dialog_or_blade_is_no_label(self) -> None:
+        for text, labels in (
+                ("In the **Delete confirmation** dialog, click **Delete**", ["Delete"]),          # 1.3.6, 1.3.13
+                ("In the **Overview** blade, locate the **FQDN** (Fully Qualified Domain Name).", ["FQDN"])):  # 3.3
+            with self.subTest(text=text):
+                self.assertEqual(parse.list_item(text, 7)["labels"], labels)
+
+    def test_a_tab_or_a_span_without_in_the_stays_a_label(self) -> None:
+        for text, labels in (("Click **Tags** in the **Overview** tab", ["Tags", "Overview"]),
+                             ("Click **Delete confirmation** dialog's **Delete**", ["Delete confirmation", "Delete"])):
+            with self.subTest(text=text):
+                self.assertEqual(parse.list_item(text, 7)["labels"], labels)
+
+
 class UnderPlaceTests(unittest.TestCase):
     """A bold span right after 'under' names where the next label is, a menu group or a section
     heading, not a control to click: clicking a Portal menu group collapses it. The texts are
@@ -1424,6 +1465,48 @@ class UnderPlaceTests(unittest.TestCase):
                              ("Undergo **A**", ["A"])):
             with self.subTest(text=text):
                 self.assertEqual(self.item(text), {"kind": "action", "labels": labels, "line": 7})
+
+
+class NoClickListTests(unittest.TestCase):
+    """A step without numbered items gives no click (#342); an Expected View list is read as
+    before. The fixtures copy the shapes of 2.2.16 and 2.1.x."""
+
+    def step(self, markdown: str) -> tuple[list[dict], str | None]:
+        body = parse.split_steps(parse.strip_hidden(markdown.splitlines()))[0]["body"]
+        items, expected, _, _ = parse.read_step(body)
+        return items, expected
+
+    def test_an_expected_view_with_text_is_read_as_before(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: View\n"
+            "\n"
+            "1. Click **Diagram**\n"
+            "\n"
+            "**Expected View**: A diagram of the hub.\n"
+            "- **Spoke** is shown\n")
+        self.assertEqual([i["labels"] for i in items], [["Diagram"], ["Spoke"]])
+        self.assertIsNone(expected)
+
+    def test_a_step_without_numbered_items_gives_no_clicks(self) -> None:
+        items, expected = self.step(
+            "### Step 9.9.1: Understand\n"
+            "\n"
+            "**Important Concepts**:\n"
+            "\n"
+            "- Locks at **subscription** level protect all\n"
+            "- Use **CanNotDelete** on production\n")
+        self.assertEqual(items, [])
+
+    def test_its_form_table_still_gives_fields(self) -> None:
+        items, _ = self.step(
+            "### Step 9.9.1: Understand\n"
+            "\n"
+            "- Use **CanNotDelete** on production\n"
+            "\n"
+            "| Field | Value |\n"
+            "|---|---|\n"
+            "| Name | `lock-a` |\n")
+        self.assertEqual([(i["kind"], i["label"]) for i in items], [("field", "Name")])
 
 
 if __name__ == "__main__":

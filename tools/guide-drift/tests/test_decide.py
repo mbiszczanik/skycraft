@@ -309,16 +309,19 @@ class Decorations(unittest.TestCase):
     def test_the_list_holds_each_decoration_once(self):
         # Only decorations a run has seen: the info icon's suffix alone, 'Email information', is not one.
         self.assertEqual([(d.prefix, d.suffix, d.fields) for d in DECORATIONS],
-                         [("Select row ", "", False), ("", " *", True), ("", " information *", True)])
+                         [("Select row ", "", False), ("", " *", True), ("", " information *", True),
+                          ("", " Resource Manager", False)])
 
     def test_each_decoration_of_the_label_is_recognised_on_its_roles_only(self):
         cases = {"Select row ": ("Select row Khadgar Archmage", ("checkbox",)),    # a list row's check box
                  " *": ("Email *", ("textbox", "combobox", "checkbox", "radio")),   # a required field's marker
                  " information *": ("Email information *",                          # lab 1.1's Email field
-                                    ("textbox", "combobox", "checkbox", "radio"))}
+                                    ("textbox", "combobox", "checkbox", "radio")),
+                 " Resource Manager": ("Resource groups Resource Manager", ("option",))}   # a search result's group
         for decoration in DECORATIONS:
             with self.subTest(decoration=decoration.what):
-                label = self.MEMBER if decoration.prefix else "Email"
+                label = (self.MEMBER if decoration.prefix
+                         else "Resource groups" if decoration.search else "Email")
                 name, roles = cases[decoration.prefix or decoration.suffix]
                 self.assertEqual((decoration.of(label), decoration.roles), (name, roles))
                 self.assertIs(decoration_of(name, label), decoration)                 # no role: the text alone
@@ -365,6 +368,26 @@ class Decorations(unittest.TestCase):
         recording = {"steps": {STEP["id"]: {"labels": {self.MEMBER: entry}}}}
         replayed = ReplayDecider(recording)(STEP, ITEM, self.MEMBER, self.PICKER)
         self.assertEqual((replayed.kind, replayed.severity, replayed.name), ("use", None, "Select row Khadgar Archmage"))
+
+    CATEGORY = [Candidate("option", "Resource groups Resource Manager"),
+                Candidate("option", "Subscriptions Keywords: resource groups")]
+
+    def test_replay_of_a_recorded_category_result_is_use(self):
+        entry = {"decision": "use", "role": "option", "name": "Resource groups Resource Manager",
+                 "severity": "misleading", "rejected": [], "decidedBy": "human", "at": AT}
+        recording = {"steps": {STEP["id"]: {"labels": {"Resource groups": entry}}}}
+        replayed = ReplayDecider(recording)(STEP, ITEM, "Resource groups", self.CATEGORY)
+        self.assertEqual((replayed.kind, replayed.severity, replayed.name, replayed.decided_by),
+                         ("use", None, "Resource groups Resource Manager", "replay"))
+
+    def test_a_human_pick_of_it_is_use(self):
+        for answer in ("1", "c 1"):
+            with self.subTest(answer=answer):
+                given = human(answer)(STEP, ITEM, "Resource groups", self.CATEGORY)
+                self.assertEqual((given.kind, given.severity, given.role, given.name),
+                                 ("use", None, "option", "Resource groups Resource Manager"))
+        other = human("2")(STEP, ITEM, "Resource groups", self.CATEGORY)       # another result: drift
+        self.assertEqual((other.kind, other.severity), ("drift", "misleading"))
 
     def test_another_row_is_still_drift(self):
         given = human("c 1")(STEP, ITEM, self.MEMBER, self.PICKER)

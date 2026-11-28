@@ -28,12 +28,19 @@
 
     It also keeps tenant data out of this public repository: for every recording, no e-mail
     address, tenant domain or GUID, and only query-free portal.azure.com blade addresses, read
-    percent-decoded, without an address, a guest user principal name or an id with or without
-    hyphens (issue #206); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
+    percent-decoded, without an address, a guest user principal name, an id with or without
+    hyphens (issue #206) or a generated resource name, a path segment of 20 or more hex digits
+    such as a Policy assignment's name (issue #342); for lab 1.1, the tenant prefix and the guest address of step 1.1.5 are
     environment references. A decision's rejected candidates are the Portal's labels only (issue
     #317): each is 'role "name"', its role one of recording.LABEL_ROLES (no table cell, option or
     tree item, which name a list's entries), and its name not a list row's check box ('Select row
     <display name>'), which names users and service principals of the tenant.
+
+    A step entry may carry '"lateLabels": {"<label>": <minutes>}' (issue #342): a view that lists the
+    label only later (step 1.3.10's Policy Compliance grid) is refreshed for up to that many whole
+    minutes, from 1 to 60, before the label is reported or asked about. run.py refuses to start on
+    any other value, and the label must be one of the step's labels, or the runner would never wait
+    for it.
 
     A step entry may carry '"startBlade": "<blade>"' (issue #207): the blade part of the view the
     step starts on (for a HubsExtension Browse blade, with the resource type it lists), which the
@@ -53,7 +60,7 @@
 
 .NOTES
     Project: SkyCraft
-    Issue:   #189, #199, #200, #202, #206, #207, #317, #320
+    Issue:   #189, #199, #200, #202, #206, #207, #317, #320, #342
 #>
 
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
@@ -182,6 +189,41 @@ $LabelRuleCases = @(
     @{ label = 'Project'; problem = "step 9.9.1 label 'Project' is not in the guide" }
 ) | ForEach-Object { $_.actual = @(Get-LabelProblem -Step $LabelFixture -Label $_.label) -join '; '; $_ }
 
+# Why a step entry's 'lateLabels' (#342) cannot be used: not an object of label to minutes, minutes
+# that are not a whole number from 1 to 60, and, when the parsed $Step is given, a label that is not
+# one of its labels (the runner would never wait for it). recording.late_label_problems, which
+# run.py refuses to start with, applies the minutes rule.
+function Get-LateLabelProblem {
+    param([string]$StepId, [object]$Entry, [object]$Step)
+    $late = $Entry.PSObject.Properties['lateLabels']
+    if ($null -eq $late) { return }
+    if ($late.Value -isnot [pscustomobject]) {
+        return "step ${StepId}: 'lateLabels' must be an object of label to minutes"
+    }
+    foreach ($label in @($late.Value.PSObject.Properties)) {
+        $minutes = $label.Value
+        if (($minutes -isnot [int] -and $minutes -isnot [long]) -or $minutes -lt 1 -or $minutes -gt 60) {
+            "step ${StepId}: 'lateLabels' '$($label.Name)' must be whole minutes from 1 to 60"
+        }
+        if ($Step -and @(Get-StepLabel -Step $Step -Kind decided) -cnotcontains $label.Name) {
+            "step ${StepId}: 'lateLabels' '$($label.Name)' is not a label of the step"
+        }
+    }
+}
+
+$LateRuleCases = @(
+    @{ json = '{ "lateLabels": { "Save": 30 } }'; problem = '' }
+    @{ json = '{ "lateLabels": { "Save": 1, "Name": 60 } }'; problem = '' }
+    @{ json = '{ "labels": {} }'; problem = '' }
+    @{ json = '{ "lateLabels": { "Save": 0 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": 61 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": "30" } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": 1.5 } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Save": true } }'; problem = "step 9.9.1: 'lateLabels' 'Save' must be whole minutes from 1 to 60" }
+    @{ json = '{ "lateLabels": { "Cancel": 30 } }'; problem = "step 9.9.1: 'lateLabels' 'Cancel' is not a label of the step" }
+    @{ json = '{ "lateLabels": [30] }'; problem = "step 9.9.1: 'lateLabels' must be an object of label to minutes" }
+) | ForEach-Object { $_.actual = @(Get-LateLabelProblem -StepId '9.9.1' -Entry ($_.json | ConvertFrom-Json) -Step $LabelFixture) -join '; '; $_ }
+
 # Why a step entry's 'skip' (#200) is malformed; nothing when the entry has none or a reason.
 # recording.skip_reason, which run.py checks every entry with, applies the same rule.
 function Get-SkipProblem {
@@ -231,6 +273,9 @@ function Get-ViewUrlProblem {
     if ($decoded -match '#EXT#') { "step $StepId $Key contains a guest user principal name (#EXT#)" }
     if ($decoded -match '[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -or $decoded -match '(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])') {
         "step $StepId $Key contains an id (with or without hyphens)"
+    } elseif ($decoded -match '/[0-9a-fA-F]{20,}(?![0-9A-Za-z])') {
+        # A generated resource name (issue #342): a Policy assignment is named with 24 hex digits.
+        "step $StepId $Key contains a generated resource name (a path segment of 20 or more hex digits)"
     }
 }
 
@@ -287,6 +332,13 @@ $ViewUrlRuleCases = @(
     @{ url = 'https://portal.azure.com/#view/Blade/id/%252F1111111122223333444455555555aaaa'; problem = 'step 9.9.1 viewUrl contains an id (with or without hyphens)' }
     @{ url = 'https://portal.azure.com/#view/User/upn/someone%EF%BC%A0example.com'; problem = "step 9.9.1 viewUrl contains '@' or '?' (also percent-encoded)" }
     @{ url = 'https://portal.azure.com/#view/User/upn/x%2525252525252540example.com'; problem = 'step 9.9.1 viewUrl does not stop decoding after 5 rounds' }
+    # A generated resource name, 24 hex digits made up here, also percent-encoded; fewer digits, or
+    # inside a longer word, is none.
+    @{ url = 'https://portal.azure.com/#view/Blade/assignmentId/%2Fproviders%2Fpolicyassignments%2F0123456789abcdef01234567/scopes~/x'; problem = 'step 9.9.1 viewUrl contains a generated resource name (a path segment of 20 or more hex digits)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/policyassignments%252F0123456789ABCDEF01234567'; problem = 'step 9.9.1 viewUrl contains a generated resource name (a path segment of 20 or more hex digits)' }
+    @{ url = 'https://portal.azure.com/#view/Blade/policyassignments%2F<id>/scopes~/x'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Blade/name/1111111111111111111'; problem = '' }
+    @{ url = 'https://portal.azure.com/#view/Blade/name/x0123456789abcdef01234567'; problem = '' }
 ) | ForEach-Object { $_.actual = @(Get-ViewUrlProblem -StepId '9.9.1' -Url $_.url) -join '; '; $_ }
 
 # Why a decision's rejected candidates must not be in this public repository; nothing when they may
@@ -430,6 +482,7 @@ $RecordingCases = Get-ChildItem -Path (Join-Path $RepoRoot 'tools/guide-drift/re
         $malformed = @(
             foreach ($prop in $recording.steps.PSObject.Properties) {
                 Get-SkipProblem -StepId $prop.Name -Entry $prop.Value
+                Get-LateLabelProblem -StepId $prop.Name -Entry $prop.Value -Step $stepById[$prop.Name]
                 $labelsObject = $prop.Value.labels
                 if ($null -ne $labelsObject) {
                     foreach ($entry in @($labelsObject.PSObject.Properties)) {
@@ -595,8 +648,16 @@ Describe 'Guide drift recordings - a skip gives its reason' {
     }
 }
 
+Describe 'Guide drift recordings - a late label waits whole minutes for a label of its step' {
+    It "reports the step entry <json> as '<problem>' (empty: well-formed)" -ForEach $LateRuleCases {
+        # run.py refuses to start on minutes outside 1..60 (recording.late_label_problems); a label
+        # the step does not have would never be waited for. Both fail here, not in a live run.
+        $actual | Should -Be $problem
+    }
+}
+
 Describe 'Guide drift recordings - every decision is one replay can act on' {
-    It "'<file>' records only use (with name and role), ignore or gone decisions, a well-formed result and skip" -ForEach $RecordingCases {
+    It "'<file>' records only use (with name and role), ignore or gone decisions, a well-formed result, skip and late labels" -ForEach $RecordingCases {
         # ReplayDecider indexes entry['decision'] and entry['name'] directly, so a missing key
         # raises KeyError, and a use entry without a role matches any role. An unrecognised
         # decision value is treated as no answer. A hand edit that breaks the shape must fail here,
