@@ -9,6 +9,27 @@ ADR-0007). Sections up to 0.9.0 were written by hand in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0](https://github.com/mbiszczanik/skycraft/compare/v0.24.0...v0.25.0) (2026-11-28)
+
+
+### Features
+
+* **agents:** add the lab-portal-pass skill for agent Portal passes ([#617](https://github.com/mbiszczanik/skycraft/issues/617)) ([fa87101](https://github.com/mbiszczanik/skycraft/commit/fa871014337f6497ece29ede4a378356b7614b8a))
+* **lab-cycle:** an idempotence pass that runs each deploy and test a second time (Refs [#525](https://github.com/mbiszczanik/skycraft/issues/525)) ([#592](https://github.com/mbiszczanik/skycraft/issues/592)) ([1c1745a](https://github.com/mbiszczanik/skycraft/commit/1c1745aae47ab1f2406640f669176caed2c12885))
+* **lab-cycle:** assert that the subscription budget is gone after the teardown (Refs [#526](https://github.com/mbiszczanik/skycraft/issues/526)) ([#588](https://github.com/mbiszczanik/skycraft/issues/588)) ([f746d14](https://github.com/mbiszczanik/skycraft/commit/f746d14cca559ac4419b2b5a2bdd68a1f64d2023))
+
+
+### Bug Fixes
+
+* **lab-1.1:** New-LabUser.ps1 sets Malfurion's company name and office location (Refs [#362](https://github.com/mbiszczanik/skycraft/issues/362)) ([#586](https://github.com/mbiszczanik/skycraft/issues/586)) ([df0b18c](https://github.com/mbiszczanik/skycraft/commit/df0b18c891aa9081353b5ea30e391a1b6a6c5895))
+* **lab-4.4:** stop Deploy-Bicep before the deployment when Lab 5.2's restore outlasts the soft delete days (Refs [#364](https://github.com/mbiszczanik/skycraft/issues/364)) ([#585](https://github.com/mbiszczanik/skycraft/issues/585)) ([50564f8](https://github.com/mbiszczanik/skycraft/commit/50564f8daf12b4c9da4b849f9bfdacc20c82a963))
+* **lab-5.2:** retry the backup instance until the vault role takes effect (Refs [#301](https://github.com/mbiszczanik/skycraft/issues/301)) ([#584](https://github.com/mbiszczanik/skycraft/issues/584)) ([f4ebe18](https://github.com/mbiszczanik/skycraft/commit/f4ebe18d6110ccbc3e8f0b62847f5369890674c4))
+
+
+### Documentation
+
+* **agents:** move lab step and live run rules into AGENTS.md ([#616](https://github.com/mbiszczanik/skycraft/issues/616)) ([1db5b26](https://github.com/mbiszczanik/skycraft/commit/1db5b26f3786589b7e69056c4b7a325bc6ff5820))
+
 ## [0.24.0](https://github.com/mbiszczanik/skycraft/compare/v0.23.0...v0.24.0) (2026-11-17)
 
 
