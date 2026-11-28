@@ -113,7 +113,10 @@ the looking goes on to the same deadline. When the deadline passes while a blade
 loading (blade_still_loading: a close button reads "Close content 'undefined'", or the newest
 blade's title heading has no content after it), the console says so once and the label is looked
 for up to BLADE_LOAD_TIMEOUT_MS more (BLADE_EMPTY_TIMEOUT_MS for a titled blade); once the blade
-has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked.
+has rendered, it is looked for FIND_TIMEOUT_MS again. Only then is the person asked. A blade
+showing the Portal's error screen instead (blade_shows_error, #614) gets its Refresh clicked once
+and the label looked for again; still missing, the item is unknown with the screen's text, kept as
+blade-<step>-<line>.error.txt, and nobody is asked.
 
 A Portal deployment takes from seconds to ten minutes, so before the blade check, a lookup that
 found nothing waits for one that the screen shows still running (issue #328, wait_for_deployment):
@@ -198,7 +201,8 @@ on, so that it is redone from there; after s, the skipped step's own view when i
 an earlier run), or else the view it started from, as a failed step records none. The run opens
 that view itself, pinned to the tenant, when it can: not when the view names an object by id
 ('<id>': the recording leaves ids out), keeps a '[token]' or '${NAME}' this run cannot fill in
-(an environment variable that is not set), or is no Portal view. Otherwise it prints the view
+(an environment variable that is not set), or is no Portal view; then it opens the blade the
+recording says the step starts on, when that one can be opened (#614). Otherwise it prints the view
 and why it cannot open it, or says that no view is recorded for that step. Either way it waits
 for Enter, as the recording keeps no query string and a view opened on its own has none of the
 blades the guide opened before it: the person checks the Portal and corrects it. The answer to
@@ -615,6 +619,26 @@ def frame_snapshots(page: Page) -> list[str | None]:
     return snapshots
 
 
+def frame_facts(page: Page) -> list[str]:
+    """One line per child frame for a kept outline (#614): its URL's host, whether its iframe is in
+    the window's columns, and what its snapshot gave (lines, empty, unreadable)."""
+    try:
+        frames = all_frames(page)[1:]
+    except (PlaywrightError, AttributeError):
+        return []
+    facts = []
+    for number, frame in enumerate(frames, 1):
+        host = urlsplit(getattr(frame, "url", "") or "").hostname or "no URL"
+        where = "in the window" if frame_in_window(frame, getattr(page, "viewport_size", None)) else "outside the window"
+        try:
+            snapshot = frame.locator("body").aria_snapshot(timeout=2000)
+            got = f"{len(snapshot.splitlines())} lines" if snapshot.strip() else "empty"
+        except PlaywrightError:
+            got = "unreadable"
+        facts.append(f"# child frame {number}: {host}, {where}, snapshot {got}")
+    return facts
+
+
 def outline_of(snapshots: list[str | None]) -> list[tuple[str, str]]:
     """aria_outline() of the frames frame_snapshots() read; a frame that could not be read is left out."""
     return [key for snapshot in snapshots if snapshot is not None
@@ -687,6 +711,28 @@ def deployment_state(texts: list[str]) -> tuple[str | None, list[str]]:
     return running, failures
 
 
+# The Portal's error screen in a blade's frame (#614, run 20261123-172651): self-diagnostics and a
+# copy of the error summary where the blade's content belongs.
+BLADE_ERROR_DIAGNOSE = "Perform self-diagnostics"
+BLADE_ERROR_SUMMARY = re.compile(r"\bcopy error summary\b", re.IGNORECASE)
+BLADE_ERROR_HEADING = "Summary"
+
+
+def blade_shows_error(outline: list[tuple[str, str]]) -> bool:
+    """Whether the screen (aria_outline) holds the Portal's error screen: both of its buttons."""
+    buttons = [name for role, name in outline if role == "button"]
+    return BLADE_ERROR_DIAGNOSE in buttons and any(BLADE_ERROR_SUMMARY.search(name) for name in buttons)
+
+
+def blade_error_text(texts: list[str] | None) -> str:
+    """The first text after the error screen's 'Summary' heading (texts_of), '' when there is none."""
+    texts = [text.strip() for text in texts or []]
+    if BLADE_ERROR_HEADING not in texts:
+        return ""
+    after = texts[texts.index(BLADE_ERROR_HEADING) + 1:]
+    return next((text for text in after if text and not BLADE_ERROR_SUMMARY.search(text)), "")
+
+
 def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     """Whether a blade's frame is open while its content has not rendered yet (issue #233), from
     aria_outline(): BLADE_UNTITLED when any close button reads "Close content 'undefined'";
@@ -706,7 +752,13 @@ def blade_still_loading(outline: list[tuple[str, str]]) -> str | None:
     if not headings:
         return None
     start = max(close_at, headings[-1])
-    return None if any(role in BLADE_CONTENT_ROLES for role, _ in outline[start + 1:]) else BLADE_EMPTY
+    rest = outline[start + 1:]
+    # A blade menu's search box comes before the blade's frame (#614): a bare iframe with nothing
+    # after it is a frame not rendered yet, whatever came before it.
+    frames = [index for index, (role, _) in enumerate(rest) if role == "iframe"]
+    if frames:
+        rest = rest[frames[-1] + 1:]
+    return None if any(role in BLADE_CONTENT_ROLES for role, _ in rest) else BLADE_EMPTY
 
 
 # A list's entry (#317): what an element inside one is named after is the entry's data (a user's
@@ -815,6 +867,12 @@ class DeploymentStopped(Exception):
     """A lookup gave up on a Portal deployment (#328): it failed, or it was still running after the
     longest wait. Its message is the record's 'observed'; the step is unknown, and the person is
     not asked about the label, as nothing about it is missing yet."""
+
+
+class BladeError(DeploymentStopped):
+    """The blade shows the Portal's error screen (blade_shows_error, #614) and one Refresh did not
+    clear it. Handled as DeploymentStopped: the item is unknown, and nobody is asked about a label
+    the Portal never rendered."""
 
 
 class ReadOnly(LookupError):
@@ -2269,6 +2327,8 @@ class Runner:
                 return found
             snapshots = frame_snapshots(self.page)
         outline = outline_of(snapshots)
+        if blade_shows_error(outline):
+            return self.refresh_error_screen(step, item, label, renew() if renew else look)
         loading = blade_still_loading(outline)
         if loading is None:
             self.save_blade_outline(step, item, label, outline)
@@ -2295,8 +2355,43 @@ class Runner:
         if found is rendered:
             found = in_time(self.page, renew() if renew else look)
         if found is None:
+            if blade_shows_error(aria_outline(self.page)):
+                return self.refresh_error_screen(step, item, label, renew() if renew else look)
             self.save_blade_outline(step, item, label)
         return found
+
+    def refresh_error_screen(self, step: dict, item: dict, label: str,
+                             look: Callable[[], Locator | None]) -> Locator:
+        """The blade shows the Portal's error screen (#614): click its Refresh once, the Portal's
+        own retry, and look for BLADE_EMPTY_TIMEOUT_MS. Still missing, or no single Refresh on
+        screen to click: keep the outline and the screen's text (blade-<step>-<line>.error.txt)
+        and raise BladeError, so the person is not asked about a label the Portal never showed."""
+        print(f"The blade shows the Portal's error screen: clicking its Refresh once before "
+              f"looking for '{label}' again.")
+        try:
+            refresh = unique_visible(self.page, lambda f: f.get_by_role("button", name="Refresh", exact=True))
+        except Ambiguous:
+            refresh = None
+        if refresh is not None:
+            try:
+                refresh.click(timeout=FIND_TIMEOUT_MS)
+            except PlaywrightError:
+                refresh = None
+        if refresh is not None:
+            found = in_time(self.page, look, ms=BLADE_EMPTY_TIMEOUT_MS)
+            if found is not None:
+                return found
+        snapshots = frame_snapshots(self.page)
+        self.save_blade_outline(step, item, label, outline_of(snapshots))
+        texts = texts_of(snapshots) or []
+        if not self.page.is_closed():
+            path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.error.txt"
+            path.write_text(scrub("\n".join(t for t in texts if t.strip()), self.redactor, self.secrets,
+                                  whole=True) + "\n", encoding="utf-8")
+            print(f"The error screen's text is in {path}")
+        why = "still after one Refresh" if refresh is not None else "with no single Refresh to retry"
+        detail = blade_error_text(texts)
+        raise BladeError(f"the Portal showed its error screen in the blade, {why}" + (f": {detail}" if detail else ""))
 
     def save_blade_outline(self, step: dict, item: dict, label: str,
                            outline: list[tuple[str, str]] | None = None) -> None:
@@ -2309,7 +2404,7 @@ class Runner:
             return
         if outline is None:
             outline = aria_outline(self.page)
-        lines = [f'{role} "{name}"' if name else role for role, name in outline]
+        lines = [f'{role} "{name}"' if name else role for role, name in outline] + frame_facts(self.page)
         path = self.run_dir / f"blade-{step['id']}-{item.get('line')}.aria.txt"
         # Every line kept, scrubbed as a record is (ids, secrets, tenant data; #212).
         path.write_text(scrub("\n".join(lines), self.redactor, self.secrets, whole=True) + "\n", encoding="utf-8")
@@ -3158,9 +3253,28 @@ class Runner:
                           f"string, and the blades the guide opened before it are not open: if the step "
                           f"needs them, bring the Portal there by hand first.")
                     return self.prompt("> ") is not None
+            if blade is not None and self.open_start_blade(head, step, previous, why, blade):
+                return self.prompt("> ") is not None
             print(f"{head} Bring the Portal to the view step {previous} ended on, then press Enter "
                   f"(the run cannot open it: {scrub(why, self.redactor, self.secrets)}):\n  {view}")
         return self.prompt("> ") is not None
+
+    def open_start_blade(self, head: str, step: dict, previous: str, why: str, blade: str) -> bool:
+        """Open the blade the recording says `step` starts on (#207) when the view `previous` ended
+        on cannot be opened (#614: step 1.3.8's names the subscription by id, while 1.3.9's
+        Assignments blade names nothing). False when that blade cannot be opened either."""
+        view = f"{PORTAL}/#view/{blade}"
+        address = self.view_address(view)
+        if address is None:
+            return False
+        try:
+            self.page.goto(address, wait_until="domcontentloaded")
+        except PlaywrightError:
+            return False
+        print(f"{head} Opened the blade step {step['id']} starts on, as the view step {previous} ended on "
+              f"cannot be opened ({scrub(why, self.redactor, self.secrets)}):\n  {view}\n"
+              f"Check the Portal shows it, then press Enter.")
+        return True
 
     # -- the run ---------------------------------------------------------------------------
 

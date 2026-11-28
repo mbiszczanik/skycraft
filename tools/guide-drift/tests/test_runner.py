@@ -1083,6 +1083,22 @@ class RunLogRedactionTests(RunnerTestCase):
             with self.subTest(name=name):
                 self.assertIsNone(r.proposed_edit(3, "+ New group", name))
 
+    def test_the_blade_outline_ends_with_what_each_child_frame_gave(self) -> None:
+        r = self.runner()
+        frame = BladeStillLoadingTests.Frame
+        main = frame('- heading "Policy | Assignments"\n')
+        unread = frame(None, {"x": 265, "y": 0, "width": 1269, "height": 891})
+        parked = frame("", {"x": -2000, "y": 0, "width": 800, "height": 891})
+        main.url, unread.url, parked.url = ("https://portal.azure.com/", "https://reactblade.portal.azure.net/x?t=1",
+                                            "https://portal.azure.com/frame")
+        r.page.viewport_size = {"width": 1440, "height": 900}
+        with mock.patch.object(run, "all_frames", lambda _page: [main, unread, parked]):
+            self.quietly(lambda: r.save_blade_outline({"id": "9.9.1"}, {"line": 7}, "Missing", [("heading", "X")]))
+        self.assertEqual((r.run_dir / "blade-9.9.1-7.aria.txt").read_text(encoding="utf-8"),
+                         'heading "X"\n'
+                         "# child frame 1: reactblade.portal.azure.net, in the window, snapshot unreadable\n"
+                         "# child frame 2: portal.azure.com, outside the window, snapshot empty\n")
+
     def test_the_aria_files_mask_ids_and_secret_values_and_keep_every_line(self) -> None:
         r = self.runner()
         # As aria_snapshot() writes a text field: its value after the colon, an auto-generated
@@ -1269,6 +1285,20 @@ class ResumeViewTests(RunnerTestCase):
                       "leaves out):\n  https://portal.azure.com/#view/Group/groupId/<id>\n", out)
         self.assertEqual(r.ask.prompts[-1], "> ")
         self.assertEqual(r.ran, ["9.9.4", "9.9.5"])
+
+    # Batch 6 (#614): runs 3 to 5 of step 1.3.9 met the Entra ID overview, the view of step 1.3.8
+    # naming the subscription by id; the blade 1.3.9 starts on names none.
+    def test_a_view_the_run_cannot_open_gives_way_to_the_blade_the_step_starts_on(self) -> None:
+        blade = "Microsoft_Azure_Policy/PolicyMenuBlade.MenuView/~/Assignments"
+        self.recording["steps"]["9.9.2"] = {"viewUrl": "https://portal.azure.com/#view/Group/groupId/<id>"}
+        self.recording["steps"]["9.9.4"] = {"startBlade": blade}
+        r, out, code = self.resume(["y", ""])
+        self.assertEqual(code, 0)
+        self.assertEqual(r.page.visited[0], f"https://portal.azure.com/#@{TENANT_ID}/view/{blade}")
+        self.assertIn(f"Opened the blade step 9.9.4 starts on, as the view step 9.9.2 ended on cannot be "
+                      f"opened (it names an object by id, which the recording leaves out):\n"
+                      f"  https://portal.azure.com/#view/{blade}\nCheck the Portal shows it, then press Enter.", out)
+        self.assertEqual(r.ask.prompts[-1], "> ")
 
     def test_a_step_without_a_view_is_named_and_waited_for(self) -> None:
         r, out, code = self.resume(["y", ""])          # 9.9.2 has no entry in the recording
@@ -2024,6 +2054,17 @@ class BladeStillLoadingTests(unittest.TestCase):
                                    ("textbox", "Group name"), ("heading", "Add members"),
                                    ("button", "Close content 'Add members'")])
         self.assertEqual(run.blade_still_loading(outline), run.BLADE_EMPTY)
+
+    # Run 20261123-185036 (#614): the blade menu's search box came before the blade's frame, still
+    # a bare iframe, and passed for the blade's content.
+    def test_a_bare_iframe_after_a_blade_menu_is_still_loading(self) -> None:
+        blade = [("heading", "Policy | Assignments"), ("button", "Close content 'Policy | Assignments'"),
+                 ("searchbox", "Search box"), ("link", "Assignments")]
+        self.assertEqual(run.blade_still_loading(self.TOP_BAR + blade + [("iframe", ""), ("text", "")]),
+                         run.BLADE_EMPTY)
+        self.assertIsNone(run.blade_still_loading(       # the frame was read: its rows follow it
+            self.TOP_BAR + blade + [("iframe", ""), ("button", "Assign policy"), ("table", "")]))
+        self.assertIsNone(run.blade_still_loading(self.TOP_BAR + blade))      # a menu blade, no frame
 
     def test_without_a_titled_blade_frame_nothing_is_loading(self) -> None:
         self.assertIsNone(run.blade_still_loading([]))
@@ -3263,6 +3304,64 @@ class FindOnScreenTests(RunnerTestCase):
                 self.act(screen, {"kind": "field", "label": label, "value": "x", "line": line}, label, runner=r)
         self.assertEqual(sorted(path.name for path in (self.tmp / "logs" / "test").glob("blade-*")),
                          ["blade-9.9.1-3.aria.txt", "blade-9.9.1-4.aria.txt"])
+
+    # Run 20261123-172651 (#614): the blade's frame held the Portal's error screen, not its list.
+    ASSIGNMENTS = ('- heading "Policy | Assignments" [level=2]\n'
+                   "- button \"Close content 'Policy | Assignments'\"\n"
+                   '- searchbox "Search box"\n'
+                   '- link "Assignments"\n')
+    ERROR_SCREEN = ('- button "Refresh"\n'
+                    '- button "Get support"\n'
+                    '- button "Perform self-diagnostics"\n'
+                    '- heading "Summary" [level=2]\n'
+                    '- button "Copy to clipboard the value for Copy error summary to clipboard"\n'
+                    '- text: The blade failed to load.\n')
+    ASSIGN = {"kind": "action", "labels": ["Assign policy"], "line": 483}
+
+    def error_screen(self, clears: bool) -> tuple[Screen, ScreenNode, ScreenNode]:
+        """The Assignments blade showing the Portal's error screen; its Refresh brings the list
+        and 'Assign policy' back when `clears`."""
+        screen = Screen(tree=self.TOP_BAR + self.ASSIGNMENTS + self.ERROR_SCREEN)
+        assign = ScreenNode()
+
+        def refreshed() -> None:
+            if clears:
+                screen.tree = self.TOP_BAR + self.ASSIGNMENTS + '- button "Assign policy"\n- table\n'
+                screen.add(("button", "Assign policy", assign))
+
+        refresh = ScreenNode(on_click=refreshed)
+        screen.add(("button", "Refresh", refresh))
+        return screen, refresh, assign
+
+    def test_the_portals_error_screen_is_refreshed_once_and_the_label_found_after_it(self) -> None:
+        screen, refresh, assign = self.error_screen(clears=True)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, assign.clicked, r.ask.prompts),
+                         ("match", 1, 1, []))
+        self.assertEqual(list((self.tmp / "logs" / "test").glob("blade-*")), [])
+
+    def test_an_error_screen_a_refresh_does_not_clear_ends_the_item_without_asking(self) -> None:
+        screen, refresh, _ = self.error_screen(clears=False)
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, r.ask.prompts), ("unknown", 1, []))
+        self.assertEqual(record["observed"], "the Portal showed its error screen in the blade, still after "
+                                             "one Refresh: The blade failed to load.")
+        self.assertIn('button "Perform self-diagnostics"', self.blade_outline(483))
+        error = (self.tmp / "logs" / "test" / "blade-9.9.1-483.error.txt").read_text(encoding="utf-8")
+        self.assertIn("The blade failed to load.", error)
+
+    def test_an_error_screen_without_a_single_refresh_ends_the_item_without_a_click(self) -> None:
+        screen, refresh, _ = self.error_screen(clears=False)
+        other = ScreenNode()
+        screen.add(("button", "Refresh", other))             # two blades' Refresh: none is guessed
+        with mock.patch("builtins.print"):
+            record, r = self.act(screen, self.ASSIGN, "Assign policy")
+        self.assertEqual((record["outcome"], refresh.clicked, other.clicked, r.ask.prompts),
+                         ("unknown", 0, 0, []))
+        self.assertTrue(record["observed"].startswith(
+            "the Portal showed its error screen in the blade, with no single Refresh to retry"))
 
     def test_a_blade_that_never_gets_its_title_is_asked_about_after_the_longer_limit(self) -> None:
         screen = Screen(tree=self.TOP_BAR + "- button \"Close content 'undefined'\"\n")
